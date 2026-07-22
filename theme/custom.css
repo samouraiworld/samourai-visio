@@ -1,39 +1,111 @@
 /* ─────────────────────────────────────────────────────────────
-   Samouraï Visio — runtime theme over La Suite Meet
-   Loaded via FRONTEND_CSS_URL. No rebuild, no fork.
+   Samouraï Visio — runtime theme over La Suite Meet v1.24.0
+   Loaded via FRONTEND_CUSTOM_CSS_URL (a BACKEND setting) ->
+   /api/v1.0/config/ -> AppInitialization.tsx appends <link> to <head>.
 
-   ⚠️  The custom property names below follow Cunningham's token
-   scheme, which DRIFTS BETWEEN VERSIONS. Do not trust this file
-   blind — open the running app, inspect :root in devtools, and
-   reconcile before considering the theme done.
-   Reference: apps/meet/docs/theming.md
+   Token authority: the CSS emitted by @pandacss/dev from
+   src/frontend/panda.config.ts. Meet migrated OFF Cunningham, so
+   every `--c--theme--*` name is dead and fails silently. No cssVar
+   prefix is configured, so vars are --colors-* / --fonts-*, with
+   camelCase kebab-cased (primaryDark -> --colors-primary-dark-*,
+   focusRing -> --colors-focus-ring).
+
+   CRITICAL: the app reads the PALETTE ramp far more than the
+   semantic tier. buttonRecipe.ts:56 paints the primary button from
+   `primary.800` with a LITERAL `white`, not `primary.text`.
+   Overriding only --colors-primary leaves every button Bleu France.
+
+   Meet has no light/dark toggle: LIGHT outside a meeting, DARK
+   inside a room. Those are two different ramps, both live at once.
+
+   No !important — an unlayered :root already beats Panda's
+   @layer tokens, and !important would break the html.font-lexend
+   accessibility override.
+
+   Contrast ratios below are measured. Guarded by
+   scripts/check-contrast.py in CI.
    ───────────────────────────────────────────────────────────── */
 
+@import url('https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap');
+
 :root {
-  /* Kodera palette, from samourai.world-v2026 */
-  --c--theme--colors--primary-100: #FFE9E9;
-  --c--theme--colors--primary-300: #FE9A9A;
-  --c--theme--colors--primary-500: #FD6262;  /* coral — primary accent */
-  --c--theme--colors--primary-600: #E85454;
-  --c--theme--colors--primary-800: #A63A3A;
+  /* ── LIGHT SURFACE (outside a room) — palette ramp ──
+     Brand coral #FD6262 is 2.96:1 on white. It fails AA text (4.5:1)
+     AND the non-text minimum (3:1), so it cannot carry white text and
+     cannot be a UI boundary. It stays at .500 as a decorative accent
+     while the fill and text steps darken to clear AA. */
+  --colors-primary-50:   #FFF6F6;
+  --colors-primary-100:  #FEECEC;   /* tertiary button bg */
+  --colors-primary-200:  #FDE2E2;   /* LoginHint bg — ink 14.8:1 */
+  --colors-primary-300:  #FBD5D5;   /* tertiary hover bg */
+  --colors-primary-400:  #F58A8A;   /* disabled text only (WCAG-exempt) */
+  --colors-primary-500:  #FD6262;   /* Kodera coral, decorative */
+  --colors-primary-600:  #A63A3A;   /* focus box-shadow ring */
+  --colors-primary-700:  #8F2E2E;
+  --colors-primary-800:  #B83636;   /* PRIMARY BUTTON FILL + link/border text
+                                       (20 usages — the brand lives here)
+                                       white on it 5.80:1 · on white 5.80:1 */
+  --colors-primary-900:  #8F2E2E;   /* tertiaryText — 8.08:1 on white */
+  --colors-primary-950:  #5C1E1E;
+  --colors-primary-action: #A63A3A; /* primary button hover — 6.39:1 */
 
-  --c--theme--colors--secondary-500: #889CE7; /* lavender */
+  /* ── LIGHT SURFACE — semantic tier ──
+     Also feeds the LiveKit accent chain (livekit.css:14-18), so these
+     must read on BOTH white and the #141416 room surface. */
+  --colors-primary:             #CC4444;  /* white on it 4.69:1 · vs room 3.92:1 */
+  --colors-primary-hover:       #B83636;  /* 5.80:1 */
+  --colors-primary-active:      #A63A3A;  /* 6.39:1 */
+  --colors-primary-text:        #FFFFFF;  /* structurally forced white: paired with
+                                             primary, primary.active, primary.800
+                                             AND primaryDark.100 — no single ink
+                                             satisfies all four */
+  --colors-primary-subtle:      #FEECEC;
+  --colors-primary-subtle-text: #8F2E2E;  /* Badge — 7.09:1 on white */
 
-  --c--theme--colors--greyscale-000: #FFFFFF;
-  --c--theme--colors--greyscale-900: #1E1E22;
-  --c--theme--colors--greyscale-1000: #141416; /* background */
+  /* ── DARK SURFACE (inside a room) ──
+     Luminance-matched to upstream's ramp so every contrast relation the
+     upstream designers built is preserved, then rehued to Samouraï
+     lavender. This ramp is where the brand's #889CE7 belongs: upstream's
+     primaryDark IS a lavender-indigo (its default .500 is #8787D7).
 
-  --c--theme--font--families--base: 'Inter', system-ui, -apple-system, sans-serif;
-  --c--theme--font--families--accent: 'Inter', system-ui, sans-serif;
+     .100 is the workhorse (27 usages: buttons, tooltips, menus, popovers).
+     .500 and .action have ZERO usages in v1.24.0 — set for forward-compat.
+     .700 and .900 are INVERTED (light) selected states: darkening them
+     would break the selected-state contrast entirely. */
+  --colors-primary-dark-50:     #141416;  /* Kodera bg — room canvas, white 18.4:1 */
+  --colors-primary-dark-75:     #222429;
+  --colors-primary-dark-100:    #2D3037;  /* in-room button — white 13.2:1 */
+  --colors-primary-dark-200:    #434655;
+  --colors-primary-dark-300:    #585E75;  /* hover — white 6.42:1 */
+  --colors-primary-dark-400:    #6B759C;
+  --colors-primary-dark-500:    #889CE7;  /* Samouraï lavender (unused in 1.24.0) */
+  --colors-primary-dark-600:    #96A2CC;
+  --colors-primary-dark-700:    #ACB7DF;  /* inverted — .100 text on it 6.66:1 */
+  --colors-primary-dark-800:    #C4CBE9;
+  --colors-primary-dark-900:    #DCE1F2;  /* open select — .100 text 10.13:1 */
+  --colors-primary-dark-950:    #F4F5FB;
+
+  /* ── Focus ring (index.css:39,47) ──
+     Must clear 3:1 on white AND on the room canvas. Pure brand lavender
+     #889CE7 is 2.64:1 on white and fails 1.4.11 — darkened here. */
+  --colors-focus-ring: #5C6FBF;   /* white 4.69:1 · room 3.93:1 */
+
+  /* ── Type ── */
+  --fonts-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-/* Attribution — MIT requires the licence, good faith requires the link.
-   Keep this visible: it's the difference between running La Suite for
-   people who have no server, and looking like a rebrand. */
-.samourai-credit {
-  font-size: 0.75rem;
-  opacity: 0.65;
-  text-align: center;
-  padding: 0.5rem;
+/* Attribution — MIT requires the notice, good faith requires the link.
+   There is NO footer element to hang this on: use_french_gov_footer
+   defaults to false and Footer.tsx:125 returns null. The only stable
+   hook upstream ships is .Header-beforeLogo (Header.tsx:153), which
+   exists precisely so a deployer can inject branding. CSS `content`
+   cannot carry a clickable link, so the repo link belongs on the
+   promo page as well as here. */
+.Header-beforeLogo::after {
+  content: 'Propulsé par La Suite Meet';
+  display: block;
+  font-size: 0.6875rem;
+  line-height: 1;
+  opacity: 0.7;
+  margin-top: 0.25rem;
 }
-.samourai-credit a { color: inherit; text-decoration: underline; }
