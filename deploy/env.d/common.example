@@ -80,8 +80,16 @@ OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
 # Comma-separated, NOT JSON. See the header.
-# `name` is the lower-variance alternative: a single token that cannot be
-# mis-split. Clerk returns it under the same `profile` scope.
+#
+# !! VERIFIED 2026-07-22: this currently yields NOTHING. !!
+# The Clerk instance has first_name and last_name DISABLED, so the sign-up form
+# collects no name, userinfo carries no given_name/family_name, and full_name is
+# NULL for every user. The `profile` scope does not change this — the claims are
+# absent because the data was never collected.
+# Not an outage: full_name is nullable and participants can rename themselves
+# in-room. But everyone arrives nameless.
+# Re-check with: scripts/audit-clerk-instance.sh
+# Options and recommendation: docs/CLERK_INSTANCE_AUDIT_2026-07-22.md
 OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
 OIDC_USERINFO_SHORTNAME_FIELD=given_name
 # Default is empty, which requires only `sub` — so a Clerk identity with no
