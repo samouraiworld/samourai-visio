@@ -1,0 +1,25 @@
+# ── Secrets: never commit ──
+.env
+env.d/common
+env.d/postgresql
+deploy/.env
+deploy/env.d/common
+deploy/env.d/postgresql
+*.secret
+*.key
+*.pem
+
+# Anything not explicitly an example
+deploy/env.d/*
+!deploy/env.d/*.example
+
+# ── Upstream artifacts fetched at deploy time ──
+deploy/compose.yaml
+deploy/livekit-server.yaml
+deploy/default.conf.template
+
+# ── OS / editor ──
+.DS_Store
+*.swp
+.idea/
+.vscode/

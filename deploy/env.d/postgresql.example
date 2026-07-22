@@ -1,0 +1,11 @@
+# Copy to `env.d/postgresql`, set DB_PASSWORD, never commit the result.
+
+DB_HOST=postgresql
+DB_NAME=meet
+DB_USER=meet
+DB_PASSWORD=<openssl rand -base64 48>
+DB_PORT=5432
+
+POSTGRES_DB=meet
+POSTGRES_USER=meet
+POSTGRES_PASSWORD=${DB_PASSWORD}
