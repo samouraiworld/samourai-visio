@@ -71,6 +71,42 @@ B trades a cosmetic problem for a privacy one and should not ship on a public
 instance. Whichever is chosen, settle the OAuth question above first — it may
 mean the problem only affects a subset of users.
 
+### Decision: D — enable `username` (owner, 2026-07-22)
+
+`OIDC_USERINFO_FULLNAME_FIELDS` and `OIDC_USERINFO_SHORTNAME_FIELD` are now set
+to `preferred_username`, which Clerk lists in `claims_supported`. **The config
+half is done; the Clerk half is not, and cannot be done from here** — it is a
+dashboard change on a production instance, and no credential for it belongs in
+this session.
+
+**Clerk dashboard → User & Authentication → Email, Phone, Username → Username → enable.**
+
+Then re-run `scripts/audit-clerk-instance.sh`; `username` should read
+`enabled=True`.
+
+Two things to decide while you are in there:
+
+- **Required or optional?** *Required* makes Clerk prompt existing Memba and
+  Zentai users to choose a username at their next sign-in — a visible change to
+  two live products, but it is the only way pre-existing accounts ever get one.
+  *Optional* leaves every existing user with a null `preferred_username`, i.e.
+  exactly today's behaviour for them, and only new sign-ups benefit.
+- **Do not also enable `first_name`/`last_name`.** The point of choosing a handle
+  over a legal name is that a public video service should not be putting real
+  names in front of strangers by default.
+
+### Severity, revised down after tracing the frontend
+
+The earlier framing — "everyone arrives nameless" — was wrong. `Join.tsx:457-465`
+renders a **required** name field to anyone not signed in, *and* to signed-in
+users while `AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME` is true (the
+default). Its `defaultValue` is `username || user?.full_name`.
+
+So a null `full_name` means that field starts **empty instead of pre-filled**,
+once, and the browser remembers what the user types. Nobody is ever nameless in
+a room. That makes this a papercut for signed-in users, not a launch blocker —
+and it is worth knowing before spending a change to a shared sign-up form on it.
+
 ## Other findings
 
 Not blocking, but they land squarely on decisions already open in the plan.
