@@ -26,9 +26,28 @@
 
 ### Access model
 
-- `ALLOW_UNREGISTERED_ROOMS=True` → **guests join by link with no account**
-- Clerk login required only to **create/own** a room
-- Django session cookie, 12 h
+**Product requirement: Visio must be usable without an account, like Google Meet.** Verified against `v1.24.0` — this already works, and is *more* open than Google Meet.
+
+| Who | What they can do | What they need |
+|---|---|---|
+| Anonymous visitor | **Join** any room by link | Nothing — they type a display name on the join screen |
+| Anonymous visitor | **Create** a room from any URL | Nothing (`ALLOW_UNREGISTERED_ROOMS=True`) |
+| Signed-in user | Own an **administrable, persistent** room | Clerk login |
+
+How the guest path works, end to end:
+
+1. Visitor opens `https://visio.samourai.app/<any-slug>`.
+2. The backend can't find the slug, raises `Http404`, and — because the flag is on — returns a synthetic public room plus a LiveKit token (`core/api/viewsets.py:257-277`).
+3. The join screen renders a **required** name field for anyone not signed in, and passes it as `?username=` (`Join.tsx:457-465`). The browser remembers it.
+
+> Google Meet requires an account to *create* a meeting. Here an anonymous visitor can conjure a working room from any URL. The trade: those rooms have no owner, no admin controls (`is_administrable: false`), and no attribution — which is the same fact that makes abuse reports unactionable. Decide that deliberately.
+
+Two settings interact with this and should be tested before launch:
+
+- **`FRONTEND_IS_SILENT_LOGIN_ENABLED`** (default `true`) redirects every anonymous visitor to Clerk with `prompt=none`, rate-limited via `localStorage`. Keeping it on means returning signed-in users are recognised without clicking "log in"; turning it off removes a redirect from every guest's first visit. The callback only handles `error=login_required` gracefully — test the anonymous path.
+- **`AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME`** (default `true`) shows the same name field to signed-in users, pre-filled from `full_name`.
+
+Session: Django cookie, 12 h.
 
 > [!IMPORTANT]
 > The production template ships `ALLOW_UNREGISTERED_ROOMS=False`. For a free public instance you **must** flip it to `True` (§4). This is the single most consequential line in the config.
