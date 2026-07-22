@@ -1,21 +1,46 @@
 # visio.samourai.app — Meet backend config
 # Copy to `env.d/common`, fill the <placeholders>, never commit the result.
 #
-# Differs from upstream env.d/production.dist/common in 4 places, all deliberate:
+# Derived from suitenumerique/meet env.d/production.dist/common (MIT, DINUM).
+#
+# ─── READ THIS BEFORE EDITING ───────────────────────────────────────────────
+# List-valued settings are COMMA-SEPARATED. They are NOT JSON.
+# `values.ListValue` parses with `value.strip().split(',')`
+# (django-configurations configurations/values.py:238) and never reads JSON.
+#
+#     OIDC_USERINFO_FULLNAME_FIELDS=["given_name","family_name"]
+#         -> ['["given_name"', '"family_name"]']   every display name is empty
+#     OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
+#         -> ['given_name', 'family_name']         correct
+#
+# There is no error and no warning. Upstream's own production template gets
+# this wrong at env.d/production.dist/common:44.
+# ────────────────────────────────────────────────────────────────────────────
+#
+# Differs from upstream in five deliberate places:
 #   1. OIDC points at Clerk, not Keycloak
-#   2. OIDC_RP_SCOPES adds `profile`      (default "openid email" → names arrive empty)
+#   2. OIDC_RP_SCOPES adds `profile`   (default "openid email" -> names empty)
 #   3. OIDC_USERINFO_FULLNAME_FIELDS overridden (default contains `usual_name`,
-#      a ProConnect-only claim Clerk does not emit → display names break)
-#   4. ALLOW_UNREGISTERED_ROOMS=True      (upstream production default is False,
-#      which would require an account just to JOIN a call)
+#      a ProConnect-only claim Clerk does not emit)
+#   4. ALLOW_UNREGISTERED_ROOMS=True   (upstream template ships False, which
+#      would require an account just to JOIN a call)
+#   5. OIDC_OP_LOGOUT_ENDPOINT omitted (Clerk advertises no logout endpoint)
 
 # ── Django ──
 DJANGO_ALLOWED_HOSTS=${MEET_HOST}
-DJANGO_SECRET_KEY=<openssl rand -base64 64>
+# NOTE: `openssl rand -base64 64` wraps at 64 columns and emits TWO lines.
+# Pasted here, the key is truncated at the wrap and the remainder becomes a
+# junk variable — silently. Generate with:  openssl rand -base64 64 | tr -d '\n'
+DJANGO_SECRET_KEY=<openssl rand -base64 64 | tr -d '\n'>
 DJANGO_SETTINGS_MODULE=meet.settings
 DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
+
+# Empty by default in Production. Same-origin POSTs pass on host comparison,
+# so this is normally unnecessary. Uncomment only if login POSTs 403.
+# Comma-separated WITH scheme (this one is compared against the Origin header).
+#DJANGO_CSRF_TRUSTED_ORIGINS=https://visio.samourai.app
 
 # ── Mail (Resend) ──
 DJANGO_EMAIL_HOST=smtp.resend.com
@@ -25,6 +50,9 @@ DJANGO_EMAIL_PORT=587
 DJANGO_EMAIL_USE_TLS=true
 DJANGO_EMAIL_FROM=visio@samourai.app
 DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
+# Served by the ./custom bind-mount in compose.override.yaml. Without it this
+# 404s in every invitation email — and the SPA fallback returns 200 text/html
+# rather than a 404, so a naive curl check will not catch it.
 DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
 
 # ── OIDC — Clerk (clerk.samourai.app) ──
@@ -35,21 +63,57 @@ OIDC_OP_TOKEN_ENDPOINT=https://clerk.samourai.app/oauth/token
 OIDC_OP_USER_ENDPOINT=https://clerk.samourai.app/oauth/userinfo
 # OIDC_OP_LOGOUT_ENDPOINT intentionally unset — Clerk reports
 # backchannel_logout_supported:false and frontchannel_logout_supported:false.
-# Effect: logout clears the Django session but not the Clerk SSO session.
+# Verified safe in source: django-lasuite oidc_login/views.py:89-92 returns the
+# plain redirect URL when this is falsy, and post() then calls auth.logout().
+# Effect: logout clears the Django session but NOT the Clerk SSO session, so
+# log-out-then-log-in silently re-authenticates.
+# Do NOT copy upstream's Keycloak value at env.d/production.dist/common:33.
 
+# Redirect URI to register at Clerk, exactly (trailing slash included):
+#   https://visio.samourai.app/api/v1.0/callback/
+# Nothing else needs registering: `authenticate/` is a local entry point,
+# `logout-callback/` is used only when a logout endpoint is set, and Clerk
+# does not support backchannel logout.
 OIDC_RP_CLIENT_ID=<from Clerk dashboard>
 OIDC_RP_CLIENT_SECRET=<from Clerk dashboard — shown once, never again>
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
-OIDC_USERINFO_FULLNAME_FIELDS=["given_name","family_name"]
+# Comma-separated, NOT JSON. See the header.
+# `name` is the lower-variance alternative: a single token that cannot be
+# mis-split. Clerk returns it under the same `profile` scope.
+OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
 OIDC_USERINFO_SHORTNAME_FIELD=given_name
+# Default is empty, which requires only `sub` — so a Clerk identity with no
+# email would create a silent null-email account rather than being rejected.
+OIDC_USERINFO_ESSENTIAL_CLAIMS=email
 
 OIDC_USE_PKCE=true
 OIDC_PKCE_CODE_CHALLENGE_METHOD=S256
 OIDC_CREATE_USER=true
 OIDC_REDIRECT_REQUIRE_HTTPS=true
-OIDC_REDIRECT_ALLOWED_HOSTS=["https://${MEET_HOST}"]
+# Host only — no scheme, no brackets. Django compares urlparse(url).netloc
+# against this set, so a scheme-bearing entry can never match anything.
+OIDC_REDIRECT_ALLOWED_HOSTS=visio.samourai.app
+# Nothing reads the stored ID token: there is no SessionRefresh middleware,
+# and the only reader returns before reaching it while logout is unset. With
+# the default (true) it is dead Clerk PII sitting in every Redis session.
+OIDC_STORE_ID_TOKEN=false
+
+# NEVER set OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION=true. `email_verified`
+# is checked nowhere in the chain, so with a shared Clerk org it creates an
+# account-takeover path via an unverified email matching an existing user.
+
+# ── OIDC fallbacks, in order, if login fails ──
+# 1. HTTP 400 "JWT Nonce verification failed" -> Clerk is not echoing `nonce`
+#    into the ID token. The check is fatal and outside the try/except, so this
+#    surfaces as a bare 400, not a graceful failure redirect.
+#OIDC_USE_NONCE=false
+# 2. Token endpoint rejects the credentials -> Clerk dropped client_secret_post.
+#OIDC_TOKEN_USE_BASIC_AUTH=true
+# 3. Last resort. PKCE + a confidential client is valid and Clerk advertises
+#    S256, so this should not be needed.
+#OIDC_USE_PKCE=false
 
 LOGIN_REDIRECT_URL=https://${MEET_HOST}
 LOGIN_REDIRECT_URL_FAILURE=https://${MEET_HOST}
@@ -59,9 +123,54 @@ LOGOUT_REDIRECT_URL=https://${MEET_HOST}
 LIVEKIT_API_SECRET=<openssl rand -base64 48>
 LIVEKIT_API_KEY=meet
 LIVEKIT_API_URL=https://${LIVEKIT_HOST}
+# Browsers need wss://, not https://. Upstream's own production Helm values
+# set this true while the code default is false; the docs and code disagree.
+LIVEKIT_FORCE_WSS_PROTOCOL=true
 
 # ── Public instance ──
+# Code default is True (settings.py:665); the upstream production template
+# ships False and the env file wins. Both statements are true, about
+# different layers.
+#
+# What it actually does (core/api/viewsets.py:257-277): it fires ONLY when
+# RoomViewSet.retrieve raises Http404 — a slug NOT in the database — and then
+# returns a synthetic public room plus a LiveKit token. It grants ad-hoc rooms
+# conjured from a URL. It has no effect on rooms that already exist, so an
+# account is NOT required to create a working room, only to own an
+# administrable one.
 ALLOW_UNREGISTERED_ROOMS=True
 
+# Default is true. Every anonymous visitor is sent through prompt=none at
+# Clerk, and the callback special-cases only error=login_required — anything
+# else lands in login_failure. Set false if first-time guests bounce.
+#FRONTEND_IS_SILENT_LOGIN_ENABLED=false
+
 # ── Branding ──
-FRONTEND_CSS_URL=/custom/style.css
+# The setting is FRONTEND_CUSTOM_CSS_URL. FRONTEND_CSS_URL does not exist, and
+# Django ignores unknown env vars silently — a wrong name here yields a
+# perfectly healthy stack with no theme and no error anywhere.
+FRONTEND_CUSTOM_CSS_URL=/custom/style.css
+# Leave false. Enabling it renders the French Republic footer and loads
+# /assets/marianne.svg and /assets/devise.svg, which are not in the image.
+#FRONTEND_USE_FRENCH_GOV_FOOTER=false
+
+# ── Monitoring ──
+# The trap: settings.py:69 documents this as DJANGO_SENTRY_DSN, but :448
+# declares environ_name="SENTRY_DSN" with no prefix. The documented name is
+# the one that does nothing.
+#SENTRY_DSN=<from sentry.samourai.pro>
+
+# ── File-based secrets (recommended) ──
+# SECRET_KEY, OIDC_RP_CLIENT_SECRET, EMAIL_HOST_PASSWORD, DB_PASSWORD and the
+# LiveKit key/secret are all SecretFileValue: each accepts a `<VAR>_FILE`
+# variant that is read from disk and takes precedence over the plain variable.
+# This keeps secrets out of the process environment and out of
+# `docker compose config` output.
+#
+#   DJANGO_SECRET_KEY_FILE=/run/secrets/django_secret_key
+#   OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/clerk_client_secret
+#   DJANGO_EMAIL_HOST_PASSWORD_FILE=/run/secrets/resend_api_key
+#
+# Write them with `printf '%s'` — exactly one trailing newline is stripped, so
+# a trailing blank line corrupts the secret. A missing path raises at settings
+# import, so the container dies loudly rather than starting misconfigured.

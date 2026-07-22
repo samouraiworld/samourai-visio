@@ -1,0 +1,59 @@
+# Copy to `deploy/livekit-server.yaml` (gitignored), set the key, never commit.
+#
+# Derived from suitenumerique/meet docs/examples/livekit/server.yaml (MIT, DINUM),
+# with a turn: block added — upstream's example has none.
+#
+# The `meet` key MUST equal LIVEKIT_API_SECRET in env.d/common. If they differ,
+# the stack comes up healthy, TLS works, https://livekit.samourai.app returns
+# 200 — and every token the backend mints fails signature validation, so nobody
+# can join any room. Nothing else in the deploy detects this; assert it:
+#
+#   A=$(grep -E '^\s+meet:' livekit-server.yaml | sed 's/.*meet:[[:space:]]*//' | tr -d '"'"'"' ')
+#   B=$(grep '^LIVEKIT_API_SECRET=' env.d/common | cut -d= -f2- | tr -d '"'"'"' ')
+#   [ -n "$A" ] && [ "$A" = "$B" ] && echo MATCH || echo MISMATCH
+---
+port: 7880
+
+redis:
+  # Shared with Django, which uses db 1 (settings.py:311-316). LiveKit uses
+  # db 0, so there is no key collision.
+  address: redis:6379
+
+keys:
+  meet: <same value as LIVEKIT_API_SECRET in env.d/common>
+
+rtc:
+  # A port RANGE performs better than a single port under load — upstream
+  # recommends one >= vCPU count. port_range_start/end and udp_port are
+  # MUTUALLY EXCLUSIVE, and a range needs matching firewall rules, so this
+  # stays on the single port until a measurement justifies the change.
+  udp_port: 7882
+  # WebRTC ICE over TCP, for networks that block UDP but allow arbitrary
+  # outbound TCP. Note this is NOT port 443: it does nothing for a firewall
+  # that permits only 443. Cannot sit behind a load balancer or TLS.
+  tcp_port: 7881
+  # The host has a public IP the process cannot see; discover it via STUN.
+  use_external_ip: true
+
+turn:
+  # Upstream's example omits this block entirely, so a stock deploy has NO
+  # TURN at all — a 443-only user joins the room UI and gets no media, which
+  # reads as a product bug rather than a network block.
+  #
+  # UDP/443 works because firewalls increasingly permit it for QUIC (HTTP/3).
+  # It does NOT help a TCP-443-only firewall doing TLS inspection; that needs
+  # either a second IP with tls_port: 443, or SNI multiplexing in front of
+  # nginx-proxy. Decide that after measuring, not before.
+  enabled: true
+  domain: livekit.samourai.app
+  udp_port: 443
+  # REQUIRED. Any tls_port > 0 makes LiveKit load cert_file/key_file and
+  # refuse to start with "TURN tls cert required" (pkg/service/turn.go).
+  # The default is 5349, so omitting this line breaks startup.
+  tls_port: 0
+  # REQUIRED. LiveKit defaults relay allocations to 30000-40000/udp; under
+  # Docker bridge networking only published ports are reachable, so an
+  # unnarrowed range means allocations land on unpublished ports.
+  # Must match the published range in compose.override.yaml.
+  relay_range_start: 30000
+  relay_range_end: 30100

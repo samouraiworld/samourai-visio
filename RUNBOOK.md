@@ -98,12 +98,26 @@ No `id.` record needed — Clerk replaces Keycloak.
 ### Firewall
 
 ```bash
-ufw allow 80/tcp      # TLS issuance
-ufw allow 443/tcp     # HTTPS + TURN/TLS
-ufw allow 443/udp     # TURN/TLS
-ufw allow 7881/tcp    # WebRTC ICE over TCP
-ufw allow 7882/udp    # WebRTC multiplexing over UDP
+ufw allow 80/tcp              # TLS issuance
+ufw allow 443/tcp             # HTTPS (nginx-proxy)
+ufw allow 443/udp             # TURN over UDP
+ufw allow 7881/tcp            # WebRTC ICE over TCP
+ufw allow 7882/udp            # WebRTC multiplexing over UDP
+ufw allow 30000:30100/udp     # TURN relay allocations
 ufw enable
+```
+
+> [!IMPORTANT]
+> **Two things this does not do.**
+>
+> **1. ufw does not govern container exposure.** Docker publishes ports via the `DOCKER-USER` iptables chain, *before* ufw sees the packet — so a published port is open with or without a `ufw allow`, and a `ufw deny` will not close it. These rules are documentation, not enforcement. What actually determines exposure is `ports:` in compose. The live risk is a future debugging `"5432:5432"`, which would publish PostgreSQL to the internet regardless of ufw; bind debug ports to `127.0.0.1:5432:5432`.
+>
+> **2. The Scaleway security group is a second, independent filter** that `ufw status` cannot see. A green ufw check with a closed security group is the most common cause of "signalling works, no media". Verify both.
+
+Confirm what is genuinely exposed:
+
+```bash
+docker compose ps --format '{{.Service}}\t{{.Ports}}'
 ```
 
 ---
@@ -123,10 +137,21 @@ curl -o default.conf.template https://raw.githubusercontent.com/suitenumerique/m
 Generate three secrets:
 
 ```bash
-openssl rand -base64 48   # DB_PASSWORD
-openssl rand -base64 48   # LIVEKIT_API_SECRET
-openssl rand -base64 64   # DJANGO_SECRET_KEY
+openssl rand -base64 48                # DB_PASSWORD        (64 chars — one line)
+openssl rand -base64 48                # LIVEKIT_API_SECRET (64 chars — one line)
+openssl rand -base64 64 | tr -d '\n'   # DJANGO_SECRET_KEY  (88 chars — WRAPS)
 ```
+
+> [!WARNING]
+> `openssl rand -base64 64` wraps at 64 columns and emits **two lines**. Pasted into an env file, `DJANGO_SECRET_KEY` is truncated at the wrap and the remainder becomes a junk variable — with no error. The `tr -d '\n'` is not optional. `-base64 48` produces exactly 64 characters and does not wrap, which is why only the third command needs it.
+
+Then assert every line is a well-formed `KEY=value`:
+
+```bash
+awk -F= 'NF<2 || $1 ~ /[^A-Z0-9_]/ {print NR": "$0}' env.d/common
+```
+
+Expected: no output.
 
 ---
 
@@ -182,14 +207,18 @@ OIDC_RP_CLIENT_SECRET=<from Clerk>
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
-OIDC_USERINFO_FULLNAME_FIELDS=["given_name","family_name"]
+# Comma-separated. NOT JSON — see trap 2.
+OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
 OIDC_USERINFO_SHORTNAME_FIELD=given_name
+OIDC_USERINFO_ESSENTIAL_CLAIMS=email
 
 OIDC_USE_PKCE=true
 OIDC_PKCE_CODE_CHALLENGE_METHOD=S256
 OIDC_CREATE_USER=true
 OIDC_REDIRECT_REQUIRE_HTTPS=true
-OIDC_REDIRECT_ALLOWED_HOSTS=["https://${MEET_HOST}"]
+# Host only — no scheme, no brackets.
+OIDC_REDIRECT_ALLOWED_HOSTS=${MEET_HOST}
+OIDC_STORE_ID_TOKEN=false
 
 LOGIN_REDIRECT_URL=https://${MEET_HOST}
 LOGIN_REDIRECT_URL_FAILURE=https://${MEET_HOST}
@@ -199,64 +228,95 @@ LOGOUT_REDIRECT_URL=https://${MEET_HOST}
 LIVEKIT_API_SECRET=<generated>
 LIVEKIT_API_KEY=meet
 LIVEKIT_API_URL=https://${LIVEKIT_HOST}
+LIVEKIT_FORCE_WSS_PROTOCOL=true
 
 # ── Public instance ──
 ALLOW_UNREGISTERED_ROOMS=True
 
 # ── Branding ──
-FRONTEND_CSS_URL=/custom/style.css
+FRONTEND_CUSTOM_CSS_URL=/custom/style.css
 ```
 
-### Three config traps
+### Five config traps
 
-**1. `OIDC_USERINFO_FULLNAME_FIELDS` — you must override the default.**
-Meet defaults to `["given_name", "usual_name"]` (`settings.py:505`). `usual_name` is a **ProConnect-specific** claim; Clerk does not emit it (see §1 `claims_supported`). Leave the default and every user's display name is broken. Set it to `["given_name","family_name"]`.
+**1. `ALLOW_UNREGISTERED_ROOMS` — two true statements that look contradictory.**
+The **code** default is `True` (`settings.py:665`). The **production env template** ships `False` (`env.d/production.dist/common:50`). Both are correct; the env file wins, so a stock deploy requires an account merely to *join* a call. Set `True`.
 
-**2. `OIDC_RP_SCOPES` — the default is too narrow.**
-Default is `"openid email"` (`settings.py:464`). Without `profile` you get no `given_name`/`family_name` and names render empty regardless of trap #1.
+What it actually does (`core/api/viewsets.py:257-277`): it fires **only** when `RoomViewSet.retrieve` raises `Http404` — a slug **not in the database** — and then returns a synthetic public room plus a LiveKit token. It grants *ad-hoc rooms conjured from a URL*, and has no effect on rooms that already exist. Consequence for the product: **an account is not required to create a working room**, only to own an administrable one.
 
-**3. No logout endpoint.**
+**2. List settings are comma-separated, not JSON.**
+`values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) and never reads JSON. `["given_name","family_name"]` becomes `['["given_name"', '"family_name"]']`, so `user_info.get(...)` returns `None` and **every display name is empty**. There is no error. Upstream's own template gets this wrong at `env.d/production.dist/common:44`. Affects `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
+
+**3. `OIDC_USERINFO_FULLNAME_FIELDS` — you must override the default.**
+Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim; Clerk does not emit it (see §1 `claims_supported`). Leave the default and every user's display name is broken. Set `given_name,family_name` — obeying trap 2.
+
+**4. `OIDC_RP_SCOPES` — the default is too narrow.**
+Default is `"openid email"` (`settings.py:533`). Without `profile` you get no `given_name`/`family_name` and names render empty regardless of trap 3. Note that the scope is necessary but **not sufficient**: Clerk emits these claims only if the *instance* collects first/last name, which is a setting shared with every other `*.samourai.app` product.
+
+**5. No logout endpoint.**
 Clerk reports `backchannel_logout_supported: false` and `frontchannel_logout_supported: false`. Leave `OIDC_OP_LOGOUT_ENDPOINT` unset. Consequence: signing out of Meet clears the local Django session but **not** the Clerk SSO session — clicking "log out" then "log in" silently re-authenticates. Acceptable for a shared-SSO product; surprising if you don't expect it. If you need true logout, redirect to Clerk's sign-out URL after `LOGOUT_REDIRECT_URL`.
 
 ### `livekit-server.yaml`
 
-Set the same `LIVEKIT_API_SECRET` against key `meet`.
+Copy [`deploy/livekit-server.yaml.example`](deploy/livekit-server.yaml.example) — it is the upstream example plus a `turn:` block, which upstream omits entirely.
 
-The example multiplexes WebRTC on a **single UDP port**. A **port range** performs materially better under load — worth doing before any public promotion, and it means opening that range in §2.
+Set the same `LIVEKIT_API_SECRET` against key `meet`, then **assert it matches**:
 
-### Pin your images
+```bash
+A=$(grep -E '^\s+meet:' livekit-server.yaml | sed 's/.*meet:[[:space:]]*//' | tr -d '"'"'"' ')
+B=$(grep '^LIVEKIT_API_SECRET=' env.d/common | cut -d= -f2- | tr -d '"'"'"' ')
+[ -n "$A" ] && [ "$A" = "$B" ] && echo MATCH || echo "MISMATCH — nobody will be able to join a room"
+```
 
-`compose.yaml` ships `latest` on every service. Pin every tag to a released version, or an upstream push will silently restart your production stack on the next `docker compose pull`.
+A mismatch is invisible: the stack comes up healthy, TLS works, `https://livekit.samourai.app` returns 200 — and every token the backend mints fails signature validation.
+
+The example multiplexes WebRTC on a **single UDP port**. A **port range** performs materially better under load, but `udp_port` and `port_range_start/end` are mutually exclusive and a range widens the firewall — leave it until a measurement justifies the change.
+
+### Configure via `compose.override.yaml`, not `compose.yaml`
+
+All our deltas — pinned tags, restart policies, the Redis volume, the CSS mount, the TURN ports, the proxy wiring — live in [`deploy/compose.override.yaml`](deploy/compose.override.yaml), which Compose loads automatically alongside `compose.yaml`.
+
+**Do not edit `compose.yaml`.** §10 re-fetches it verbatim on every upgrade and would silently discard those edits. Upstream ships `latest` on every service; the override pins them.
 
 ---
 
 ## 5. Reverse proxy + TLS
 
-Use the upstream [nginx-proxy example](https://github.com/suitenumerique/meet/tree/main/docs/examples/compose/nginx-proxy) (auto Let's Encrypt). Uncomment the `environment:` and `networks:` blocks in `compose.yaml`:
+Use the upstream [nginx-proxy example](https://github.com/suitenumerique/meet/tree/main/docs/examples/compose/nginx-proxy) (auto Let's Encrypt), in its **own** compose project. The `VIRTUAL_HOST` / `LETSENCRYPT_HOST` wiring is already in [`deploy/compose.override.yaml`](deploy/compose.override.yaml) — nothing to uncomment.
+
+```bash
+docker network create proxy-tier
+```
+
+Two edits to the nginx-proxy example are mandatory:
 
 ```yaml
-  frontend:
     environment:
-      - VIRTUAL_HOST=${MEET_HOST}
-      - VIRTUAL_PORT=8083
-      - LETSENCRYPT_HOST=${MEET_HOST}
-    networks:
-      - proxy-tier
-      - default
+      # Cert-expiry warnings go here. The upstream example ships
+      # mail@yourdomain.tld, and a bogus ACME contact means no warning.
+      - DEFAULT_EMAIL=<a monitored coop address>
 
-  livekit:
-    environment:
-      - VIRTUAL_HOST=${LIVEKIT_HOST}
-      - VIRTUAL_PORT=7880
-      - LETSENCRYPT_HOST=${LIVEKIT_HOST}
-    networks:
-      - proxy-tier
-      - default
+      # nginx-proxy forwards a CLIENT-supplied X-Forwarded-Proto unchanged by
+      # default. Meet's Production settings trust that header
+      # (SECURE_PROXY_SSL_HEADER), so with the default any client can send
+      # `X-Forwarded-Proto: https` over plaintext port 80 and Django treats the
+      # request as secure — defeating SECURE_SSL_REDIRECT and making
+      # request.is_secure() attacker-controlled. There is no downstream proxy
+      # in this architecture, so this must be false.
+      - TRUST_DOWNSTREAM_PROXY=false
 
-networks:
-  proxy-tier:
-    external: true
+      # FIRST RUN ONLY — prove issuance against staging before spending the
+      # Let's Encrypt budget. samourai.app is shared with clerk/memba/zentai,
+      # and the limits (5 failed validations/hostname/hour, 50 certs/domain/
+      # week) are per registered domain.
+      - ACME_CA_URI=https://acme-staging-v02.api.letsencrypt.org/directory
 ```
+
+Watch `docker compose logs -f acme-companion` until both certificates issue against staging, then remove `ACME_CA_URI`, recreate, and confirm real issuance.
+
+> **If issuance fails:** check for stray `AAAA` records (Let's Encrypt will validate over IPv6 and fail) and `CAA` records that do not name `letsencrypt.org`, confirm port 80 is reachable from the public internet, and read the acme-companion log. Do not loop `up -d` — you will burn the rate limit.
+
+Back up the nginx-proxy `certs` and `acme` volumes. They live in a *different* compose project, so a `down -v` there destroys the ACME account key and every certificate.
 
 Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 
@@ -276,41 +336,50 @@ Admin at `https://visio.samourai.app/admin`.
 
 ## 7. Branding
 
-`FRONTEND_CSS_URL` injects CSS at runtime via a `<link>` in `<head>` — **no rebuild, no fork, survives upgrades**. Serve `custom/style.css` from the frontend container or any URL.
+`FRONTEND_CUSTOM_CSS_URL` — a **backend** setting — injects CSS at runtime via a `<link>` in `<head>`: **no rebuild, no fork, survives upgrades**. The theme lives in [`theme/custom.css`](theme/custom.css); copy it to `deploy/custom/style.css`, which `compose.override.yaml` bind-mounts into the frontend web root.
 
-Starter using the Kodera tokens from `samourai.world-v2026`:
+> [!WARNING]
+> The variable is `FRONTEND_CUSTOM_CSS_URL`. `FRONTEND_CSS_URL` **does not exist**, and Django ignores unknown env vars silently — a wrong name gives a perfectly healthy stack with no theme and no error anywhere.
 
-```css
-/* Samouraï Visio — runtime theme over La Suite Meet */
-:root {
-  --c--theme--colors--primary-500: #FD6262;   /* coral   */
-  --c--theme--colors--primary-600: #E85454;
-  --c--theme--colors--secondary-500: #889CE7; /* lavender */
-  --c--theme--colors--greyscale-1000: #141416;
-  --c--theme--font--families--base: 'Inter', system-ui, sans-serif;
-}
-```
+**Tokens are [Panda CSS](https://panda-css.com/), not Cunningham.** Meet migrated the frontend, so every `--c--theme--*` name is dead and fails silently. The authority is `src/frontend/panda.config.ts`. Override the **palette ramp** (`--colors-primary-800`, `--colors-primary-dark-100`), not only the semantic tier — `buttonRecipe.ts:56` paints the primary button from `primary.800` with a literal `white`, so overriding `--colors-primary` alone leaves every button Bleu France.
 
-> Token names are indicative — confirm against the live DOM and `docs/theming.md`, since Cunningham's variable names drift between versions. Inspect the running app and adjust.
+Meet has **no light/dark toggle**: light outside a meeting, dark inside a room. Those are two ramps, both live at once.
 
-Build-time env vars cover the browser-tab app name.
+Every brand pairing must clear WCAG AA. The raw Kodera values do not — `#FD6262` on white is **2.96:1** and `#889CE7` on white is **2.64:1**, failing both the 4.5:1 text and 3:1 non-text thresholds. `theme/custom.css` darkens the fill and text steps while keeping coral as a decorative accent. `scripts/check-contrast.py` enforces this in CI; run it after any palette edit.
 
-**Credit upstream visibly.** MIT requires the licence; good faith requires the link. A "Propulsé par La Suite Meet" line in the footer is the difference between running La Suite for people who have no server, and looking like a rebrand.
+### Assets
+
+Bind-mount branding assets **per file**. Never mount a *directory* over `/usr/share/nginx/html/assets` — that replaces Vite's build output and the app will not boot. Favicons and PWA icons live at the web **root**, not under `/assets`.
+
+The browser-tab title needs a rebuilt frontend image (`VITE_APP_TITLE`), which contradicts the no-fork position; **accept the upstream title for v1.** Note it appears in on-screen copy too, not only the tab.
+
+**Credit upstream visibly.** MIT requires the notice — see [`NOTICE.md`](NOTICE.md) — and good faith requires the link. There is no footer element to hang it on (`use_french_gov_footer` defaults false and `Footer.tsx:125` returns `null`), so the theme injects it via `.Header-beforeLogo::after`. CSS `content` cannot carry a clickable link, so put the repo link on the promo page as well.
 
 ---
 
 ## 8. Smoke tests
 
 - [ ] `https://visio.samourai.app` loads over TLS
-- [ ] "Log in" → Clerk → back to Meet, **name and email correct** (validates traps #1 and #2)
+- [ ] Resolved settings are what you wrote — **run this before touching login**:
+      ```bash
+      docker compose run --rm backend python manage.py shell -c \
+        "from django.conf import settings; print(settings.OIDC_USERINFO_FULLNAME_FIELDS, settings.OIDC_REDIRECT_ALLOWED_HOSTS)"
+      ```
+      Expected `['given_name', 'family_name'] ['visio.samourai.app']`. Anything with a bracket in it is trap 2.
+- [ ] `X-Forwarded-Proto` cannot be spoofed — `curl -H "X-Forwarded-Proto: https" http://visio.samourai.app/` must redirect to `https://`, not serve a 200 over plaintext
+- [ ] "Log in" → Clerk → back to Meet, **name and email correct** (validates traps 3 and 4). Test with a **freshly created** account: a pre-existing Clerk user may simply have no name stored
+- [ ] Anonymous first visit does not bounce — silent login (`prompt=none`) succeeds or fails gracefully
 - [ ] Create a room as a logged-in user
-- [ ] **Open the room link in a private window — joins with no account** (validates `ALLOW_UNREGISTERED_ROOMS`)
+- [ ] Open the **created** room's link in a private window — joins with no account *(validates `access_level` + `RoomPermissions`, **not** the flag)*
+- [ ] Open a slug that was **never created** — e.g. `/zzz-test-unregistered-2026` — in a private window; a room materialises and joins *(**this alone** validates `ALLOW_UNREGISTERED_ROOMS` — trap 1)*
 - [ ] 3-way call: audio, video, screenshare
 - [ ] Mobile browser, iOS Safari + Android Chrome
-- [ ] Call from a restrictive network (mobile data / corporate VPN) — proves TURN over 443 works
-- [ ] Invitation email arrives via Resend
-- [ ] Custom CSS applied
+- [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
+- [ ] Invitation email arrives via Resend, **and its logo renders**
+- [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
 - [ ] `/admin` reachable, non-admins rejected
+- [ ] Reboot the host. All five services plus nginx-proxy return unattended, TLS still serves, a room still joins
+- [ ] `docker compose restart redis` → still logged in *(proves the AOF volume took)*
 
 ---
 
@@ -329,10 +398,42 @@ A free public WebRTC service with open signup is a bandwidth and moderation liab
 
 ## 10. Upgrades
 
+> [!WARNING]
+> `docker compose restart` does **not** apply a newly pulled image. A container's image is bound at creation, so `restart` reuses the existing container and the pulled layers are never used — then `migrate` runs new migrations against old code. Use `up -d`.
+
 ```bash
-# 1. read UPGRADE.md and CHANGELOG.md first
-# 2. bump the pinned tags in compose.yaml
+# 1. Read UPGRADE.md and CHANGELOG.md between the pinned tag and the target.
+#    Re-run the contract gate against the target tag before anything else:
+scripts/check-upstream-contract.sh v1.25.0
+
+# 2. BACK UP FIRST — this is the only rollback that exists.
+docker compose exec -T postgresql pg_dump -U meet meet \
+  | gzip > ~/backups/pre-upgrade-$(date +%F-%H%M).sql.gz
+ls -lh ~/backups/pre-upgrade-*.sql.gz | tail -1     # non-zero size, or stop
+
+# 3. Record the current state so you can get back to it.
+docker compose config --images > ~/backups/images-$(date +%F-%H%M).txt
+docker compose run --rm backend python manage.py showmigrations \
+  > ~/backups/migrations-$(date +%F-%H%M).txt
+
+# 4. Bump the tags in compose.override.yaml (NOT compose.yaml — that gets
+#    re-fetched verbatim), then:
 docker compose pull
-docker compose restart
+docker compose up -d          # NOT `restart`
+docker compose config --images   # confirm the new tags are actually running
 docker compose run --rm backend python manage.py migrate
 ```
+
+**Rollback:** revert the tags in `compose.override.yaml`, `docker compose up -d`, then restore the dump if the migration was not reversible. Re-fetch upstream `compose.yaml` at the old tag if it changed.
+
+### Rotating a secret
+
+No secret rotates cleanly by itself — each has a blast radius:
+
+| Secret | Rotation effect |
+|---|---|
+| `DJANGO_SECRET_KEY` | invalidates every session — **mass logout, mid-call** |
+| `LIVEKIT_API_SECRET` | must change in **two** files (`env.d/common` *and* `livekit-server.yaml`) or every token fails signature validation and nobody can join |
+| `DB_PASSWORD` | change in PostgreSQL *and* `env.d/postgresql` |
+| `OIDC_RP_CLIENT_SECRET` | regenerate in Clerk; login is broken between regeneration and restart |
+| Resend API key | invitation emails fail silently until restart |
