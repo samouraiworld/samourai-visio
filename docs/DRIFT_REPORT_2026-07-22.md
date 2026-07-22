@@ -4,6 +4,18 @@
 >
 > **This is that reconciliation.** Everything below was re-derived from `refs/heads/main` today, not from the stale clone.
 
+> [!IMPORTANT]
+> **Corrected by expert review — see [CTO_REVIEW_2026-07-22.md](CTO_REVIEW_2026-07-22.md).** The findings below survived scrutiny (11 of 11 spot-checked line citations verified; `panda.config.ts`, `settings.py` and `theming.md` confirmed byte-identical between `main` and the pinned `v1.24.0`). Six items were wrong and are corrected here rather than silently edited:
+>
+> | Item | Correction |
+> |---|---|
+> | **Trap 1** | The *diagnosis* is right; the *fix* everyone was using is not. `["given_name","family_name"]` cannot parse — `values.ListValue` splits on `,` and never reads JSON. Use `given_name,family_name`. **This alone would have broken every display name.** |
+> | **R1** | REFUTED as stated. nginx forwards inbound headers by default, so `X-Forwarded-Proto` does arrive and there is no day-one redirect loop. The real risk is the inverse: nginx-proxy's `TRUST_DOWNSTREAM_PROXY=true` lets a **client spoof** the header. Fix is `TRUST_DOWNSTREAM_PROXY=false`. |
+> | **R5** | REFUTED. `mozilla_django_oidc` sends `client_secret` and `code_verifier` in the same POST unconditionally; Clerk advertises `client_secret_post` and `S256`. Keep PKCE on. The real fallbacks are `OIDC_USE_NONCE=false` then `OIDC_TOKEN_USE_BASIC_AUTH=true`. |
+> | **R6** | REFUTED. Compose v2 interpolates inside `env_file`; `format: raw` is the opt-*out*. But undefined variables render as the **empty string**, not a literal `${VAR}` — so the check as written could never fire. |
+> | **R12** | CONFIRMED, remediation wrong. 443/**udp** is free — nginx-proxy binds 443/**tcp** only. LiveKit TURN on UDP/443 is available today at zero cost; no second IP needed. |
+> | **Token table** | `--colors-error` is not a semantic token. `panda.config.ts:171` defines an `error` *palette ramp*; the semantic destructive token at `:316` is `--colors-danger`. Inherited from an error in upstream's own `theming.md:57`. |
+
 ## Method
 
 All artefacts re-fetched 2026-07-22, all HTTP 200, all from `suitenumerique/meet@main` unless noted:
@@ -95,7 +107,7 @@ Real token names, from `panda.config.ts` + `theming.md`:
 | Primary hover / active | `--colors-primary-hover`, `--colors-primary-active` | — |
 | In-room (dark) primary | `--colors-primary-dark-500` *(50–950 + `action`)* | — |
 | Greyscale ramp | `--colors-greyscale-000` … `--colors-greyscale-1000` | `--c--theme--colors--greyscale-1000` |
-| Error / success / warning / alert | `--colors-error`, `--colors-success`, `--colors-warning`, `--colors-alert` | — |
+| Destructive / success / warning / alert | `--colors-danger`, `--colors-success`, `--colors-warning`, `--colors-alert` *(`--colors-error` is a palette ramp `-100…950`, not a semantic token — `theming.md:57` is wrong)* | — |
 | Fonts | `--fonts-sans`, `--fonts-serif`, `--fonts-mono` | `--c--theme--font--families--base` |
 
 > ⚠️ **Near-miss trap.** Panda also defines `greyscale-1000`. The *leaf* name matches ours exactly; only the prefix differs. Anyone eyeballing the diff will read `greyscale-1000` in both columns and conclude the file is fine.

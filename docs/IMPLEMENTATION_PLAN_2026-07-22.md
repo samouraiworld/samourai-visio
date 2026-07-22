@@ -2,8 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use `superpowers:subagent-driven-development` (recommended) or `superpowers:executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 >
-> **Status: PROPOSAL — awaiting owner review. Nothing in Phases B–J has been executed.**
-> Evidence base: [DRIFT_REPORT_2026-07-22.md](DRIFT_REPORT_2026-07-22.md). Read it first; this plan assumes its findings.
+> **Status: PROPOSAL, REVISED AFTER EXPERT REVIEW — awaiting owner review. Nothing in Phases B–J has been executed.**
+> Evidence base: [DRIFT_REPORT_2026-07-22.md](DRIFT_REPORT_2026-07-22.md).
+> **Corrections: [CTO_REVIEW_2026-07-22.md](CTO_REVIEW_2026-07-22.md) — read this second and treat it as authoritative where it disagrees with anything below.** Four independent expert reviews found one defect that would have broken authentication outright, one that would have shipped an inaccessible interface, and four verification steps that would have reported success while the system was broken. The critical fixes are applied below; the review carries the full reasoning and the items still outstanding.
 
 **Goal:** Bring La Suite Meet live at `visio.samourai.app`, authenticated against the existing Clerk org, with working guest-join, working branding, and an honest account of what does and does not work on restrictive networks.
 
@@ -17,8 +18,12 @@
 
 - **Never commit to `main`/`master`.** Feature branches + PR only. No Claude attribution in commits, PR bodies, tags, or release notes.
 - **Secrets live only in gitignored files.** Tracked files carry `*.example` placeholders and nothing else. The Clerk client secret is displayed once and is unrecoverable.
+- **List-valued env vars are COMMA-SEPARATED, never JSON.** `values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) — it never parses JSON. `["a","b"]` becomes `['["a"', '"b"]']` and silently breaks. Write `a,b`. Applies to `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`. **Upstream's own template gets this wrong.**
+- **Never run bare `docker compose config`.** It expands `env_file` and prints every secret to stdout. Use `--no-env-resolution` for structure, `--images` for tags, and a filtered `--format json` selection when resolved values are genuinely needed.
 - **`FRONTEND_CUSTOM_CSS_URL`** is the correct variable name. `FRONTEND_CSS_URL` does not exist.
-- **Design tokens are Panda CSS** (`--colors-*`, `--fonts-*`). Cunningham `--c--theme--*` names are dead.
+- **Design tokens are Panda CSS** (`--colors-*`, `--fonts-*`). Cunningham `--c--theme--*` names are dead. Override the **palette ramp** (`--colors-primary-800`, `--colors-primary-dark-100`), not only the semantic tier — the app paints its most visible surfaces from the ramp.
+- **Every brand colour must clear WCAG AA (4.5:1) for text and 3:1 for UI.** `#FD6262` on white is 2.96:1 and `#889CE7` on white is 2.64:1 — neither may carry white text or serve as a focus ring.
+- **Assert on command output, never on grep exit codes** — implementations differ (`ugrep` exits 2 where GNU grep exits 1).
 - **Pin every image tag.** No `latest` reaches the host.
 - **Upstream `compose.yaml` is read-only**, re-fetched verbatim at upgrade. Our changes go in `compose.override.yaml`.
 - **Verify-first.** Infrastructure has no unit tests, so every task states its check, runs it *before* the change to observe the failure, then runs it again to observe the pass. A task without an executed check is not done.
@@ -29,14 +34,79 @@
 
 ## Phase A — Repository corrections (no server required)
 
-> These three tasks fix defects that exist in the repo *today*. They need no IP, no credentials, and no host. They can land before any infrastructure work and should, because they are what makes Phase H succeed on the first attempt.
+> These tasks fix defects that exist in the repo *today*. They need no IP, no credentials, and no host. They can land before any infrastructure work and should, because they are what makes Phases F and H succeed on the first attempt.
+
+### Task A0: Fix the list-value syntax — authentication is broken without this
+
+**Files:**
+- Modify: `deploy/env.d/common.example:45,52`
+- Modify: `RUNBOOK.md:185,192`
+
+**Interfaces:**
+- Produces: parseable OIDC list settings, consumed by Tasks D2 and F1.
+
+> **This is the single most consequential fix in the plan.** Trap 1 was correctly identified in the runbook and then fixed in a syntax django-configurations cannot parse, so display names would still be empty — and the plan's own diagnostic pointed at the wrong cause. See [CTO_REVIEW §1.1](CTO_REVIEW_2026-07-22.md).
+
+- [ ] **Step 1: Reproduce the defect — no server needed**
+
+```bash
+python3 -c "
+for v in ['[\"given_name\",\"family_name\"]', 'given_name,family_name']:
+    print(f'{v!r:34} -> ' + str(list(filter(None,[x.strip() for x in v.strip().split(\",\")]))))"
+```
+
+Expected output — the first line is what the repo ships today:
+
+```
+'["given_name","family_name"]'     -> ['["given_name"', '"family_name"]']
+'given_name,family_name'           -> ['given_name', 'family_name']
+```
+
+- [ ] **Step 2: Correct `deploy/env.d/common.example`**
+
+Replace lines 45 and 52:
+
+```env
+# Comma-separated. NOT JSON — values.ListValue splits on ',' and never parses
+# JSON (django-configurations configurations/values.py:238). Brackets and quotes
+# become part of the field names and every display name silently renders empty.
+OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
+OIDC_USERINFO_SHORTNAME_FIELD=given_name
+# Requires `email` in userinfo. Default is [] which demands only `sub`, so a Clerk
+# identity with no email would create a silent null-email account.
+OIDC_USERINFO_ESSENTIAL_CLAIMS=email
+```
+
+```env
+# Host only — no scheme, no brackets. Django compares urlparse(url).netloc
+# against this set, so a scheme-bearing entry can never match.
+OIDC_REDIRECT_ALLOWED_HOSTS=visio.samourai.app
+```
+
+- [ ] **Step 3: Apply the same correction to `RUNBOOK.md:185,192`.**
+
+- [ ] **Step 4: Verify no bracketed list survives**
+
+```bash
+grep -nE '^[A-Z_]+=\[' deploy/env.d/common.example RUNBOOK.md
+```
+
+Expected: no output. (Assert on the output, not the exit code.)
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add deploy/env.d/common.example RUNBOOK.md
+git commit -m "Use comma-separated OIDC list values — JSON syntax silently breaks every display name"
+```
 
 ### Task A1: Correct the CSS variable name
 
 **Files:**
 - Modify: `deploy/env.d/common.example:67`
-- Modify: `RUNBOOK.md:207`
-- Verify: `docs/DRIFT_REPORT_2026-07-22.md` (BLOCKER-1)
+- Modify: `RUNBOOK.md:207`, `RUNBOOK.md:279`
+- Modify: `README.md:33`, `README.md:40` ← *missed in the first draft; the repo's front door carries the wrong name*
+- Modify: `docs/PLAN_2026-07-22.md:68`, `docs/PLAN_2026-07-22.md:97`
 
 **Interfaces:**
 - Produces: `FRONTEND_CUSTOM_CSS_URL` as the canonical name used by Tasks D2, H2, I6.
@@ -69,16 +139,19 @@ In `RUNBOOK.md` §4, replace `FRONTEND_CSS_URL=/custom/style.css` with `FRONTEND
 
 - [ ] **Step 4: Verify no occurrence survives**
 
+`docs/` is excluded because the analysis documents legitimately quote the wrong name; without that the check can never go green.
+
 ```bash
-grep -rn "FRONTEND_CSS_URL" . --exclude-dir=.git
+grep -rn "FRONTEND_CSS_URL" . --exclude-dir=.git --exclude-dir=docs
+grep -c "FRONTEND_CUSTOM_CSS_URL" deploy/env.d/common.example RUNBOOK.md README.md
 ```
 
-Expected: no output (exit 1).
+Expected: **no output** from the first command (assert on output, not exit code — `ugrep` exits 2 where GNU grep exits 1). Non-zero counts from the second.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add deploy/env.d/common.example RUNBOOK.md
+git add deploy/env.d/common.example RUNBOOK.md README.md docs/PLAN_2026-07-22.md
 git commit -m "Use FRONTEND_CUSTOM_CSS_URL — FRONTEND_CSS_URL is not a Meet setting and fails silently"
 ```
 
@@ -105,51 +178,102 @@ Expected: `primaryDark` and `primary` colour ramps, a `greyscale` ramp `000`–`
 
 - [ ] **Step 2: Replace `theme/custom.css` entirely**
 
+> Ramp values below were derived by reproducing Panda's codegen locally against `v1.24.0` with the pinned compiler, then validated numerically against the actual component pairings. Contrast ratios in the comments are measured, not estimated.
+
 ```css
 /* ─────────────────────────────────────────────────────────────
-   Samouraï Visio — runtime theme over La Suite Meet
-   Loaded via FRONTEND_CUSTOM_CSS_URL. No rebuild, no fork.
+   Samouraï Visio — runtime theme over La Suite Meet v1.24.0
+   Loaded via FRONTEND_CUSTOM_CSS_URL (a BACKEND setting) ->
+   /api/v1.0/config/ -> AppInitialization.tsx appends <link> to <head>.
 
-   Token authority: src/frontend/panda.config.ts (Panda CSS).
-   Meet migrated OFF Cunningham — `--c--theme--*` names are dead
-   and fail silently. See docs/DRIFT_REPORT_2026-07-22.md.
+   Token authority: the CSS emitted by @pandacss/dev from
+   src/frontend/panda.config.ts. No prefix is configured, so vars are
+   --colors-* / --fonts-*, camelCase kebab-cased
+   (primaryDark -> --colors-primary-dark-*, focusRing -> --colors-focus-ring).
 
-   Meet has no light/dark toggle: LIGHT outside a meeting,
-   DARK inside a room. Those are two different palettes.
+   CRITICAL: the app reads the PALETTE ramp far more than the semantic tier.
+   buttonRecipe.ts:56 uses primary.800 with a LITERAL `white`, not primary.text.
+   Overriding only --colors-primary leaves every button Bleu France.
+
+   No !important: an unlayered :root already beats Panda's @layer tokens, and
+   !important would break the html.font-lexend accessibility override.
    ───────────────────────────────────────────────────────────── */
 
-:root {
-  /* ── Outside the room: light surface ── */
-  --colors-primary: #FD6262;          /* Kodera coral */
-  --colors-primary-hover: #E85454;
-  --colors-primary-active: #A63A3A;
-  --colors-primary-text: #FFFFFF;
-  --colors-primary-subtle: #FFE9E9;
-  --colors-primary-subtle-text: #A63A3A;
+@import url('https://fonts.bunny.net/css?family=inter:400,500,600,700&display=swap');
 
-  /* ── Inside the room: dark surface ──
-     Panda's primaryDark ramp runs 50 (darkest) → 950 (lightest). */
-  --colors-primary-dark-50: #141416;  /* Kodera background */
-  --colors-primary-dark-500: #FD6262;
-  --colors-primary-dark-action: #FE9A9A;
+:root {
+  /* ── LIGHT SURFACE (outside a room) — palette ramp ──
+     Brand coral #FD6262 is 2.96:1 on white: it CANNOT carry white text.
+     It stays at .500 (decorative) while the text/fill steps darken. */
+  --colors-primary-50:   #FFF6F6;
+  --colors-primary-100:  #FEECEC;   /* tertiary button bg */
+  --colors-primary-200:  #FDE2E2;   /* LoginHint bg — ink 14.8:1 */
+  --colors-primary-300:  #FBD5D5;   /* tertiary hover bg */
+  --colors-primary-400:  #F58A8A;   /* disabled text only (WCAG-exempt) */
+  --colors-primary-500:  #FD6262;   /* Kodera coral, decorative */
+  --colors-primary-600:  #A63A3A;   /* focus box-shadow ring */
+  --colors-primary-700:  #8F2E2E;
+  --colors-primary-800:  #B83636;   /* PRIMARY BUTTON FILL + link/border text (20 usages)
+                                       white on it 5.80:1 AA · on white 5.80:1 AA */
+  --colors-primary-900:  #8F2E2E;   /* tertiaryText — 8.08:1 on white */
+  --colors-primary-950:  #5C1E1E;
+  --colors-primary-action: #A63A3A; /* primary button hover — 6.39:1 AA */
+
+  /* ── LIGHT SURFACE — semantic tier ──
+     Also feeds the LiveKit accent chain (livekit.css:14-18), so it must read
+     on BOTH white and the #141416 room surface. */
+  --colors-primary:             #CC4444;  /* white on it 4.69:1 AA · vs room bg 3.92:1 */
+  --colors-primary-hover:       #B83636;  /* 5.80:1 AA */
+  --colors-primary-active:      #A63A3A;  /* 6.39:1 AA */
+  --colors-primary-text:        #FFFFFF;  /* forced white: paired with primary,
+                                             primary.active, primary.800 AND
+                                             primaryDark.100 — no ink suits all four */
+  --colors-primary-subtle:      #FEECEC;
+  --colors-primary-subtle-text: #8F2E2E;  /* Badge — 7.09:1 AA */
+
+  /* ── DARK SURFACE (inside a room) ──
+     Luminance-matched to upstream's ramp so every contrast relation the
+     upstream designers built is preserved, rehued to Samouraï lavender.
+     .100 is the workhorse (27 usages). .500 and .action have ZERO usages
+     in v1.24.0 — set only for forward-compatibility.
+     .700/.900 are INVERTED (light) selected states: darkening them breaks them. */
+  --colors-primary-dark-50:     #141416;  /* Kodera bg — room canvas, white 18.4:1 */
+  --colors-primary-dark-75:     #222429;
+  --colors-primary-dark-100:    #2D3037;  /* buttons/tooltips/menus — white 13.2:1 */
+  --colors-primary-dark-200:    #434655;
+  --colors-primary-dark-300:    #585E75;  /* hover — white 6.42:1 */
+  --colors-primary-dark-400:    #6B759C;
+  --colors-primary-dark-500:    #889CE7;  /* Samouraï lavender (unused in 1.24.0) */
+  --colors-primary-dark-600:    #96A2CC;
+  --colors-primary-dark-700:    #ACB7DF;  /* inverted — .100 text on it 6.66:1 AA */
+  --colors-primary-dark-800:    #C4CBE9;
+  --colors-primary-dark-900:    #DCE1F2;  /* Select open — .100 text 10.13:1 AA */
+  --colors-primary-dark-950:    #F4F5FB;
+
+  /* ── Focus ring (index.css:39,47) — must clear 3:1 on white AND on #141416.
+     Pure lavender #889CE7 is 2.64:1 on white and FAILS. Darkened. */
+  --colors-focus-ring: #5C6FBF;   /* white 4.69:1 · room 3.93:1 */
 
   /* ── Type ── */
   --fonts-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-/* Attribution — MIT requires the licence, good faith requires the link.
-   Keep this visible: it's the difference between running La Suite for
-   people who have no server, and looking like a rebrand. */
-.samourai-credit {
-  font-size: 0.75rem;
-  opacity: 0.65;
-  text-align: center;
-  padding: 0.5rem;
+/* Attribution. There is NO footer element: use_french_gov_footer defaults to
+   false and Footer.tsx:125 returns null. The only stable hook upstream ships
+   is .Header-beforeLogo (Header.tsx:153) — the same one DINUM uses. */
+.Header-beforeLogo::after {
+  content: 'Propulsé par La Suite Meet';
+  display: block;
+  font-size: 0.6875rem;
+  line-height: 1;
+  opacity: 0.7;
+  margin-top: 0.25rem;
 }
-.samourai-credit a { color: inherit; text-decoration: underline; }
 ```
 
-> The secondary lavender `#889CE7` is deliberately dropped: Panda exposes no `secondary` semantic token. Reintroduce it only against a token confirmed in the live DOM (Task H3).
+> **Lavender is not dropped — it is relocated.** Panda exposes no `secondary` semantic token, but upstream's `primaryDark` ramp *is* a lavender-indigo (default `.500` is `#8787D7`, within a hair of Samouraï's `#889CE7`). Rehueing the dark ramp is the correct home for it. It must not become the focus ring: `#889CE7` scores 2.64:1 on white and fails 1.4.11's 3:1 threshold.
+>
+> **`--colors-error` is not a token.** `panda.config.ts:171` defines an `error` *palette ramp* (`--colors-error-100…950`); the semantic destructive token at `:316` is `--colors-danger`. Upstream's `theming.md:57` is wrong, and the first draft of the drift report inherited that error.
 
 - [ ] **Step 3: Update the runbook's starter block**
 
@@ -161,13 +285,23 @@ Replace the CSS block in `RUNBOOK.md` §7 with the `:root` block above, and repl
 > Confirm every token against the live DOM before calling the theme done (§8).
 ```
 
-- [ ] **Step 4: Verify no dead token survives**
+- [ ] **Step 4: Verify no dead token survives, and no failing colour was introduced**
 
 ```bash
-grep -rn -- "--c--theme--" . --exclude-dir=.git
+grep -rn --exclude-dir=.git --exclude-dir=docs -- "--c--theme--" .
+python3 -c "
+def rl(c):
+    c=c.lstrip('#'); v=[int(c[i:i+2],16)/255 for i in (0,2,4)]
+    v=[x/12.92 if x<=0.04045 else ((x+0.055)/1.055)**2.4 for x in v]
+    return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2]
+def cr(a,b):
+    l=sorted([rl(a),rl(b)],reverse=True); return (l[0]+0.05)/(l[1]+0.05)
+for a,b,lbl,mn in [('#B83636','#FFFFFF','primary-800/white',4.5),('#CC4444','#FFFFFF','primary/white',4.5),
+                   ('#5C6FBF','#FFFFFF','focus-ring/white',3.0),('#5C6FBF','#141416','focus-ring/room',3.0)]:
+    r=cr(a,b); print(f'{lbl:22} {r:5.2f}:1  {\"PASS\" if r>=mn else \"FAIL\"}')"
 ```
 
-Expected: no output (exit 1).
+Expected: **no output** from grep, and four `PASS` lines.
 
 - [ ] **Step 5: Commit**
 
