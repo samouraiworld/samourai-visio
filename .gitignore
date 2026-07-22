@@ -1,24 +1,58 @@
-# ── Secrets: never commit ──
+# ── Secrets ─────────────────────────────────────────────────────────────────
+# Broad by default. Templates are re-included explicitly below.
 .env
+.env.*
+**/.env
+**/.env.*
 env.d/common
 env.d/postgresql
-deploy/.env
-deploy/env.d/common
-deploy/env.d/postgresql
+deploy/env.d/*
+secrets/
+deploy/secrets/
 *.secret
 *.key
 *.pem
 
-# Anything not explicitly an example
-deploy/env.d/*
+# Re-include the tracked templates (must come after the rules above).
+!*.example
+!**/*.example
 !deploy/env.d/*.example
 
-# ── Upstream artifacts fetched at deploy time ──
+# ── Upstream artefacts, fetched at deploy time ──────────────────────────────
+# Re-fetched verbatim on every upgrade so upstream stays diffable. Our own
+# deltas live in deploy/compose.override.yaml, which IS tracked.
 deploy/compose.yaml
 deploy/livekit-server.yaml
 deploy/default.conf.template
 
-# ── OS / editor ──
+# ── Runtime data ────────────────────────────────────────────────────────────
+# The PostgreSQL cluster (all user PII) and the Redis AOF (which holds Clerk
+# ID tokens in serialised sessions). Created by `docker compose up`.
+data/
+deploy/data/
+*.aof
+*.rdb
+
+# ── Backups ─────────────────────────────────────────────────────────────────
+# pg_dump output contains user emails, names and room metadata.
+backups/
+deploy/backups/
+*.sql
+*.sql.gz
+*.dump
+*.bak
+
+# ── Deployed branding assets ────────────────────────────────────────────────
+# Owner-supplied binaries, staged on the host, not source.
+deploy/custom/
+
+# ── Command output that expands secrets ─────────────────────────────────────
+# `docker compose config` resolves env_file and prints every secret.
+*compose-config*
+*.log
+nohup.out
+
+# ── OS / editor ─────────────────────────────────────────────────────────────
 .DS_Store
 *.swp
 .idea/
