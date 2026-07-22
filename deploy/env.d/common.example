@@ -81,17 +81,26 @@ OIDC_RP_SCOPES="openid email profile"
 
 # Comma-separated, NOT JSON. See the header.
 #
-# !! VERIFIED 2026-07-22: this currently yields NOTHING. !!
-# The Clerk instance has first_name and last_name DISABLED, so the sign-up form
-# collects no name, userinfo carries no given_name/family_name, and full_name is
-# NULL for every user. The `profile` scope does not change this — the claims are
-# absent because the data was never collected.
-# Not an outage: full_name is nullable and participants can rename themselves
-# in-room. But everyone arrives nameless.
+# Set to `preferred_username` by decision (2026-07-22): a public handle suits a
+# public video service better than a legal name, and it is one attribute rather
+# than two on a sign-up form shared with Memba and Zentai.
+#
+# !! REQUIRES A CLERK CHANGE THAT IS NOT YET APPLIED. !!
+# Audited 2026-07-22: `username` is DISABLED on clerk.samourai.app (as are
+# first_name and last_name). Until it is enabled in the Clerk dashboard,
+# userinfo carries no preferred_username and full_name stays NULL.
+# No worse than the previous value, which was equally empty — see the audit.
+#
+# Impact while unset is small: the join screen shows a required name field to
+# anyone not logged in, and also to logged-in users because
+# AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME defaults true
+# (Join.tsx:457-465). A null full_name means that field starts empty instead of
+# pre-filled; the browser remembers what the user types.
+#
 # Re-check with: scripts/audit-clerk-instance.sh
-# Options and recommendation: docs/CLERK_INSTANCE_AUDIT_2026-07-22.md
-OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
-OIDC_USERINFO_SHORTNAME_FIELD=given_name
+# Rationale: docs/CLERK_INSTANCE_AUDIT_2026-07-22.md
+OIDC_USERINFO_FULLNAME_FIELDS=preferred_username
+OIDC_USERINFO_SHORTNAME_FIELD=preferred_username
 # Default is empty, which requires only `sub` — so a Clerk identity with no
 # email would create a silent null-email account rather than being rejected.
 OIDC_USERINFO_ESSENTIAL_CLAIMS=email
@@ -148,9 +157,25 @@ LIVEKIT_FORCE_WSS_PROTOCOL=true
 # administrable one.
 ALLOW_UNREGISTERED_ROOMS=True
 
-# Default is true. Every anonymous visitor is sent through prompt=none at
-# Clerk, and the callback special-cases only error=login_required — anything
-# else lands in login_failure. Set false if first-time guests bounce.
+# ── Guest access (product requirement: usable without an account) ──
+# This is already satisfied by ALLOW_UNREGISTERED_ROOMS above plus the join
+# screen: Join.tsx:457 renders a required name field whenever the visitor is
+# not logged in, and passes it as ?username= to the room endpoint. A guest
+# types a name and joins. No account, no e-mail, nothing to verify.
+#
+# Note this is MORE open than Google Meet, which requires an account to create
+# a meeting. Here an unauthenticated visitor can conjure a working room from
+# any URL. The trade is that such rooms have no owner, no admin controls
+# (is_administrable: false) and no attribution for moderation.
+#
+# Default is true. Every anonymous visitor is redirected to Clerk with
+# prompt=none once per retry interval (silentLogin.ts rate-limits it via
+# localStorage), and the callback special-cases only error=login_required —
+# anything else lands in login_failure.
+# Keeping it TRUE means returning signed-in users are recognised without
+# clicking "log in". Setting it FALSE removes a redirect from every guest's
+# first visit, at the cost of that convenience.
+# Decide after testing the anonymous path against Clerk (RUNBOOK §8).
 #FRONTEND_IS_SILENT_LOGIN_ENABLED=false
 
 # ── Branding ──
