@@ -32,7 +32,13 @@
 
 ---
 
-## Phase A — Repository corrections (no server required)
+## Phase A — Repository corrections (no server required) — ✅ **DONE**
+
+> **Completed and merged 2026-07-22.** Tasks A0–A3 are applied, plus the engineering baseline the review demanded: CI with six required checks, `LICENSE` + `NOTICE.md`, a closed `.gitignore`, `deploy/compose.override.yaml`, and `deploy/livekit-server.yaml.example` with the `turn:` block upstream omits.
+>
+> The checks below are retained as the record of what was verified. They are now enforced continuously rather than run once — the drift report became `scripts/check-upstream-contract.sh`, which asserts every upstream assumption on each PR and weekly against `main`.
+>
+> **Everything from Phase B onward is blocked on owner inputs.** See §"Blocked on you" in the handover.
 
 > These tasks fix defects that exist in the repo *today*. They need no IP, no credentials, and no host. They can land before any infrastructure work and should, because they are what makes Phases F and H succeed on the first attempt.
 
