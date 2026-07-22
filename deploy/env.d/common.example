@@ -1,0 +1,67 @@
+# visio.samourai.app — Meet backend config
+# Copy to `env.d/common`, fill the <placeholders>, never commit the result.
+#
+# Differs from upstream env.d/production.dist/common in 4 places, all deliberate:
+#   1. OIDC points at Clerk, not Keycloak
+#   2. OIDC_RP_SCOPES adds `profile`      (default "openid email" → names arrive empty)
+#   3. OIDC_USERINFO_FULLNAME_FIELDS overridden (default contains `usual_name`,
+#      a ProConnect-only claim Clerk does not emit → display names break)
+#   4. ALLOW_UNREGISTERED_ROOMS=True      (upstream production default is False,
+#      which would require an account just to JOIN a call)
+
+# ── Django ──
+DJANGO_ALLOWED_HOSTS=${MEET_HOST}
+DJANGO_SECRET_KEY=<openssl rand -base64 64>
+DJANGO_SETTINGS_MODULE=meet.settings
+DJANGO_CONFIGURATION=Production
+PYTHONPATH=/app
+MEET_BASE_URL="https://${MEET_HOST}"
+
+# ── Mail (Resend) ──
+DJANGO_EMAIL_HOST=smtp.resend.com
+DJANGO_EMAIL_HOST_USER=resend
+DJANGO_EMAIL_HOST_PASSWORD=<resend api key>
+DJANGO_EMAIL_PORT=587
+DJANGO_EMAIL_USE_TLS=true
+DJANGO_EMAIL_FROM=visio@samourai.app
+DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
+DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
+
+# ── OIDC — Clerk (clerk.samourai.app) ──
+# Verified live: https://clerk.samourai.app/.well-known/openid-configuration
+OIDC_OP_JWKS_ENDPOINT=https://clerk.samourai.app/.well-known/jwks.json
+OIDC_OP_AUTHORIZATION_ENDPOINT=https://clerk.samourai.app/oauth/authorize
+OIDC_OP_TOKEN_ENDPOINT=https://clerk.samourai.app/oauth/token
+OIDC_OP_USER_ENDPOINT=https://clerk.samourai.app/oauth/userinfo
+# OIDC_OP_LOGOUT_ENDPOINT intentionally unset — Clerk reports
+# backchannel_logout_supported:false and frontchannel_logout_supported:false.
+# Effect: logout clears the Django session but not the Clerk SSO session.
+
+OIDC_RP_CLIENT_ID=<from Clerk dashboard>
+OIDC_RP_CLIENT_SECRET=<from Clerk dashboard — shown once, never again>
+OIDC_RP_SIGN_ALGO=RS256
+OIDC_RP_SCOPES="openid email profile"
+
+OIDC_USERINFO_FULLNAME_FIELDS=["given_name","family_name"]
+OIDC_USERINFO_SHORTNAME_FIELD=given_name
+
+OIDC_USE_PKCE=true
+OIDC_PKCE_CODE_CHALLENGE_METHOD=S256
+OIDC_CREATE_USER=true
+OIDC_REDIRECT_REQUIRE_HTTPS=true
+OIDC_REDIRECT_ALLOWED_HOSTS=["https://${MEET_HOST}"]
+
+LOGIN_REDIRECT_URL=https://${MEET_HOST}
+LOGIN_REDIRECT_URL_FAILURE=https://${MEET_HOST}
+LOGOUT_REDIRECT_URL=https://${MEET_HOST}
+
+# ── LiveKit ──
+LIVEKIT_API_SECRET=<openssl rand -base64 48>
+LIVEKIT_API_KEY=meet
+LIVEKIT_API_URL=https://${LIVEKIT_HOST}
+
+# ── Public instance ──
+ALLOW_UNREGISTERED_ROOMS=True
+
+# ── Branding ──
+FRONTEND_CSS_URL=/custom/style.css

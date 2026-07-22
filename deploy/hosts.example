@@ -1,0 +1,11 @@
+# Copy to `deploy/.env` (compose reads this for ${VAR} interpolation).
+#
+# Clerk replaces Keycloak, so KEYCLOAK_HOST and REALM_NAME from the upstream
+# template are unused and omitted.
+
+MEET_HOST=visio.samourai.app
+LIVEKIT_HOST=livekit.samourai.app
+
+BACKEND_INTERNAL_HOST=backend
+FRONTEND_INTERNAL_HOST=frontend
+LIVEKIT_INTERNAL_HOST=livekit

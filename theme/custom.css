@@ -1,0 +1,39 @@
+/* ─────────────────────────────────────────────────────────────
+   Samouraï Visio — runtime theme over La Suite Meet
+   Loaded via FRONTEND_CSS_URL. No rebuild, no fork.
+
+   ⚠️  The custom property names below follow Cunningham's token
+   scheme, which DRIFTS BETWEEN VERSIONS. Do not trust this file
+   blind — open the running app, inspect :root in devtools, and
+   reconcile before considering the theme done.
+   Reference: apps/meet/docs/theming.md
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* Kodera palette, from samourai.world-v2026 */
+  --c--theme--colors--primary-100: #FFE9E9;
+  --c--theme--colors--primary-300: #FE9A9A;
+  --c--theme--colors--primary-500: #FD6262;  /* coral — primary accent */
+  --c--theme--colors--primary-600: #E85454;
+  --c--theme--colors--primary-800: #A63A3A;
+
+  --c--theme--colors--secondary-500: #889CE7; /* lavender */
+
+  --c--theme--colors--greyscale-000: #FFFFFF;
+  --c--theme--colors--greyscale-900: #1E1E22;
+  --c--theme--colors--greyscale-1000: #141416; /* background */
+
+  --c--theme--font--families--base: 'Inter', system-ui, -apple-system, sans-serif;
+  --c--theme--font--families--accent: 'Inter', system-ui, sans-serif;
+}
+
+/* Attribution — MIT requires the licence, good faith requires the link.
+   Keep this visible: it's the difference between running La Suite for
+   people who have no server, and looking like a rebrand. */
+.samourai-credit {
+  font-size: 0.75rem;
+  opacity: 0.65;
+  text-align: center;
+  padding: 0.5rem;
+}
+.samourai-credit a { color: inherit; text-decoration: underline; }
