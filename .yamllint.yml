@@ -1,0 +1,18 @@
+extends: default
+
+rules:
+  line-length:
+    max: 100
+    allow-non-breakable-words: true
+  # GitHub Actions requires the `on:` key, which YAML 1.1 parses as boolean
+  # true. This is unavoidable, not a style choice.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+
+ignore: |
+  .git/
+  deploy/compose.yaml
+  deploy/livekit-server.yaml

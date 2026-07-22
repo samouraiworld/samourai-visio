@@ -1,0 +1,121 @@
+# All visio.samourai.app deltas.
+#
+# Compose loads compose.yaml + compose.override.yaml together by default.
+# Keeping our changes here means upstream's compose.yaml is never edited, so
+# it can be re-fetched verbatim at upgrade time (RUNBOOK §10). RUNBOOK §5's
+# original "uncomment these blocks in compose.yaml" instruction would be
+# silently erased by that re-fetch.
+#
+# Merge semantics (verified on Compose v2.40.3):
+#   image, command   -> REPLACE
+#   environment      -> merge; on key collision `environment:` beats `env_file:`
+#   networks         -> merge
+#   volumes          -> merge, keyed by TARGET path (same target replaces)
+#
+# NEVER run bare `docker compose config` against this: it expands env_file and
+# prints every secret. Use --no-env-resolution, or --images for tags.
+---
+services:
+  postgresql:
+    image: postgres:16
+    restart: unless-stopped
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    # Upstream ships redis:5 (years past EOL) with no volume. Sessions are
+    # cache-backed (SESSION_ENGINE=...backends.cache -> redis://redis:6379/1),
+    # so an unpersisted Redis logs out every user on every restart — mid-call.
+    #
+    # A NAMED volume, not a bind mount: Docker creates a missing bind-mount
+    # source as root:root, the image drops to uid 999, and Redis crash-loops
+    # on "Can't open the append only file: Permission denied".
+    #
+    # noeviction because this Redis holds sessions: under an LRU policy Redis
+    # would silently evict logged-in users to reclaim memory.
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *logging
+
+  backend:
+    image: lasuite/meet-backend:v1.24.0
+    restart: unless-stopped
+    volumes:
+      # DATA_DIR=/data, MEDIA_ROOT=/data/media, STATIC_ROOT=/data/static
+      # (settings.py:85,126,128). Upstream mounts nothing here, so anything
+      # written lives in the container's writable layer and is destroyed on
+      # the next image change. Harmless for the v1 feature set; silent data
+      # loss the moment any upload feature is enabled.
+      - ./data/backend:/data
+    logging: *logging
+
+  frontend:
+    image: lasuite/meet-frontend:v1.24.0
+    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=${MEET_HOST}
+      - VIRTUAL_PORT=8083
+      - LETSENCRYPT_HOST=${MEET_HOST}
+    volumes:
+      # Serves FRONTEND_CUSTOM_CSS_URL=/custom/style.css and
+      # DJANGO_EMAIL_LOGO_IMG=.../custom/logo.png. Without this both return
+      # 200 text/html (the SPA fallback), never 404 — so a missing mount looks
+      # like a working URL. See scripts/check-hygiene.sh and RUNBOOK §8.
+      #
+      # NEVER bind-mount a DIRECTORY over /usr/share/nginx/html/assets: that
+      # replaces Vite's build output (index-*.js, index-*.css, the MediaPipe
+      # wasm) and the app will not boot. Asset overrides must be per-file.
+      - ./custom:/usr/share/nginx/html/custom:ro
+    networks:
+      - proxy-tier
+      - default
+    logging: *logging
+
+  livekit:
+    image: livekit/livekit-server:v1.13.4
+    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=${LIVEKIT_HOST}
+      - VIRTUAL_PORT=7880
+      - LETSENCRYPT_HOST=${LIVEKIT_HOST}
+    ports:
+      # TURN over UDP/443. nginx-proxy binds 443/TCP only, so 443/UDP is free
+      # — no second IP required. Needs the turn: block in livekit-server.yaml.
+      - "443:443/udp"
+      # TURN relay allocations. LiveKit defaults this range to 30000-40000;
+      # narrowed here so the published range stays manageable. Must match
+      # relay_range_start/end in livekit-server.yaml, and must be open in BOTH
+      # ufw and the Scaleway security group.
+      #
+      # This expands to 101 individual published ports. Set
+      #   {"userland-proxy": false}
+      # in /etc/docker/daemon.json and restart dockerd, or Docker spawns one
+      # docker-proxy process per port.
+      - "30000-30100:30000-30100/udp"
+    depends_on:
+      redis:
+        # Upstream uses service_started. With no restart policy, losing the
+        # boot race against Redis left LiveKit down permanently.
+        condition: service_healthy
+    networks:
+      - proxy-tier
+      - default
+    logging: *logging
+
+networks:
+  proxy-tier:
+    external: true
+
+volumes:
+  redis-data:
