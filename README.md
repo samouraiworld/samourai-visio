@@ -28,17 +28,31 @@ Related but separate:
 
 ```
 RUNBOOK.md          Step-by-step deployment. Start here.
-docs/               Strategy + audit
-deploy/             compose config, env templates (.example only — no secrets)
-theme/custom.css    Runtime branding via FRONTEND_CSS_URL
+docs/               Strategy, drift verification, plan, expert review
+deploy/             compose overrides + env templates (.example only — no secrets)
+scripts/            CI gates, runnable locally
+theme/custom.css    Runtime branding via FRONTEND_CUSTOM_CSS_URL
 ```
 
 ## Quick orientation
 
 - **Auth**: Clerk, as OIDC provider. Verified: `https://clerk.samourai.app/.well-known/openid-configuration`
-- **Access**: `ALLOW_UNREGISTERED_ROOMS=True` — guests join by link with no account; login only to *create* a room
-- **Branding**: `FRONTEND_CSS_URL` injects CSS at runtime. No fork, survives upstream upgrades
+- **Access**: `ALLOW_UNREGISTERED_ROOMS=True` — a room materialises from any URL, so **no account is needed to create one**. What an account buys is a *persistent, owned, administrable* room. See [RUNBOOK §4 trap 1](RUNBOOK.md)
+- **Branding**: `FRONTEND_CUSTOM_CSS_URL` injects CSS at runtime. No fork, survives upstream upgrades. Tokens are **Panda CSS** (`--colors-*`), not Cunningham
 - **Not in v1**: recording, transcription, telephony
+
+## Before you touch anything
+
+Read [docs/DRIFT_REPORT_2026-07-22.md](docs/DRIFT_REPORT_2026-07-22.md) and
+[docs/CTO_REVIEW_2026-07-22.md](docs/CTO_REVIEW_2026-07-22.md). Several settings in this
+stack fail **silently** when misconfigured — a wrong env var name, a JSON list where a
+comma-separated one is expected, or a missing bind-mount all yield a perfectly healthy
+stack that does the wrong thing. The gates in `scripts/` encode those lessons; run them
+locally before pushing:
+
+```bash
+scripts/check-hygiene.sh && scripts/check-upstream-contract.sh && scripts/check-contrast.py
+```
 
 ## Secrets
 
