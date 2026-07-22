@@ -63,6 +63,12 @@ frontchannel_logout     false                   ← no logout endpoint (see §4 
 
 1. Name: `Visio Samouraï`
 2. Scopes: **`openid`, `email`, `profile`** — `profile` is required or user names arrive empty
+
+> [!WARNING]
+> **The `profile` scope is necessary but not sufficient, and on this instance it is currently not enough.**
+> Audited 2026-07-22: `first_name` and `last_name` are **disabled** on `clerk.samourai.app`, so the sign-up form collects no name, `userinfo` carries no `given_name`/`family_name`, and `full_name` is `NULL` for every user — regardless of scopes or env vars.
+> Re-check with `scripts/audit-clerk-instance.sh`. Options, tradeoffs and a recommendation: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md).
+> Enabling those attributes changes the sign-up form for **Memba and Zentai** as well — this instance is shared.
 3. Redirect URI — exactly:
    ```
    https://visio.samourai.app/api/v1.0/callback/
