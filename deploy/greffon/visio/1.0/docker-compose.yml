@@ -1,0 +1,148 @@
+version: "3"
+
+# Samouraï Visio — La Suite Meet (suitenumerique/meet), Clerk-backed variant for
+# the Greffon catalog. DRAFT — see NOTES.md for the open gates before shipping.
+#
+# Differs from greffon-catalog's stock visio/1.0 demo:
+#   - Auth: the external Samouraï Clerk org, NOT a bundled Keycloak.
+#   - No recording in v1: no MinIO, no Celery, no object storage.
+#   - Pins v1.24.0 (demo is v1.19.0) and applies our verified config fixes
+#     (profile scope, comma-separated OIDC lists, preferred_username, PKCE).
+#   - Our theme is injected at /custom/style.css.
+#
+# Single public origin (Greffon terminates TLS and fronts the gateway):
+#   {{ instance_url }}/            -> frontend (Next.js)
+#   {{ instance_url }}/api /admin  -> backend  (Django/DRF)
+#   {{ instance_url }}/livekit/    -> livekit:7880 (WebRTC signaling, WebSocket)
+# WebRTC media: one UDP port published directly on the host as the L4 port.
+
+services:
+  gateway:
+    # Declared FIRST: the greffer enumerates ports in service order, and the
+    # CI smoke harness probes the first one — it must land on this HTTP gateway,
+    # not livekit's L4 media port.
+    image: nginx:1.25
+    restart: on-failure
+    depends_on:
+      - backend
+      - frontend
+      - livekit
+    volumes:
+      - gateway_conf:/etc/nginx/conf.d
+    ports:
+      - "8083:8083"
+
+  postgresql:
+    image: postgres:16
+    restart: on-failure
+    environment:
+      POSTGRES_DB: meet
+      POSTGRES_USER: meet
+      # POSTGRES_PASSWORD injected (shared with backend DB_PASSWORD)
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    # 7-alpine + appendonly: sessions are cache-backed into Redis, so an
+    # unpersisted Redis would log everyone out on restart.
+    image: redis:7-alpine
+    restart: on-failure
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis_data:/data
+
+  livekit:
+    image: livekit/livekit-server:v1.13.4
+    restart: on-failure
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - livekit_conf:/etc
+    # 7880 (signaling) is internal, reached through the gateway. 7882/udp is the
+    # single media port, published as an L4 same_port UDP port (see metadata).
+    ports:
+      - "7882:7882/udp"
+
+  backend:
+    image: lasuite/meet-backend:v1.24.0
+    restart: on-failure
+    command: >
+      sh -c "python manage.py migrate --no-input &&
+             exec gunicorn -c /usr/local/etc/gunicorn/meet.py meet.wsgi:application"
+    depends_on:
+      - postgresql
+      - redis
+      - livekit
+    environment:
+      DJANGO_SETTINGS_MODULE: meet.settings
+      DJANGO_CONFIGURATION: Production
+      PYTHONPATH: /app
+      # gateway is allowed so LiveKit webhooks (routed via http://gateway:8083)
+      # carry X-Forwarded-Proto: https and don't trip SECURE_SSL_REDIRECT.
+      DJANGO_ALLOWED_HOSTS: '{{ instance_url.split("://")[1] }},localhost,backend,gateway'
+      DJANGO_CSRF_TRUSTED_ORIGINS: "{{ instance_url }}"
+      # DJANGO_SECRET_KEY injected (greffon-secret)
+      MEET_BASE_URL: "{{ instance_url }}"
+      DB_HOST: postgresql
+      DB_NAME: meet
+      DB_USER: meet
+      DB_PORT: "5432"
+      # DB_PASSWORD injected (shared with postgresql)
+      REDIS_URL: redis://redis:6379/1
+      # LiveKit: API calls are server-side (internal address); the join token
+      # handed to the browser carries the PUBLIC wss URL via the gateway.
+      LIVEKIT_API_KEY: meet
+      # LIVEKIT_API_SECRET injected (shared with the rendered livekit.yaml)
+      LIVEKIT_API_URL: "wss://{{ instance_url.split('://')[1] }}/livekit"
+      LIVEKIT_VERIFY_SSL: "false"
+      LIVEKIT_FORCE_WSS_PROTOCOL: "true"
+      ALLOW_UNREGISTERED_ROOMS: "true"
+      # ── OIDC — Samouraï Clerk (external, fixed) ──
+      OIDC_OP_JWKS_ENDPOINT: "https://clerk.samourai.app/.well-known/jwks.json"
+      OIDC_OP_AUTHORIZATION_ENDPOINT: "https://clerk.samourai.app/oauth/authorize"
+      OIDC_OP_TOKEN_ENDPOINT: "https://clerk.samourai.app/oauth/token"
+      OIDC_OP_USER_ENDPOINT: "https://clerk.samourai.app/oauth/userinfo"
+      # OIDC_OP_LOGOUT_ENDPOINT deliberately unset — Clerk advertises none.
+      # OIDC_RP_CLIENT_ID / _SECRET injected (operator-supplied, from Clerk).
+      OIDC_RP_SIGN_ALGO: RS256
+      OIDC_RP_SCOPES: "openid email profile"
+      # Comma-separated, NOT JSON (values.ListValue splits on ','). Single token.
+      OIDC_USERINFO_FULLNAME_FIELDS: preferred_username
+      OIDC_USERINFO_SHORTNAME_FIELD: preferred_username
+      OIDC_USERINFO_ESSENTIAL_CLAIMS: email
+      OIDC_USE_PKCE: "true"
+      OIDC_PKCE_CODE_CHALLENGE_METHOD: S256
+      OIDC_CREATE_USER: "true"
+      OIDC_REDIRECT_REQUIRE_HTTPS: "true"
+      # Host only — no scheme, no brackets.
+      OIDC_REDIRECT_ALLOWED_HOSTS: '{{ instance_url.split("://")[1] }}'
+      OIDC_STORE_ID_TOKEN: "false"
+      LOGIN_REDIRECT_URL: "{{ instance_url }}"
+      LOGIN_REDIRECT_URL_FAILURE: "{{ instance_url }}"
+      LOGOUT_REDIRECT_URL: "{{ instance_url }}"
+      # Our runtime theme, served same-origin from the frontend mount below.
+      FRONTEND_CUSTOM_CSS_URL: /custom/style.css
+      # ── Mail (operator SMTP integration; stripped when unset) ──
+      DJANGO_EMAIL_HOST: "{{ smtp.host }}"
+      DJANGO_EMAIL_PORT: "{{ smtp.port }}"
+      DJANGO_EMAIL_HOST_USER: "{{ smtp.username }}"
+      DJANGO_EMAIL_HOST_PASSWORD: "{{ smtp.password }}"
+      DJANGO_EMAIL_FROM: "{{ smtp.from_address }}"
+      DJANGO_EMAIL_USE_TLS: '{{ "true" if smtp.tls_mode == "starttls" else "false" }}'
+      DJANGO_EMAIL_USE_SSL: '{{ "true" if smtp.tls_mode == "tls" else "false" }}'
+
+  frontend:
+    image: lasuite/meet-frontend:v1.24.0
+    restart: on-failure
+    depends_on:
+      - backend
+    # Internal-only (gateway reaches frontend:8080). The theme volume is served
+    # same-origin at /custom/style.css by the frontend's own nginx.
+    volumes:
+      - frontend_custom:/usr/share/nginx/html/custom:ro
+
+volumes:
+  postgres_data:
+  redis_data:
+  gateway_conf:
+  livekit_conf:
+  frontend_custom:
