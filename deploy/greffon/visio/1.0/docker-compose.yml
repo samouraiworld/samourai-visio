@@ -45,7 +45,7 @@ services:
   redis:
     # 7-alpine + appendonly: sessions are cache-backed into Redis, so an
     # unpersisted Redis would log everyone out on restart.
-    image: redis:7-alpine
+    image: redis:7.4-alpine
     restart: on-failure
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:

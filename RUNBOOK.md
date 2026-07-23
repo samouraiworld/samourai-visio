@@ -235,8 +235,10 @@ OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
 # Comma-separated. NOT JSON — see trap 2.
-OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
-OIDC_USERINFO_SHORTNAME_FIELD=given_name
+# preferred_username, because this Clerk instance collects no first/last name
+# (see the Clerk audit). Requires `username` enabled in Clerk. See trap 3.
+OIDC_USERINFO_FULLNAME_FIELDS=preferred_username
+OIDC_USERINFO_SHORTNAME_FIELD=preferred_username
 OIDC_USERINFO_ESSENTIAL_CLAIMS=email
 
 OIDC_USE_PKCE=true
@@ -274,11 +276,11 @@ What it actually does (`core/api/viewsets.py:257-277`): it fires **only** when `
 **2. List settings are comma-separated, not JSON.**
 `values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) and never reads JSON. `["given_name","family_name"]` becomes `['["given_name"', '"family_name"]']`, so `user_info.get(...)` returns `None` and **every display name is empty**. There is no error. Upstream's own template gets this wrong at `env.d/production.dist/common:44`. Affects `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
 
-**3. `OIDC_USERINFO_FULLNAME_FIELDS` — you must override the default.**
-Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim; Clerk does not emit it (see §1 `claims_supported`). Leave the default and every user's display name is broken. Set `given_name,family_name` — obeying trap 2.
+**3. `OIDC_USERINFO_FULLNAME_FIELDS` — override the default, and match it to what the instance actually collects.**
+Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md)), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
 
 **4. `OIDC_RP_SCOPES` — the default is too narrow.**
-Default is `"openid email"` (`settings.py:533`). Without `profile` you get no `given_name`/`family_name` and names render empty regardless of trap 3. Note that the scope is necessary but **not sufficient**: Clerk emits these claims only if the *instance* collects first/last name, which is a setting shared with every other `*.samourai.app` product.
+Default is `"openid email"` (`settings.py:533`). Without `profile` you get no profile claims — including `preferred_username` — and names render empty regardless of trap 3. The scope is necessary but **not sufficient**: Clerk emits `preferred_username` only if the instance has **`username` enabled**, a setting shared with every other `*.samourai.app` product.
 
 **5. No logout endpoint.**
 Clerk reports `backchannel_logout_supported: false` and `frontchannel_logout_supported: false`. Leave `OIDC_OP_LOGOUT_ENDPOINT` unset. Consequence: signing out of Meet clears the local Django session but **not** the Clerk SSO session — clicking "log out" then "log in" silently re-authenticates. Acceptable for a shared-SSO product; surprising if you don't expect it. If you need true logout, redirect to Clerk's sign-out URL after `LOGOUT_REDIRECT_URL`.
