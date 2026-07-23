@@ -37,7 +37,7 @@ Nothing past step 2 works without these. Get them first.
 | 0.2 | **Server IP + SSH access** | The host to deploy on. |
 | 0.3 | **Clerk OAuth app** → `OIDC_RP_CLIENT_ID` + secret | Register redirect URI **exactly** `https://visio.samourai.app/api/v1.0/callback/`. Scopes `openid email profile`. Secret is shown once. |
 | 0.4 | **Clerk: enable `username`** | Without it, every display name is empty — see [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md). Owner action in the Clerk dashboard. |
-| 0.5 | **Resend API key** + SPF/DKIM on `samourai.app` | Invitation emails. DNS change on the shared apex — coordinate it. |
+| 0.5 | **Scaleway TEM** — a verified sending domain + an API key | Invitation emails, via Scaleway Transactional Email (French/EU). Verify the domain in TEM (SPF + DKIM + DMARC on the shared apex — coordinate it); username is the Project ID, password the API secret key. |
 | 0.6 | **Brand assets** | `logo.png` for emails; favicons. The CSS theme is already in the repo (`theme/custom.css`). |
 
 DNS (owner or ops): `visio.samourai.app` **and** `livekit.samourai.app` → the
