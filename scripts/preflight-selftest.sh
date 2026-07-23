@@ -14,9 +14,9 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 WORK="$(mktemp -d)"
-# shellcheck disable=SC2329  # invoked indirectly via trap
-cleanup() { chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"; }
-trap cleanup EXIT
+# Inlined rather than a named function: shellcheck flags an unreachable trap
+# body (SC2317/SC2329) differently across versions, and this avoids both.
+trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 export VISIO_DIR="$WORK"
 rc=0
