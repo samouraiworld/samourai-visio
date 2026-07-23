@@ -1,0 +1,292 @@
+{
+  "name": "Samouraï Visio",
+  "min_greffer_version": "0.3.3",
+  "logo": "https://raw.githubusercontent.com/suitenumerique/meet/v1.24.0/src/frontend/public/android-chrome-512x512.png",
+  "description": "Free video conferencing by Samouraï Coop — La Suite Meet (DINUM), themed and authenticated against the Samouraï Clerk SSO. Guests join by link with no account. WebRTC media uses one UDP port published on the host. Requires: a Clerk OAuth application whose redirect URI is set to {{ instance_url }}/api/v1.0/callback/, and this instance bound to a stable domain. No recording in v1.",
+  "categories": [
+    "productivity",
+    "collaboration"
+  ],
+  "images": [],
+  "ports": [
+    {
+      "name": "gateway_8083",
+      "exposure_tier": "http",
+      "protocol": "tcp"
+    },
+    {
+      "name": "livekit_7882",
+      "exposure_tier": "l4",
+      "protocol": "udp",
+      "same_port": true,
+      "udp_reviewed": true
+    }
+  ],
+  "configurations": [
+    {
+      "title": "Gateway routing config",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "data-url",
+            "title": "nginx gateway default.conf"
+          }
+        },
+        "x-greffon-visibility": "hidden"
+      },
+      "default_value": {
+        "file": "data:text/plain;base64,Cm1hcCAkaHR0cF91cGdyYWRlICRjb25uZWN0aW9uX3VwZ3JhZGUgeyBkZWZhdWx0IHVwZ3JhZGU7ICcnIGNsb3NlOyB9CgpzZXJ2ZXIgewogICAgbGlzdGVuIDgwODM7CiAgICBzZXJ2ZXJfbmFtZSBfOwogICAgY2hhcnNldCB1dGYtODsKICAgIGNsaWVudF9tYXhfYm9keV9zaXplIDEwME07CgogICAgbG9jYXRpb24gL2FwaS8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovL2JhY2tlbmQ6ODAwMDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgIH0KICAgIGxvY2F0aW9uIC9hZG1pbi8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovL2JhY2tlbmQ6ODAwMDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgIH0KICAgIGxvY2F0aW9uIC9zdGF0aWMvIHsKICAgICAgICBwcm94eV9wYXNzIGh0dHA6Ly9iYWNrZW5kOjgwMDA7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBIb3N0ICRob3N0OwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgWC1Gb3J3YXJkZWQtUHJvdG8gaHR0cHM7CiAgICB9CgogICAgIyBMaXZlS2l0IHNpZ25hbGluZyAoV2ViU29ja2V0KS4gVHJhaWxpbmcgc2xhc2ggc3RyaXBzIHRoZSAvbGl2ZWtpdCBwcmVmaXgKICAgICMgc28gdGhlIGNsaWVudCdzIC9saXZla2l0L3J0YyByZWFjaGVzIGxpdmVraXQ6Nzg4MC9ydGMuCiAgICBsb2NhdGlvbiAvbGl2ZWtpdC8gewogICAgICAgIHByb3h5X3Bhc3MgaHR0cDovL2xpdmVraXQ6Nzg4MC87CiAgICAgICAgcHJveHlfaHR0cF92ZXJzaW9uIDEuMTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFVwZ3JhZGUgJGh0dHBfdXBncmFkZTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIENvbm5lY3Rpb24gJGNvbm5lY3Rpb25fdXBncmFkZTsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIEhvc3QgJGhvc3Q7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgICAgICBwcm94eV9yZWFkX3RpbWVvdXQgODY0MDA7CiAgICB9CgogICAgbG9jYXRpb24gLyB7CiAgICAgICAgcHJveHlfcGFzcyBodHRwOi8vZnJvbnRlbmQ6ODA4MDsKICAgICAgICBwcm94eV9odHRwX3ZlcnNpb24gMS4xOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgVXBncmFkZSAkaHR0cF91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgQ29ubmVjdGlvbiAkY29ubmVjdGlvbl91cGdyYWRlOwogICAgICAgIHByb3h5X3NldF9oZWFkZXIgSG9zdCAkaG9zdDsKICAgICAgICBwcm94eV9zZXRfaGVhZGVyIFgtUmVhbC1JUCAkcmVtb3RlX2FkZHI7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Gb3IgJHByb3h5X2FkZF94X2ZvcndhcmRlZF9mb3I7CiAgICAgICAgcHJveHlfc2V0X2hlYWRlciBYLUZvcndhcmRlZC1Qcm90byBodHRwczsKICAgIH0KfQo="
+      },
+      "destinations": [
+        {
+          "type": "file",
+          "volume": "gateway_conf",
+          "name": "default.conf"
+        }
+      ]
+    },
+    {
+      "title": "LiveKit config",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "data-url",
+            "title": "livekit.yaml"
+          }
+        },
+        "x-greffon-visibility": "hidden"
+      },
+      "default_value": {
+        "file": "data:text/plain;base64,cG9ydDogNzg4MApiaW5kX2FkZHJlc3NlczoKICAtICIwLjAuMC4wIgpydGM6CiAgIyBTaW5nbGUgVURQIG1lZGlhIHBvcnQsIHB1Ymxpc2hlZCBkaXJlY3RseSBvbiB0aGUgaG9zdCBhcyB0aGUgTDQgcG9ydC4KICAjIGFkdmVydGlzZSAobm9kZV9pcCkgPT0gbGlzdGVuICh1ZHBfcG9ydCkgPT0gcHVibGljLCBpbiBwcm94eSBhbmQgdHVubmVsIG1vZGUuCiAgdWRwX3BvcnQ6IHt7IGluc3RhbmNlX2w0X3BvcnQgfX0KICB1c2VfZXh0ZXJuYWxfaXA6IGZhbHNlCiAgbm9kZV9pcDoge3sgaW5zdGFuY2VfbDRfaG9zdCB9fQogIGVuYWJsZV9sb29wYmFja19jYW5kaWRhdGU6IGZhbHNlCmtleXM6CiAgbWVldDogInt7IGNvbmZpZy5MSVZFS0lUX0FQSV9TRUNSRVQgfX0iCndlYmhvb2s6CiAgYXBpX2tleTogbWVldAogIHVybHM6CiAgICAtIGh0dHA6Ly9nYXRld2F5OjgwODMvYXBpL3YxLjAvcm9vbXMvd2ViaG9va3MtbGl2ZWtpdC8KbG9nZ2luZzoKICBsZXZlbDogaW5mbwogIGpzb246IGZhbHNlCg=="
+      },
+      "destinations": [
+        {
+          "type": "file",
+          "volume": "livekit_conf",
+          "name": "livekit.yaml",
+          "x-greffon-render": true
+        }
+      ]
+    },
+    {
+      "title": "Samouraï theme",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "data-url",
+            "title": "custom style.css"
+          }
+        },
+        "x-greffon-visibility": "hidden"
+      },
+      "default_value": {
+        "file": "data:text/css;base64,Lyog4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSA4pSACiAgIFNhbW91cmHDryBWaXNpbyDigJQgcnVudGltZSB0aGVtZSBvdmVyIExhIFN1aXRlIE1lZXQgdjEuMjQuMAogICBMb2FkZWQgdmlhIEZST05URU5EX0NVU1RPTV9DU1NfVVJMIChhIEJBQ0tFTkQgc2V0dGluZykgLT4KICAgL2FwaS92MS4wL2NvbmZpZy8gLT4gQXBwSW5pdGlhbGl6YXRpb24udHN4IGFwcGVuZHMgPGxpbms+IHRvIDxoZWFkPi4KCiAgIFRva2VuIGF1dGhvcml0eTogdGhlIENTUyBlbWl0dGVkIGJ5IEBwYW5kYWNzcy9kZXYgZnJvbQogICBzcmMvZnJvbnRlbmQvcGFuZGEuY29uZmlnLnRzLiBNZWV0IG1pZ3JhdGVkIE9GRiBDdW5uaW5naGFtLCBzbwogICBldmVyeSBgLS1jLS10aGVtZS0tKmAgbmFtZSBpcyBkZWFkIGFuZCBmYWlscyBzaWxlbnRseS4gTm8gY3NzVmFyCiAgIHByZWZpeCBpcyBjb25maWd1cmVkLCBzbyB2YXJzIGFyZSAtLWNvbG9ycy0qIC8gLS1mb250cy0qLCB3aXRoCiAgIGNhbWVsQ2FzZSBrZWJhYi1jYXNlZCAocHJpbWFyeURhcmsgLT4gLS1jb2xvcnMtcHJpbWFyeS1kYXJrLSosCiAgIGZvY3VzUmluZyAtPiAtLWNvbG9ycy1mb2N1cy1yaW5nKS4KCiAgIENSSVRJQ0FMOiB0aGUgYXBwIHJlYWRzIHRoZSBQQUxFVFRFIHJhbXAgZmFyIG1vcmUgdGhhbiB0aGUKICAgc2VtYW50aWMgdGllci4gYnV0dG9uUmVjaXBlLnRzOjU2IHBhaW50cyB0aGUgcHJpbWFyeSBidXR0b24gZnJvbQogICBgcHJpbWFyeS44MDBgIHdpdGggYSBMSVRFUkFMIGB3aGl0ZWAsIG5vdCBgcHJpbWFyeS50ZXh0YC4KICAgT3ZlcnJpZGluZyBvbmx5IC0tY29sb3JzLXByaW1hcnkgbGVhdmVzIGV2ZXJ5IGJ1dHRvbiBCbGV1IEZyYW5jZS4KCiAgIE1lZXQgaGFzIG5vIGxpZ2h0L2RhcmsgdG9nZ2xlOiBMSUdIVCBvdXRzaWRlIGEgbWVldGluZywgREFSSwogICBpbnNpZGUgYSByb29tLiBUaG9zZSBhcmUgdHdvIGRpZmZlcmVudCByYW1wcywgYm90aCBsaXZlIGF0IG9uY2UuCgogICBObyAhaW1wb3J0YW50IOKAlCBhbiB1bmxheWVyZWQgOnJvb3QgYWxyZWFkeSBiZWF0cyBQYW5kYSdzCiAgIEBsYXllciB0b2tlbnMsIGFuZCAhaW1wb3J0YW50IHdvdWxkIGJyZWFrIHRoZSBodG1sLmZvbnQtbGV4ZW5kCiAgIGFjY2Vzc2liaWxpdHkgb3ZlcnJpZGUuCgogICBDb250cmFzdCByYXRpb3MgYmVsb3cgYXJlIG1lYXN1cmVkLiBHdWFyZGVkIGJ5CiAgIHNjcmlwdHMvY2hlY2stY29udHJhc3QucHkgaW4gQ0kuCiAgIOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgOKUgCAqLwoKQGltcG9ydCB1cmwoJ2h0dHBzOi8vZm9udHMuYnVubnkubmV0L2Nzcz9mYW1pbHk9aW50ZXI6NDAwLDUwMCw2MDAsNzAwJmRpc3BsYXk9c3dhcCcpOwoKOnJvb3QgewogIC8qIOKUgOKUgCBMSUdIVCBTVVJGQUNFIChvdXRzaWRlIGEgcm9vbSkg4oCUIHBhbGV0dGUgcmFtcCDilIDilIAKICAgICBCcmFuZCBjb3JhbCAjRkQ2MjYyIGlzIDIuOTY6MSBvbiB3aGl0ZS4gSXQgZmFpbHMgQUEgdGV4dCAoNC41OjEpCiAgICAgQU5EIHRoZSBub24tdGV4dCBtaW5pbXVtICgzOjEpLCBzbyBpdCBjYW5ub3QgY2Fycnkgd2hpdGUgdGV4dCBhbmQKICAgICBjYW5ub3QgYmUgYSBVSSBib3VuZGFyeS4gSXQgc3RheXMgYXQgLjUwMCBhcyBhIGRlY29yYXRpdmUgYWNjZW50CiAgICAgd2hpbGUgdGhlIGZpbGwgYW5kIHRleHQgc3RlcHMgZGFya2VuIHRvIGNsZWFyIEFBLiAqLwogIC0tY29sb3JzLXByaW1hcnktNTA6ICAgI0ZGRjZGNjsKICAtLWNvbG9ycy1wcmltYXJ5LTEwMDogICNGRUVDRUM7ICAgLyogdGVydGlhcnkgYnV0dG9uIGJnICovCiAgLS1jb2xvcnMtcHJpbWFyeS0yMDA6ICAjRkRFMkUyOyAgIC8qIExvZ2luSGludCBiZyDigJQgaW5rIDE0Ljg6MSAqLwogIC0tY29sb3JzLXByaW1hcnktMzAwOiAgI0ZCRDVENTsgICAvKiB0ZXJ0aWFyeSBob3ZlciBiZyAqLwogIC0tY29sb3JzLXByaW1hcnktNDAwOiAgI0Y1OEE4QTsgICAvKiBkaXNhYmxlZCB0ZXh0IG9ubHkgKFdDQUctZXhlbXB0KSAqLwogIC0tY29sb3JzLXByaW1hcnktNTAwOiAgI0ZENjI2MjsgICAvKiBLb2RlcmEgY29yYWwsIGRlY29yYXRpdmUgKi8KICAtLWNvbG9ycy1wcmltYXJ5LTYwMDogICNBNjNBM0E7ICAgLyogZm9jdXMgYm94LXNoYWRvdyByaW5nICovCiAgLS1jb2xvcnMtcHJpbWFyeS03MDA6ICAjOEYyRTJFOwogIC0tY29sb3JzLXByaW1hcnktODAwOiAgI0I4MzYzNjsgICAvKiBQUklNQVJZIEJVVFRPTiBGSUxMICsgbGluay9ib3JkZXIgdGV4dAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAoMjAgdXNhZ2VzIOKAlCB0aGUgYnJhbmQgbGl2ZXMgaGVyZSkKICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgd2hpdGUgb24gaXQgNS44MDoxIMK3IG9uIHdoaXRlIDUuODA6MSAqLwogIC0tY29sb3JzLXByaW1hcnktOTAwOiAgIzhGMkUyRTsgICAvKiB0ZXJ0aWFyeVRleHQg4oCUIDguMDg6MSBvbiB3aGl0ZSAqLwogIC0tY29sb3JzLXByaW1hcnktOTUwOiAgIzVDMUUxRTsKICAtLWNvbG9ycy1wcmltYXJ5LWFjdGlvbjogI0E2M0EzQTsgLyogcHJpbWFyeSBidXR0b24gaG92ZXIg4oCUIDYuMzk6MSAqLwoKICAvKiDilIDilIAgTElHSFQgU1VSRkFDRSDigJQgc2VtYW50aWMgdGllciDilIDilIAKICAgICBBbHNvIGZlZWRzIHRoZSBMaXZlS2l0IGFjY2VudCBjaGFpbiAobGl2ZWtpdC5jc3M6MTQtMTgpLCBzbyB0aGVzZQogICAgIG11c3QgcmVhZCBvbiBCT1RIIHdoaXRlIGFuZCB0aGUgIzE0MTQxNiByb29tIHN1cmZhY2UuICovCiAgLS1jb2xvcnMtcHJpbWFyeTogICAgICAgICAgICAgI0NDNDQ0NDsgIC8qIHdoaXRlIG9uIGl0IDQuNjk6MSDCtyB2cyByb29tIDMuOTI6MSAqLwogIC0tY29sb3JzLXByaW1hcnktaG92ZXI6ICAgICAgICNCODM2MzY7ICAvKiA1LjgwOjEgKi8KICAtLWNvbG9ycy1wcmltYXJ5LWFjdGl2ZTogICAgICAjQTYzQTNBOyAgLyogNi4zOToxICovCiAgLS1jb2xvcnMtcHJpbWFyeS10ZXh0OiAgICAgICAgI0ZGRkZGRjsgIC8qIHN0cnVjdHVyYWxseSBmb3JjZWQgd2hpdGU6IHBhaXJlZCB3aXRoCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHByaW1hcnksIHByaW1hcnkuYWN0aXZlLCBwcmltYXJ5LjgwMAogICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBBTkQgcHJpbWFyeURhcmsuMTAwIOKAlCBubyBzaW5nbGUgaW5rCiAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIHNhdGlzZmllcyBhbGwgZm91ciAqLwogIC0tY29sb3JzLXByaW1hcnktc3VidGxlOiAgICAgICNGRUVDRUM7CiAgLS1jb2xvcnMtcHJpbWFyeS1zdWJ0bGUtdGV4dDogIzhGMkUyRTsgIC8qIEJhZGdlIOKAlCA3LjA5OjEgb24gd2hpdGUgKi8KCiAgLyog4pSA4pSAIERBUksgU1VSRkFDRSAoaW5zaWRlIGEgcm9vbSkg4pSA4pSACiAgICAgTHVtaW5hbmNlLW1hdGNoZWQgdG8gdXBzdHJlYW0ncyByYW1wIHNvIGV2ZXJ5IGNvbnRyYXN0IHJlbGF0aW9uIHRoZQogICAgIHVwc3RyZWFtIGRlc2lnbmVycyBidWlsdCBpcyBwcmVzZXJ2ZWQsIHRoZW4gcmVodWVkIHRvIFNhbW91cmHDrwogICAgIGxhdmVuZGVyLiBUaGlzIHJhbXAgaXMgd2hlcmUgdGhlIGJyYW5kJ3MgIzg4OUNFNyBiZWxvbmdzOiB1cHN0cmVhbSdzCiAgICAgcHJpbWFyeURhcmsgSVMgYSBsYXZlbmRlci1pbmRpZ28gKGl0cyBkZWZhdWx0IC41MDAgaXMgIzg3ODdENykuCgogICAgIC4xMDAgaXMgdGhlIHdvcmtob3JzZSAoMjcgdXNhZ2VzOiBidXR0b25zLCB0b29sdGlwcywgbWVudXMsIHBvcG92ZXJzKS4KICAgICAuNTAwIGFuZCAuYWN0aW9uIGhhdmUgWkVSTyB1c2FnZXMgaW4gdjEuMjQuMCDigJQgc2V0IGZvciBmb3J3YXJkLWNvbXBhdC4KICAgICAuNzAwIGFuZCAuOTAwIGFyZSBJTlZFUlRFRCAobGlnaHQpIHNlbGVjdGVkIHN0YXRlczogZGFya2VuaW5nIHRoZW0KICAgICB3b3VsZCBicmVhayB0aGUgc2VsZWN0ZWQtc3RhdGUgY29udHJhc3QgZW50aXJlbHkuICovCiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTUwOiAgICAgIzE0MTQxNjsgIC8qIEtvZGVyYSBiZyDigJQgcm9vbSBjYW52YXMsIHdoaXRlIDE4LjQ6MSAqLwogIC0tY29sb3JzLXByaW1hcnktZGFyay03NTogICAgICMyMjI0Mjk7CiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTEwMDogICAgIzJEMzAzNzsgIC8qIGluLXJvb20gYnV0dG9uIOKAlCB3aGl0ZSAxMy4yOjEgKi8KICAtLWNvbG9ycy1wcmltYXJ5LWRhcmstMjAwOiAgICAjNDM0NjU1OwogIC0tY29sb3JzLXByaW1hcnktZGFyay0zMDA6ICAgICM1ODVFNzU7ICAvKiBob3ZlciDigJQgd2hpdGUgNi40MjoxICovCiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTQwMDogICAgIzZCNzU5QzsKICAtLWNvbG9ycy1wcmltYXJ5LWRhcmstNTAwOiAgICAjODg5Q0U3OyAgLyogU2Ftb3VyYcOvIGxhdmVuZGVyICh1bnVzZWQgaW4gMS4yNC4wKSAqLwogIC0tY29sb3JzLXByaW1hcnktZGFyay02MDA6ICAgICM5NkEyQ0M7CiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTcwMDogICAgI0FDQjdERjsgIC8qIGludmVydGVkIOKAlCAuMTAwIHRleHQgb24gaXQgNi42NjoxICovCiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTgwMDogICAgI0M0Q0JFOTsKICAtLWNvbG9ycy1wcmltYXJ5LWRhcmstOTAwOiAgICAjRENFMUYyOyAgLyogb3BlbiBzZWxlY3Qg4oCUIC4xMDAgdGV4dCAxMC4xMzoxICovCiAgLS1jb2xvcnMtcHJpbWFyeS1kYXJrLTk1MDogICAgI0Y0RjVGQjsKCiAgLyog4pSA4pSAIEZvY3VzIHJpbmcgKGluZGV4LmNzczozOSw0Nykg4pSA4pSACiAgICAgTXVzdCBjbGVhciAzOjEgb24gd2hpdGUgQU5EIG9uIHRoZSByb29tIGNhbnZhcy4gUHVyZSBicmFuZCBsYXZlbmRlcgogICAgICM4ODlDRTcgaXMgMi42NDoxIG9uIHdoaXRlIGFuZCBmYWlscyAxLjQuMTEg4oCUIGRhcmtlbmVkIGhlcmUuICovCiAgLS1jb2xvcnMtZm9jdXMtcmluZzogIzVDNkZCRjsgICAvKiB3aGl0ZSA0LjY5OjEgwrcgcm9vbSAzLjkzOjEgKi8KCiAgLyog4pSA4pSAIFR5cGUg4pSA4pSAICovCiAgLS1mb250cy1zYW5zOiAnSW50ZXInLCB1aS1zYW5zLXNlcmlmLCBzeXN0ZW0tdWksIC1hcHBsZS1zeXN0ZW0sIHNhbnMtc2VyaWY7Cn0KCi8qIEF0dHJpYnV0aW9uIOKAlCBNSVQgcmVxdWlyZXMgdGhlIG5vdGljZSwgZ29vZCBmYWl0aCByZXF1aXJlcyB0aGUgbGluay4KICAgVGhlcmUgaXMgTk8gZm9vdGVyIGVsZW1lbnQgdG8gaGFuZyB0aGlzIG9uOiB1c2VfZnJlbmNoX2dvdl9mb290ZXIKICAgZGVmYXVsdHMgdG8gZmFsc2UgYW5kIEZvb3Rlci50c3g6MTI1IHJldHVybnMgbnVsbC4gVGhlIG9ubHkgc3RhYmxlCiAgIGhvb2sgdXBzdHJlYW0gc2hpcHMgaXMgLkhlYWRlci1iZWZvcmVMb2dvIChIZWFkZXIudHN4OjE1MyksIHdoaWNoCiAgIGV4aXN0cyBwcmVjaXNlbHkgc28gYSBkZXBsb3llciBjYW4gaW5qZWN0IGJyYW5kaW5nLiBDU1MgYGNvbnRlbnRgCiAgIGNhbm5vdCBjYXJyeSBhIGNsaWNrYWJsZSBsaW5rLCBzbyB0aGUgcmVwbyBsaW5rIGJlbG9uZ3Mgb24gdGhlCiAgIHByb21vIHBhZ2UgYXMgd2VsbCBhcyBoZXJlLiAqLwouSGVhZGVyLWJlZm9yZUxvZ286OmFmdGVyIHsKICBjb250ZW50OiAnUHJvcHVsc8OpIHBhciBMYSBTdWl0ZSBNZWV0JzsKICBkaXNwbGF5OiBibG9jazsKICBmb250LXNpemU6IDAuNjg3NXJlbTsKICBsaW5lLWhlaWdodDogMTsKICBvcGFjaXR5OiAwLjc7CiAgbWFyZ2luLXRvcDogMC4yNXJlbTsKfQo="
+      },
+      "destinations": [
+        {
+          "type": "file",
+          "volume": "frontend_custom",
+          "name": "style.css"
+        }
+      ]
+    },
+    {
+      "title": "Django secret key",
+      "schema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Django secret key",
+            "writeOnly": true,
+            "minLength": 50,
+            "format": "greffon-secret"
+          }
+        },
+        "x-greffon-visibility": "advanced"
+      },
+      "default_value": {
+        "value": ""
+      },
+      "destinations": [
+        {
+          "type": "env",
+          "container": "backend",
+          "key": "DJANGO_SECRET_KEY"
+        }
+      ]
+    },
+    {
+      "title": "Database password",
+      "schema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Database password",
+            "writeOnly": true,
+            "minLength": 24,
+            "format": "greffon-secret"
+          }
+        },
+        "x-greffon-visibility": "advanced"
+      },
+      "default_value": {
+        "value": ""
+      },
+      "destinations": [
+        {
+          "type": "env",
+          "container": "backend",
+          "key": "DB_PASSWORD"
+        },
+        {
+          "type": "env",
+          "container": "postgresql",
+          "key": "POSTGRES_PASSWORD"
+        }
+      ]
+    },
+    {
+      "title": "LiveKit API secret",
+      "schema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "LiveKit API secret",
+            "writeOnly": true,
+            "minLength": 32,
+            "format": "greffon-secret"
+          }
+        },
+        "x-greffon-visibility": "advanced"
+      },
+      "default_value": {
+        "value": ""
+      },
+      "destinations": [
+        {
+          "type": "env",
+          "container": "backend",
+          "key": "LIVEKIT_API_SECRET"
+        }
+      ]
+    },
+    {
+      "title": "Clerk client ID",
+      "schema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Clerk client ID",
+            "description": "From the Clerk OAuth application. Register redirect URI {{ instance_url }}/api/v1.0/callback/ and scopes 'openid email profile'."
+          }
+        },
+        "x-greffon-visibility": "visible"
+      },
+      "default_value": {
+        "value": ""
+      },
+      "destinations": [
+        {
+          "type": "env",
+          "container": "backend",
+          "key": "OIDC_RP_CLIENT_ID"
+        }
+      ]
+    },
+    {
+      "title": "Clerk client secret",
+      "schema": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Clerk client secret",
+            "description": "Shown once in the Clerk dashboard when the OAuth app is created.",
+            "writeOnly": true
+          }
+        },
+        "x-greffon-visibility": "visible"
+      },
+      "default_value": {
+        "value": ""
+      },
+      "destinations": [
+        {
+          "type": "env",
+          "container": "backend",
+          "key": "OIDC_RP_CLIENT_SECRET"
+        }
+      ]
+    },
+    {
+      "title": "SMTP",
+      "schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "default_value": {},
+      "destinations": [
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_HOST"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_PORT"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_HOST_USER"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_HOST_PASSWORD"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_FROM"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_USE_TLS"
+        },
+        {
+          "type": "smtp",
+          "container": "backend",
+          "key": "DJANGO_EMAIL_USE_SSL"
+        }
+      ]
+    }
+  ]
+}
