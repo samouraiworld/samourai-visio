@@ -11,6 +11,22 @@ each stage is actually correct — not just "up".
 
 ---
 
+## Two ways to deploy
+
+- **Manual (this document).** A Scaleway host you control, Docker Compose,
+  nginx-proxy for TLS. Full control, ready now — follow the steps below.
+- **Via Greffon** ([deploy/greffon/](deploy/greffon/README.md)). Package the stack as a
+  [Greffon](https://greffon.io) catalog app: Greffon provides the reverse proxy,
+  TLS, and secret generation, and Visio joins its catalogue. A draft entry
+  exists; it is **gated on Greffon supporting a stable custom domain** (Clerk's
+  redirect URI is fixed), so until that's confirmed the manual path is the one
+  that works. The two are not exclusive — you can launch manually now and move
+  to Greffon later without redoing Clerk or DNS.
+
+The rest of this document is the manual path.
+
+---
+
 ## 0. Before you touch the server — collect from the owner
 
 Nothing past step 2 works without these. Get them first.
