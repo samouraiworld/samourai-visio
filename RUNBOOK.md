@@ -210,10 +210,12 @@ DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
 
-# ── Mail (Resend) ──
-DJANGO_EMAIL_HOST=smtp.resend.com
-DJANGO_EMAIL_HOST_USER=resend
-DJANGO_EMAIL_HOST_PASSWORD=<resend api key>
+# ── Mail — Scaleway Transactional Email (French, EU) ──
+# Username = Project ID that owns the TEM domain; password = an API key's
+# secret key (with TEM rights). Verify the sending domain in TEM first.
+DJANGO_EMAIL_HOST=smtp.tem.scaleway.com
+DJANGO_EMAIL_HOST_USER=<Scaleway Project ID>
+DJANGO_EMAIL_HOST_PASSWORD=<Scaleway API secret key>
 DJANGO_EMAIL_PORT=587
 DJANGO_EMAIL_USE_TLS=true
 DJANGO_EMAIL_FROM=visio@samourai.app
@@ -412,7 +414,7 @@ The browser-tab title needs a rebuilt frontend image (`VITE_APP_TITLE`), which c
 - [ ] 3-way call: audio, video, screenshare
 - [ ] Mobile browser, iOS Safari + Android Chrome
 - [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
-- [ ] Invitation email arrives via Resend, **and its logo renders**
+- [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
 - [ ] `/admin` reachable, non-admins rejected
 - [ ] Reboot the host. All five services plus nginx-proxy return unattended, TLS still serves, a room still joins
@@ -473,4 +475,4 @@ No secret rotates cleanly by itself — each has a blast radius:
 | `LIVEKIT_API_SECRET` | must change in **two** files (`env.d/common` *and* `livekit-server.yaml`) or every token fails signature validation and nobody can join |
 | `DB_PASSWORD` | change in PostgreSQL *and* `env.d/postgresql` |
 | `OIDC_RP_CLIENT_SECRET` | regenerate in Clerk; login is broken between regeneration and restart |
-| Resend API key | invitation emails fail silently until restart |
+| Scaleway TEM API key | invitation emails fail silently until restart |
