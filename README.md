@@ -27,12 +27,17 @@ Related but separate:
 ## Layout
 
 ```
-RUNBOOK.md          Step-by-step deployment. Start here.
-docs/               Strategy, drift verification, plan, expert review
+DEPLOY.md           Operator quickstart — the linear path. Start here to deploy.
+RUNBOOK.md          The detail behind each deploy step.
+scripts/preflight.sh  Gates that prove each deploy stage is correct, not just up.
+docs/               Strategy, drift verification, plan, expert review, Clerk audit
 deploy/             compose overrides + env templates (.example only — no secrets)
-scripts/            CI gates, runnable locally
+scripts/            CI gates + preflight, runnable locally
 theme/custom.css    Runtime branding via FRONTEND_CUSTOM_CSS_URL
 ```
+
+**Deploying?** → [DEPLOY.md](DEPLOY.md). It front-loads the inputs the owner must
+supply, then walks the runbook with a preflight gate at each stage.
 
 ## Quick orientation
 
