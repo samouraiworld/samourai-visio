@@ -160,3 +160,13 @@ jobs:
               print(f"::error::{f}")
           sys.exit(1 if fails else 0)
           PY
+
+  preflight-selftest:
+    name: Preflight self-test
+    runs-on: ubuntu-latest
+    # Proves preflight.sh's config checks still FAIL when their defect is
+    # present. A check that has quietly stopped detecting its bug is exactly
+    # the failure mode this whole repo exists to prevent.
+    steps:
+      - uses: actions/checkout@v4
+      - run: scripts/preflight-selftest.sh
