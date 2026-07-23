@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Only main on push — feature branches are covered by pull_request, so this
+  # avoids running every branch twice (which also caused required checks to
+  # flap between the two runs).
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
   schedule:
     # Weekly upstream-drift watch. This repo carries no application code, so
@@ -57,9 +60,9 @@ jobs:
       - name: yamllint
         run: pipx install yamllint && yamllint --strict .
       - name: shellcheck
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck scripts/*.sh
+        # shellcheck ships preinstalled on ubuntu-latest — no apt-get needed
+        # (the install step was the thing that intermittently hung).
+        run: shellcheck scripts/*.sh
       - name: Markdown links resolve
         run: scripts/check-links.sh
 
