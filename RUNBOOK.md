@@ -349,6 +349,18 @@ Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 
 ## 6. Launch
 
+> [!TIP]
+> **Run the preflight at each stage — it mechanises every silent-failure check in this runbook.**
+>
+> ```bash
+> cd ~/visio
+> VISIO_DIR=~/visio /path/to/repo/scripts/preflight.sh config   # before `up` — files on disk
+> VISIO_DIR=~/visio /path/to/repo/scripts/preflight.sh stack    # after `up`  — resolved settings
+> VISIO_DIR=~/visio /path/to/repo/scripts/preflight.sh public   # after TLS   — the live surface
+> ```
+>
+> It fails on: unfilled placeholders, a wrapped secret, JSON-shaped lists, a LiveKit-secret mismatch, the wrong CSS variable, a missing bind-mount (checking content-type, not status, because the SPA fallback returns 200 for a missing file), a floating image tag, an unresolved `${VAR}`, a spoofable `X-Forwarded-Proto`, and a guest-join path that does not actually work. It prints `SKIP` for the handful of things a script cannot prove — UDP reachability, the Scaleway security group, `prompt=none` — and each SKIP explains why. **A SKIP is not a pass.**
+
 ```bash
 docker compose up -d
 docker compose run --rm backend python manage.py migrate
