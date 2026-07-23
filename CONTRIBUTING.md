@@ -33,6 +33,19 @@ All four run in CI on every push and pull request, and are required to merge.
 job is advisory, and a failure there means the next version bump needs a fresh
 drift analysis, not that your PR is broken.
 
+## Deploy preflight
+
+`scripts/preflight.sh {config|stack|public}` runs on the host at deploy time —
+it mechanises every silent-failure check in the runbook against the real files,
+the running containers, and the live URLs. It is the difference between "the
+stack is up" and "the stack is correct".
+
+Its checks are only worth anything if they can still fail, so
+`scripts/preflight-selftest.sh` builds a good fixture, breaks one thing at a
+time, and asserts each break is caught. That self-test runs in CI. **If you add
+a preflight check, add a mutation for it to the self-test** — an unproven check
+is how the four original hollow checks got written.
+
 ## Branching
 
 - Never commit to the default branch. Branch as `feat/`, `fix/`, `chore/` or
