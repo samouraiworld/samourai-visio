@@ -42,10 +42,16 @@ MEET_BASE_URL="https://${MEET_HOST}"
 # Comma-separated WITH scheme (this one is compared against the Origin header).
 #DJANGO_CSRF_TRUSTED_ORIGINS=https://visio.samourai.app
 
-# ── Mail (Resend) ──
-DJANGO_EMAIL_HOST=smtp.resend.com
-DJANGO_EMAIL_HOST_USER=resend
-DJANGO_EMAIL_HOST_PASSWORD=<resend api key>
+# ── Mail — Scaleway Transactional Email (TEM) ──
+# French provider (Paris / fr-par, EU data residency), same account as the
+# instance. Chosen over US-based Resend for sovereignty.
+# SMTP username = the Project ID of the Project that owns the TEM domain.
+# SMTP password = the SECRET KEY of an API key in that Project (with TEM rights).
+# Requires the sending domain verified in TEM first (SPF + DKIM + DMARC records).
+# Docs: https://www.scaleway.com/en/docs/transactional-email/reference-content/smtp-configuration/
+DJANGO_EMAIL_HOST=smtp.tem.scaleway.com
+DJANGO_EMAIL_HOST_USER=<Scaleway Project ID>
+DJANGO_EMAIL_HOST_PASSWORD=<Scaleway API secret key with TEM permission>
 DJANGO_EMAIL_PORT=587
 DJANGO_EMAIL_USE_TLS=true
 DJANGO_EMAIL_FROM=visio@samourai.app
@@ -202,7 +208,7 @@ FRONTEND_CUSTOM_CSS_URL=/custom/style.css
 #
 #   DJANGO_SECRET_KEY_FILE=/run/secrets/django_secret_key
 #   OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/clerk_client_secret
-#   DJANGO_EMAIL_HOST_PASSWORD_FILE=/run/secrets/resend_api_key
+#   DJANGO_EMAIL_HOST_PASSWORD_FILE=/run/secrets/scaleway_tem_secret_key
 #
 # Write them with `printf '%s'` — exactly one trailing newline is stripped, so
 # a trailing blank line corrupts the secret. A missing path raises at settings
