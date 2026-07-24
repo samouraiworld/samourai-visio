@@ -209,6 +209,9 @@ DJANGO_SETTINGS_MODULE=meet.settings
 DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
+# Upstream defaults to en-us (settings.py:217). Supported: en-us, fr-fr,
+# nl-nl, de-de — anything else silently falls back to English.
+DJANGO_LANGUAGE_CODE=fr-fr
 
 # ── Mail — Scaleway Transactional Email (French, EU) ──
 # Username = Project ID that owns the TEM domain; password = an API key's
@@ -394,7 +397,55 @@ Bind-mount branding assets **per file**. Never mount a *directory* over `/usr/sh
 
 The browser-tab title needs a rebuilt frontend image (`VITE_APP_TITLE`), which contradicts the no-fork position; **accept the upstream title for v1.** Note it appears in on-screen copy too, not only the tab.
 
-**Credit upstream visibly.** MIT requires the notice — see [`NOTICE.md`](NOTICE.md) — and good faith requires the link. There is no footer element to hang it on (`use_french_gov_footer` defaults false and `Footer.tsx:125` returns `null`), so the theme injects it via `.Header-beforeLogo::after`. CSS `content` cannot carry a clickable link, so put the repo link on the promo page as well.
+**Credit upstream visibly.** MIT requires the notice — see [`NOTICE.md`](NOTICE.md) — and good faith requires the link. There is no footer element to hang it on (`use_french_gov_footer` defaults false and `Footer.tsx:125` returns `null`), so the theme injects it via `.Header-beforeLogo::after`. CSS `content` cannot carry a clickable link, so the landing page (§7bis) carries the clickable one.
+
+---
+
+## 7bis. The public landing page
+
+Anonymous visitors get **our** home page; signed-in users keep Meet's; rooms are
+untouched upstream UI. This is an upstream-supported mechanism, not a fork.
+
+| URL | Visitor | Serves |
+|---|---|---|
+| `/` | anonymous | redirected to `/accueil/` — our landing |
+| `/` | signed in | Meet's home (create instant / scheduled room) |
+| `/<slug>` | anyone | the DINUM room UI, unchanged |
+
+**How it works.** `FRONTEND_EXTERNAL_HOME_URL` (`settings.py:401`) is published
+in `/api/v1.0/config/` as `external_home_url`. `Home.tsx:165-175` reads it,
+sends a `HEAD` probe, and only then calls `window.location.replace()` — so the
+URL **must be reachable from the visitor's browser**. Keep it same-origin:
+that is also what keeps the address bar on `visio.samourai.app`.
+
+The page itself is [`landing/index.html`](landing/index.html) — one
+self-contained file, no build step, no framework. Copy the directory to
+`~/visio/landing/`; `compose.override.yaml` mounts it at
+`/usr/share/nginx/html/accueil`.
+
+> [!WARNING]
+> **Same silent failure as the CSS.** The frontend nginx ends with
+> `error_page 404 =200 /index.html`, so a missing mount returns **200
+> text/html** — the SPA — not a 404. The visitor is then bounced from `/` back
+> into the app, which reads exactly like a redirect loop and gets debugged as
+> an auth problem. `preflight.sh public` asserts on the *content* of the page,
+> never on the status code.
+
+> [!NOTE]
+> Mounting a **directory** is safe here, unlike `/assets` above, because
+> `accueil` does not exist in the image — nothing is shadowed. The nginx
+> `try_files $uri $uri/ /index.html` resolves the directory to its
+> `index.html`. Keep the **trailing slash** in the env var or nginx spends a
+> 301 redirect adding it.
+
+The "Démarrer une réunion" button generates a slug client-side and navigates to
+it — no API call. That works only because `ALLOW_UNREGISTERED_ROOMS=True`
+materialises the room on arrival (§4 trap 1). The slug format is upstream's
+own (`abc-defg-hij`, lowercase, 3-4-3); a different shape would not match the
+room route's regex. It is generated with `crypto.getRandomValues`, not
+`Math.random`, because the slug *is* the access secret for the room.
+
+To hand the front door back to upstream, unset the variable.
 
 ---
 
@@ -418,6 +469,9 @@ The browser-tab title needs a rebuilt frontend image (`VITE_APP_TITLE`), which c
 - [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
 - [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
+- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
+- [ ] **"Démarrer une réunion" works** — the button lands you in a joinable room. This also re-exercises `ALLOW_UNREGISTERED_ROOMS`
+- [ ] **Interface is in French** — the app, *and* the invitation email. `DJANGO_LANGUAGE_CODE` needs the container recreated (`up -d`), not merely restarted
 - [ ] `/admin` reachable, non-admins rejected
 - [ ] Reboot the host. All five services plus nginx-proxy return unattended, TLS still serves, a room still joins
 - [ ] `docker compose restart redis` → still logged in *(proves the AOF volume took)*

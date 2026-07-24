@@ -29,7 +29,7 @@ curl -sSf -o "$WORK/compose.yaml" \
   || { echo "cannot fetch upstream compose"; exit 1; }
 cp deploy/compose.override.yaml "$WORK/compose.override.yaml"
 cp deploy/hosts.example "$WORK/.env"
-mkdir -p "$WORK/env.d" "$WORK/custom"
+mkdir -p "$WORK/env.d" "$WORK/custom" "$WORK/landing"
 
 # Replace <placeholders> with well-formed, single-line fake values. The same
 # token replaces the LiveKit secret in both files, so they match.
@@ -39,6 +39,7 @@ sed -E "s/<[^>]*>/$FAKE/g" deploy/env.d/postgresql.example  > "$WORK/env.d/postg
 sed -E "s/<[^>]*>/$FAKE/"  deploy/livekit-server.yaml.example > "$WORK/livekit-server.yaml"
 printf 'body\n' > "$WORK/custom/style.css"
 printf 'png\n'  > "$WORK/custom/logo.png"
+printf '<html></html>\n' > "$WORK/landing/index.html"
 chmod 600 "$WORK/.env" "$WORK/env.d/common" "$WORK/env.d/postgresql"
 
 fails() { bash scripts/preflight.sh config 2>/dev/null | grep -c 'FAIL'; }
@@ -67,6 +68,9 @@ mutate 's/^FRONTEND_CUSTOM_CSS_URL=/FRONTEND_CSS_URL=/' env.d/common "wrong CSS 
 mutate 's/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=<openssl rand -base64 64>/' env.d/common "unfilled placeholder"
 mutate 's/^OIDC_OP_TOKEN_ENDPOINT=/OIDC_OP_LOGOUT_ENDPOINT=https:\/\/x\/logout\nOIDC_OP_TOKEN_ENDPOINT=/' env.d/common "Keycloak-style logout endpoint present"
 mutate 's/^  tls_port: 0/  tls_port: 5349/' livekit-server.yaml "TURN without tls_port: 0"
+mutate 's|^FRONTEND_EXTERNAL_HOME_URL="\(.*\)/"|FRONTEND_EXTERNAL_HOME_URL="\1"|' env.d/common "landing URL without trailing slash"
+mutate 's/^DJANGO_LANGUAGE_CODE=.*/DJANGO_LANGUAGE_CODE=fr/' env.d/common "unsupported language code"
+mutate 's/^DJANGO_LANGUAGE_CODE=.*/#DJANGO_LANGUAGE_CODE=fr-fr/' env.d/common "language left at the English default"
 
 # A malformed (wrapped-secret-style) line: a bare continuation with no '='.
 echo "special: wrapped-secret continuation line"
@@ -82,6 +86,14 @@ mv "$WORK/custom/style.css" "$WORK/custom/style.css.hidden"
 n="$(fails)"
 if [ "$n" -ge 1 ]; then ok "detected: missing branding asset"; else err "NOT detected: missing branding asset"; fi
 mv "$WORK/custom/style.css.hidden" "$WORK/custom/style.css"
+
+# Landing page configured but absent — the mount Docker would fake as a
+# directory, sending every anonymous visitor to the SPA fallback.
+echo "special: landing page missing"
+mv "$WORK/landing/index.html" "$WORK/landing/index.html.hidden"
+n="$(fails)"
+if [ "$n" -ge 1 ]; then ok "detected: landing page missing"; else err "NOT detected: landing page missing"; fi
+mv "$WORK/landing/index.html.hidden" "$WORK/landing/index.html"
 
 # World-readable secret file.
 echo "special: world-readable secret file"

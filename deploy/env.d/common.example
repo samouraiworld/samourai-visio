@@ -37,6 +37,14 @@ DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
 
+# Interface AND transactional e-mail language. Upstream defaults to `en-us`
+# (settings.py:217) — a French-sovereignty service shipping an English UI is
+# a real defect, and it is silent: nothing warns you.
+# `LANGUAGE_CODE` carries no environ_name override, so it takes the default
+# DJANGO_ prefix. Supported values are en-us, fr-fr, nl-nl, de-de
+# (settings.py:227-234) — anything else falls back without an error.
+DJANGO_LANGUAGE_CODE=fr-fr
+
 # Empty by default in Production. Same-origin POSTs pass on host comparison,
 # so this is normally unnecessary. Uncomment only if login POSTs 403.
 # Comma-separated WITH scheme (this one is compared against the Origin header).
@@ -192,6 +200,24 @@ FRONTEND_CUSTOM_CSS_URL=/custom/style.css
 # Leave false. Enabling it renders the French Republic footer and loads
 # /assets/marianne.svg and /assets/devise.svg, which are not in the image.
 #FRONTEND_USE_FRENCH_GOV_FOOTER=false
+
+# ── Public landing page ──
+# Sends ANONYMOUS visitors who land on `/` to our own home page. Signed-in
+# users keep Meet's home (create instant / scheduled room), and rooms
+# (/<slug>) are never affected — this is the upstream-supported way to put a
+# custom front door on the service without forking the frontend.
+#
+# Mechanism: settings.py:401 -> /api/v1.0/config/ -> Home.tsx does a HEAD
+# probe, then window.location.replace(). Because the probe must succeed, the
+# URL has to be reachable from the visitor's browser — keep it same-origin.
+#
+# Served by the ./landing bind-mount in compose.override.yaml. Same silent
+# failure as the CSS: the frontend nginx does `error_page 404 =200 /index.html`,
+# so a missing mount returns 200 text/html (the SPA) rather than a 404, and
+# the redirect would land the visitor back on the app looking like a loop.
+# Trailing slash matters — without it nginx issues an extra 301.
+# Unset it to restore upstream's own home page.
+FRONTEND_EXTERNAL_HOME_URL="https://${MEET_HOST}/accueil/"
 
 # ── Monitoring ──
 # The trap: settings.py:69 documents this as DJANGO_SENTRY_DSN, but :448

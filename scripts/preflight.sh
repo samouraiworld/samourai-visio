@@ -103,6 +103,41 @@ phase_config() {
   if [ -z "$ba" ]; then ok "branding assets present and non-empty"
   else bad "missing branding assets (Docker will mount a directory in their place)" "$ba"; fi
 
+  # ── Landing page: the setting and the files must agree ───────────────────
+  # Both halves fail silently on their own. A set URL with no files behind it
+  # bounces every anonymous visitor onto the SPA fallback (200 text/html), and
+  # files with no URL set are simply never reached.
+  local ehu; ehu=$(envval env.d/common FRONTEND_EXTERNAL_HOME_URL)
+  if [ -n "$ehu" ]; then
+    if [ -s landing/index.html ]; then
+      ok "landing page present and FRONTEND_EXTERNAL_HOME_URL set"
+    else
+      bad "FRONTEND_EXTERNAL_HOME_URL is set but landing/index.html is missing or empty" \
+          "anonymous visitors would be redirected to the SPA fallback, which looks like a redirect loop"
+    fi
+    case "$ehu" in
+      */) : ;;
+      *) bad "FRONTEND_EXTERNAL_HOME_URL has no trailing slash" \
+             "nginx answers /accueil with a 301 to /accueil/ — redirect the visitor once, not twice" ;;
+    esac
+  elif [ -s landing/index.html ]; then
+    bad "landing/index.html exists but FRONTEND_EXTERNAL_HOME_URL is unset" \
+        "the page is served but nothing ever sends visitors to it"
+  else
+    skip "no landing page configured" "upstream's own home page will be served to anonymous visitors"
+  fi
+
+  # ── Interface language ───────────────────────────────────────────────────
+  # Upstream defaults to en-us and never warns. Only four values are wired
+  # (settings.py:227-234); anything else falls back silently to English.
+  local lang; lang=$(envval env.d/common DJANGO_LANGUAGE_CODE)
+  case "$lang" in
+    fr-fr|en-us|nl-nl|de-de) ok "DJANGO_LANGUAGE_CODE=$lang is a supported locale" ;;
+    "") bad "DJANGO_LANGUAGE_CODE is unset — the UI and invitation e-mails ship in English (upstream default en-us)" ;;
+    *)  bad "DJANGO_LANGUAGE_CODE=$lang is not one of en-us, fr-fr, nl-nl, de-de" \
+            "unsupported values fall back to English with no error" ;;
+  esac
+
   # ── TURN config traps ────────────────────────────────────────────────────
   if grep -qE '^[[:space:]]*enabled:[[:space:]]*true' livekit-server.yaml 2>/dev/null; then
     if grep -qE '^[[:space:]]*tls_port:[[:space:]]*0' livekit-server.yaml; then
@@ -331,6 +366,33 @@ phase_public() {
   else
     bad "custom_css_url is absent or null in /api/v1.0/config/" "FRONTEND_CUSTOM_CSS_URL is unset, misspelled, or the backend was not restarted"
   fi
+
+  # ── Landing page: advertised AND actually served ─────────────────────────
+  # Two independent failures. The backend can advertise a URL that serves the
+  # SPA fallback, which sends every anonymous visitor back into the app — it
+  # reads as a redirect loop and would be debugged as an auth problem.
+  local ehu; ehu="$(echo "$cfg" | sed -n 's/.*"external_home_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [ -n "$ehu" ]; then
+    ok "backend advertises external_home_url ($ehu)"
+    # Content, not status: a missing mount also returns 200 text/html.
+    local body; body="$(curl -sSL --max-time 15 "$ehu" 2>/dev/null)"
+    if echo "$body" | grep -q 'id="start-btn"'; then
+      ok "landing page is really served at $ehu"
+    else
+      bad "external_home_url does not serve the landing page" \
+          "the ./landing bind-mount is missing — the SPA fallback answers 200 text/html, so anonymous visitors bounce straight back into the app"
+    fi
+  else
+    skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
+  fi
+
+  # ── Interface language actually applied ──────────────────────────────────
+  local lc; lc="$(echo "$cfg" | sed -n 's/.*"LANGUAGE_CODE"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  case "$lc" in
+    fr-fr) ok "interface language is fr-fr" ;;
+    "")    skip "LANGUAGE_CODE absent from /api/v1.0/config/" ;;
+    *)     bad "interface language is $lc, not fr-fr" "DJANGO_LANGUAGE_CODE is unset or the backend was not recreated (restart does not reload env)" ;;
+  esac
 
   # ── Guest path: the ONLY test that exercises ALLOW_UNREGISTERED_ROOMS ─────
   # It fires only on Http404 — a slug NOT in the database. A room created by a
