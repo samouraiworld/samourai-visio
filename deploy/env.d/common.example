@@ -191,15 +191,21 @@ ALLOW_UNREGISTERED_ROOMS=True
 # any URL. The trade is that such rooms have no owner, no admin controls
 # (is_administrable: false) and no attribution for moderation.
 #
-# Default is true. Every anonymous visitor is redirected to Clerk with
-# prompt=none once per retry interval (silentLogin.ts rate-limits it via
-# localStorage), and the callback special-cases only error=login_required —
-# anything else lands in login_failure.
-# Keeping it TRUE means returning signed-in users are recognised without
-# clicking "log in". Setting it FALSE removes a redirect from every guest's
-# first visit, at the cost of that convenience.
-# Decide after testing the anonymous path against Clerk (RUNBOOK §8).
-#FRONTEND_IS_SILENT_LOGIN_ENABLED=false
+# DISABLED deliberately (decision 2026-07-24). Upstream defaults to true, which
+# sends EVERY anonymous visitor to Clerk with prompt=none before they click
+# anything — a round trip to a US processor on the guest path, on a service
+# whose stated position is no third parties. Verified live before the change:
+# an anonymous visit left `silent-login-retry` in localStorage, i.e. it fired.
+#
+# With this false, a guest's browser never contacts Clerk at all, which is what
+# lets the privacy policy state it plainly (landing/confidentialite/).
+#
+# Cost: a Samouraï user already signed in elsewhere must click "se connecter"
+# instead of being recognised silently. Accepted.
+# Bonus: the callback only handles error=login_required gracefully — anything
+# else (interaction_required, consent_required) landed in login_failure, so
+# this also removes a bounce risk from every first-time guest.
+FRONTEND_IS_SILENT_LOGIN_ENABLED=false
 
 # ── Branding ──
 # The setting is FRONTEND_CUSTOM_CSS_URL. FRONTEND_CSS_URL does not exist, and

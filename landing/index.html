@@ -549,16 +549,15 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
         — MIT, par la <a href="https://www.numerique.gouv.fr/" rel="noopener">DINUM</a>.
         Hébergé en France par Samouraï&nbsp;Coop. Sans affiliation avec le gouvernement français.
         <a href="https://github.com/samouraiworld/samourai-visio" rel="noopener">Notre configuration est publique</a>.</p>
-      <!-- PAS de lien vers /mentions-legales ni /conditions-utilisation : ces
-           routes servent les pages d'upstream, qui déclarent la DINUM comme
-           éditeur (SIREN 120 001 011), nomment une directrice de publication
-           en poste, et présentent le service comme réservé aux administrations
-           de l'État. Y renvoyer contredirait la ligne « Sans affiliation avec
-           le gouvernement français » juste au-dessus, et attribuerait notre
-           service à une entité publique. À rétablir seulement quand des pages
-           Samouraï Coop existent (LCEN art. 6-III + RGPD art. 13) — elles
-           pourront être servies depuis ce même montage ./landing. -->
+      <!-- Chemins RELATIFS vers nos propres pages, servies depuis ce montage.
+           Ne jamais pointer vers /mentions-legales ni /conditions-utilisation
+           à la racine : ces routes appartiennent à upstream et servent les
+           mentions de la DINUM, qui désignent l'État comme éditeur avec son
+           SIREN et une directrice de publication en poste. -->
       <div class="links">
+        <a href="mentions-legales/">Mentions légales</a>
+        <a href="confidentialite/">Confidentialité</a>
+        <a href="mailto:support@samourai.coop">support@samourai.coop</a>
         <a href="https://samourai.app">samourai.app</a>
       </div>
     </div>

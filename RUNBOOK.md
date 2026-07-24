@@ -446,7 +446,36 @@ own (`abc-defg-hij`, lowercase, 3-4-3); a different shape would not match the
 room route's regex. It is generated with `crypto.getRandomValues`, not
 `Math.random`, because the slug *is* the access secret for the room.
 
-To hand the front door back to upstream, unset the variable.
+To hand the front door back to upstream, unset the variable **and** re-run
+`docker compose up -d` (a `restart` does not reload env). Then remove
+`landing/` from the host, or `preflight.sh config` turns red on the
+files-without-a-URL case it is designed to catch.
+
+### The legal pages ship with it
+
+`landing/` also carries `mentions-legales/` and `confidentialite/`, served at
+`/accueil/mentions-legales/` and `/accueil/confidentialite/`.
+
+> [!WARNING]
+> **Never link to `/mentions-legales` or `/conditions-utilisation` at the site
+> root.** Those routes are upstream's, and on this instance they serve DINUM's
+> own notices: they name the DINUM as publisher with the French State's SIREN
+> `120 001 011`, name a serving public official as *directrice de la
+> publication*, give Outscale as the host, and describe the service as reserved
+> for State administrations. None of it is true here, and **no environment
+> variable overrides them** — the content is hardcoded in the React components.
+> `scripts/check-hygiene.sh` fails the build if anything under `landing/` links
+> to them.
+
+### No third-party resource, and it is enforced
+
+The landing and the privacy policy both state that the service loads nothing
+from a third party. That is now a gate, not a promise: `check-hygiene.sh`
+rejects any `@import`, `url()`, `<script src>`, `<link href>` or `<iframe>`
+pointing off-origin in `theme/custom.css` or `landing/`, and
+`preflight.sh public` re-checks the **deployed** theme, which an operator may
+have edited on the host. A font `@import` in the theme did exactly this once —
+it leaked every visitor's IP and User-Agent on every page, rooms included.
 
 ---
 
@@ -471,6 +500,9 @@ To hand the front door back to upstream, unset the variable.
 - [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
 - [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
+- [ ] **Legal pages reachable** from the landing footer, and they name **Samouraï Coop** — not DINUM (§7bis)
+- [ ] **No third-party request** — open devtools → Network on the landing *and* inside a room, and confirm every request goes to `visio.samourai.app` or `livekit.samourai.app`. This is what the privacy policy asserts
+- [ ] **A guest never contacts Clerk** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit must produce no `clerk.samourai.app` request and leave no `silent-login-retry` key in `localStorage`
 - [ ] **"Démarrer une réunion" works** — the button lands you in a joinable room. This also re-exercises `ALLOW_UNREGISTERED_ROOMS`
 - [ ] **Backend default locale is `fr-fr`** — `/api/v1.0/config/` reports it. This needs the container **recreated** (`up -d`), not merely restarted.
       ⚠️ It does **not** set the interface language: the SPA resolves that client-side via i18next browser detection (`localStorage`, then `navigator`; `fallbackLng: 'fr'`), and `LANGUAGE_CODE` appears in none of its JS chunks. Invitation e-mails follow the **sender's** `Accept-Language`. Check the UI language in a browser set to French — there is no server-side switch for it
@@ -484,9 +516,10 @@ To hand the front door back to upstream, unset the variable.
 
 A free public WebRTC service with open signup is a bandwidth and moderation liability. Have these live **before** any announcement:
 
-- [ ] **Retention policy** — monthly reset of rooms/accounts. This is what `visio.lasuite.coop` does; it's a proven, defensible norm and it caps storage growth.
-- [ ] **Caps** — max participants per room, max room duration
-- [ ] **CGU + abuse contact** published
+- [x] **Mentions légales** (LCEN art. 6-III) and **politique de confidentialité** (GDPR art. 13) — published at `/accueil/mentions-legales/` and `/accueil/confidentialite/`, naming Samouraï Coop as publisher and Scaleway SAS as host. Abuse contact `support@samourai.coop` is on both.
+- [ ] **Enforce the retention the privacy policy already promises.** The page states access logs are kept **7 days**, rooms created without an account are purged **monthly**, and accounts are deleted after **12 months** without a sign-in. None of that is implemented yet — nginx-proxy's json-file logs are unbounded by default. **A published retention period that is not enforced is worse than none**: it is a written commitment to a control that does not exist. Implement before promotion, or amend the page.
+- [ ] **Caps** — max participants per room, max room duration. Meet exposes neither; enforce LiveKit-side (`max_participants`, `empty_timeout`).
+- [ ] **CGU** — still upstream's at `/conditions-utilisation` and they describe a service reserved for State administrations. Nothing links to them (§7bis), but they remain reachable by URL on this host. Write ours, or accept and document that gap.
 - [ ] **Backups** — `pg_dump` on a cron, off-box
 - [ ] **Monitoring** — Sentry already runs at `sentry.samourai.pro`; add uptime + a bandwidth alert
 - [ ] **Bandwidth ceiling** — know the number at which you throttle or pay, and decide in advance which

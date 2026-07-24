@@ -384,6 +384,38 @@ phase_public() {
       bad "external_home_url does not serve the landing page" \
           "the ./landing bind-mount is missing — the SPA fallback answers 200 text/html, so anonymous visitors bounce straight back into the app"
     fi
+
+    # ── Legal pages, content-asserted ────────────────────────────────────────
+    # Same SPA-fallback trap: a missing file answers 200 text/html, so the
+    # status code proves nothing. Assert on our own SIREN, which upstream's
+    # DINUM pages could never contain — that distinguishes "our page is served"
+    # from "the app answered something".
+    local base; base="${ehu%/}"
+    local ml; ml="$(curl -sSL --max-time 15 "${base}/mentions-legales/" 2>/dev/null)"
+    if echo "$ml" | grep -q "830 485 108"; then
+      ok "our mentions légales are served (LCEN art. 6-III)"
+    else
+      bad "mentions légales are not served at ${base}/mentions-legales/" \
+          "without them the footer link is dead, and the only legal pages reachable on this host are upstream's, which name DINUM as publisher"
+    fi
+    local pc; pc="$(curl -sSL --max-time 15 "${base}/confidentialite/" 2>/dev/null)"
+    if echo "$pc" | grep -q "responsable du traitement"; then
+      ok "our privacy policy is served (GDPR art. 13)"
+    else
+      bad "privacy policy is not served at ${base}/confidentialite/"
+    fi
+
+    # ── The no-third-party claim, verified where it is made ──────────────────
+    # The landing and the privacy policy both state that nothing is loaded from
+    # a third party. Assert it against what production actually serves, not
+    # against the repo — the deployed theme is a copy an operator may edit.
+    local css; css="$(curl -sS --max-time 15 "https://${MEET_HOST}/custom/style.css" 2>/dev/null)"
+    if printf '%s' "$css" | grep -qE '@import[^;]*https?://|url\(["'"'"']?https?://'; then
+      bad "the deployed theme loads a third-party resource" \
+          "every visitor's IP and User-Agent leak to it, on every page including inside rooms — and the privacy policy states the opposite"
+    else
+      ok "the deployed theme loads nothing from a third party"
+    fi
   else
     skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
   fi
