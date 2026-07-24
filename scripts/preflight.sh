@@ -181,6 +181,27 @@ phase_config() {
     skip "TURN not enabled" "restrictive-network users will get signalling but no media"
   fi
 
+  # ── Room caps (the only caps this stack has) ─────────────────────────────
+  # Meet exposes no participant or idle limits of its own, and it never calls
+  # CreateRoom — every room is auto-created when the first token-holder
+  # connects, so LiveKit's server-level room config binds every room. The
+  # LiveKit default for max_participants is 0: UNLIMITED.
+  local mp et
+  mp="$(sed -n 's/^[[:space:]]*max_participants:[[:space:]]*//p' livekit-server.yaml | head -1 | tr -d '"')"
+  et="$(sed -n 's/^[[:space:]]*empty_timeout:[[:space:]]*//p' livekit-server.yaml | head -1 | tr -d '"')"
+  case "$mp" in
+    ''|*[!0-9]*) bad "room.max_participants is not set in livekit-server.yaml" \
+                     "the LiveKit default is unlimited — one room can absorb the whole host" ;;
+    0) bad "room.max_participants is 0 — that means unlimited, not disabled" ;;
+    *) ok "room cap present: max_participants=$mp" ;;
+  esac
+  if [ -n "$et" ] && [ "$et" != "0" ]; then
+    ok "empty rooms expire (empty_timeout=${et}s — what makes the privacy page's vanishing-room sentence true)"
+  else
+    bad "room.empty_timeout is ${et:-unset} in livekit-server.yaml" \
+        "the privacy policy states guest rooms vanish minutes after the last participant leaves"
+  fi
+
   # ── Compose merge + pinning ──────────────────────────────────────────────
   # --no-env-resolution: leaves env_file unexpanded so no secret is printed.
   if ! dc config --no-env-resolution -q >/dev/null 2>&1; then

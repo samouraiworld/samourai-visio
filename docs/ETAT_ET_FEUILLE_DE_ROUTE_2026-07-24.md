@@ -107,6 +107,17 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 > blocks stripped, so gateway drift blocks the next version bump instead of
 > shipping. Host needs `deploy/nginx/` copied to `~/visio/nginx/` in the
 > Phase 0 window (RUNBOOK §3 note + §9).
+> **1.4 is closed in the repo** (third PR): `room:` block in
+> `livekit-server.yaml.example` — `auto_create: true` pinned (the guest flow
+> depends on it), `max_participants: 30` (conservative until 1.7 measures),
+> `empty_timeout: 300` (the setting that makes the privacy page's
+> vanishing-room sentence true), `departure_timeout: 20`. Meet never calls
+> CreateRoom (verified v1.24.0), so these server defaults bind every room.
+> Room **duration** stays uncapped — no such knob exists at v1.13.4; noted in
+> RUNBOOK §9. Preflight asserts the caps (self-test mutations included);
+> the contract gate pins the key names against the livekit tag read from the
+> compose pin. Host: add the block to `~/visio/livekit-server.yaml` +
+> recreate livekit.
 
 ### Phase 2 — engineering debt from the 2026-07-24 review
 

@@ -156,6 +156,31 @@ else
   bad "gateway template drifted from upstream at ${REF} — re-derive deploy/nginx/default.conf.template (fresh upstream copy + the marked blocks)"
 fi
 
+# ── LiveKit: the room-cap keys must exist at the pinned server tag ──────────
+# The only caps this stack has are LiveKit's server-level room settings
+# (deploy/livekit-server.yaml.example) — Meet has none, and a renamed key
+# would be ignored silently, evaporating the cap. The tag is read from the
+# compose pin so this check cannot go stale against it.
+LK_REF="$(grep -oE 'livekit/livekit-server:v[0-9.]+' "$(dirname "$0")/../deploy/compose.override.yaml" | head -1 | cut -d: -f2)"
+if [ -z "$LK_REF" ]; then
+  bad "cannot read the pinned livekit tag from deploy/compose.override.yaml"
+else
+  lkcode=$(curl -sS -o "$WORK/lk-config.go" -w '%{http_code}' "https://raw.githubusercontent.com/livekit/livekit/${LK_REF}/pkg/config/config.go")
+  if [ "$lkcode" != "200" ]; then
+    bad "fetch livekit pkg/config/config.go @ ${LK_REF} -> HTTP $lkcode"
+  else
+    lkmiss=""
+    for k in auto_create max_participants empty_timeout departure_timeout; do
+      grep -q "yaml:\"$k" "$WORK/lk-config.go" || lkmiss="$lkmiss $k"
+    done
+    if [ -z "$lkmiss" ]; then
+      pass "livekit ${LK_REF} still recognises the room-cap keys we set (and auto_create, which the guest flow needs)"
+    else
+      bad "livekit room-config keys missing at ${LK_REF}:$lkmiss — they would be ignored silently"
+    fi
+  fi
+fi
+
 echo
 if [ "$fail" -eq 0 ]; then
   echo "All upstream assumptions hold at ${REF}."
