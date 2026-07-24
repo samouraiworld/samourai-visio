@@ -1,11 +1,13 @@
 /* ─────────────────────────────────────────────────────────────
-   Feuille commune aux pages légales de Samouraï Visio.
-   Servie en même origine depuis le montage ./landing — aucune
-   requête tierce, comme le reste du service.
-   Mêmes jetons que landing/index.html : contrastes déjà mesurés
-   sur #141416 (coral 6.22:1, lavande 6.97:1, ink-2 9.21:1,
-   ink-3 5.36:1). --ink-4 n'est PAS utilisé ici : il ne tient AA
-   que sur --bg et rien ne garantit ce fond dans un long texte.
+   Shared stylesheet for the Samouraï Visio legal pages.
+   Served same-origin from the ./landing mount — no third-party
+   request, like the rest of the service.
+
+   Same tokens as landing/index.html; contrast already measured on
+   #141416 (coral 6.22:1, lavender 6.97:1, ink-2 9.21:1,
+   ink-3 5.36:1). --ink-4 is deliberately NOT used here: it clears
+   AA only against --bg, and nothing guarantees that backdrop
+   across a long document.
    ───────────────────────────────────────────────────────────── */
 
 :root{

@@ -26,13 +26,13 @@
    scripts/check-contrast.py in CI.
    ───────────────────────────────────────────────────────────── */
 
-/* Aucune police tierce. Ce fichier est injecté sur TOUTES les pages de l'app,
-   salons compris : une @import ici faisait contacter un CDN externe à chaque
-   visiteur et à chaque participant, ce qui leur fuite IP et User-Agent. C'était
-   la seule requête tierce restante de tout le service (audit 2026-07-24 : 28
-   requêtes, 1 hors origine — celle-ci). La pile système ci-dessous ne coûte
-   aucune requête et rend le service auditable comme « sans tiers ».
-   Voir aussi landing/index.html, corrigé de la même façon. */
+/* No third-party font. This file is injected into EVERY page of the app,
+   rooms included, so an @import here made every visitor and every participant
+   contact an external CDN — leaking their IP and User-Agent. It was the only
+   remaining third-party request in the whole service (audit 2026-07-24: 28
+   requests, 1 off-origin — this one). The system stack below costs no request
+   and makes "no third parties" an auditable claim rather than a promise.
+   Enforced by scripts/check-hygiene.sh. Same fix in landing/index.html. */
 
 :root {
   /* ── LIGHT SURFACE (outside a room) — palette ramp ──
@@ -97,8 +97,8 @@
   --colors-focus-ring: #5C6FBF;   /* white 4.69:1 · room 3.93:1 */
 
   /* ── Type ── */
-  /* Inter d'abord si l'utilisateur la possède localement, puis la pile
-     système. Rien ici ne déclenche de téléchargement (voir l'en-tête). */
+  /* Inter first if the user already has it locally, then the system stack.
+     Nothing here triggers a download — see the header. */
   --fonts-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI',
                 Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
