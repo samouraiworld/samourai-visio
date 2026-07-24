@@ -591,6 +591,54 @@ journalctl -q -o short-unix | head -1   # oldest surviving entry: ≤ 8 days old
 
 ---
 
+## 8ter. Backups — nightly, off-box, restore-tested
+
+`scripts/backup.sh` dumps PostgreSQL through the running container, verifies
+the dump (gzip integrity, pg_dump header, plausible size), ships it to an
+S3-compatible bucket with rclone, **verifies the remote object by size**, and
+only then touches `~/backups/LAST_OK` — the freshness marker
+`preflight.sh stack` turns red within a day of the pipeline silently failing.
+Local dumps keep 7 days; the bucket keeps 30 — **the number the privacy
+policy publishes**, so changing one means changing the other.
+
+Install, on the host:
+
+```bash
+sudo apt-get install -y rclone
+
+# 1. The remote — Scaleway Object Storage, fr-par, private bucket.
+#    Create the bucket + an API key with Object Storage rights first.
+cp deploy/env.d/backup.example ~/visio/env.d/backup
+vi ~/visio/env.d/backup          # fill the two keys + the bucket name
+chmod 600 ~/visio/env.d/backup
+
+# 2. First run, by hand — this is also what proves the credentials:
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/backup.sh
+
+# 3. The cron. Edit <user> and the two absolute paths inside, then:
+sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
+```
+
+### The restore drill — an untested backup is not a backup
+
+Run once now, and after any PostgreSQL major-version bump:
+
+```bash
+L="$(ls -1t ~/backups/visio-*.sql.gz | head -1)"
+docker run -d --name restore-drill -e POSTGRES_PASSWORD=drill postgres:16
+sleep 5
+# The dump carries ALTER ... OWNER TO meet — the role must exist first.
+docker exec restore-drill psql -U postgres -c "CREATE ROLE meet LOGIN"
+docker exec restore-drill psql -U postgres -c "CREATE DATABASE drill OWNER meet"
+gunzip -c "$L" | docker exec -i restore-drill psql -q -v ON_ERROR_STOP=1 -U postgres -d drill
+docker exec restore-drill psql -U postgres -d drill -tc "SELECT count(*) FROM django_migrations"
+# Expect a non-zero count — django_migrations exists in every Meet dump, so
+# zero rows or an error means the restore did NOT work. Then clean up:
+docker rm -f restore-drill
+```
+
+---
+
 ## 9. Before you promote it
 
 A free public WebRTC service with open signup is a bandwidth and moderation liability. Have these live **before** any announcement:
@@ -599,7 +647,7 @@ A free public WebRTC service with open signup is a bandwidth and moderation liab
 - [ ] **Run the §8bis install block on the host.** The config, the gates and the page now agree — logs are deleted after 7 days by journald, guest rooms are never stored at all, accounts are deleted on request — but the journald half only exists once §8bis has been executed on the host. `preflight.sh` fails until it has.
 - [ ] **Caps: add the `room:` block to the host's `livekit-server.yaml`** (copy it from the example, §4) and `docker compose up -d --force-recreate livekit`. `max_participants: 30` until the load measurement says otherwise; `empty_timeout` is what makes the privacy page's vanishing-room sentence true. Room **duration** stays uncapped — LiveKit v1.13.4 has no such knob at any layer Meet uses; revisit only if abuse shows up. `preflight.sh config` asserts the caps, `check-upstream-contract.sh` pins the key names against the livekit tag.
 - [ ] **CGU: copy `deploy/nginx/` to the host with the rest.** Our own conditions are written (`landing/conditions-utilisation/`), and the gateway override 301s upstream's three DINUM routes to our pages (§7bis) — but both only exist on the host once `landing/` and `nginx/` are copied and the stack recreated. `preflight.sh public` asserts the page and the redirects.
-- [ ] **Backups** — `pg_dump` on a cron, off-box
+- [ ] **Backups: run the §8ter install block, then the restore drill.** The script, cron and gates exist; `preflight.sh` fails until the first verified off-box backup has completed, and stays honest afterwards via the `LAST_OK` marker.
 - [ ] **Monitoring** — Sentry already runs at `sentry.samourai.pro`; add uptime + a bandwidth alert
 - [ ] **Bandwidth ceiling** — know the number at which you throttle or pay, and decide in advance which
 

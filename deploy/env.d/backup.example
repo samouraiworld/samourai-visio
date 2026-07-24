@@ -1,0 +1,25 @@
+# Copy to `env.d/backup`, fill the <placeholders>, chmod 600, never commit.
+#
+# Off-box target for the nightly pg_dump archives (scripts/backup.sh).
+# Any S3-compatible store works; the values below assume Scaleway Object
+# Storage in fr-par — French provider, same account as the instance, and a
+# different failure domain than the instance's local disk, which is the
+# point of "off-box". Create the bucket first (private, fr-par).
+#
+# RCLONE_CONFIG_VISIO_* is rclone's environment-variable remote syntax: it
+# defines a remote named `visio` with no rclone.conf on disk. backup.sh
+# exports exactly these keys — it never sources this file.
+RCLONE_CONFIG_VISIO_TYPE=s3
+RCLONE_CONFIG_VISIO_PROVIDER=Scaleway
+RCLONE_CONFIG_VISIO_ENDPOINT=s3.fr-par.scw.cloud
+RCLONE_CONFIG_VISIO_REGION=fr-par
+RCLONE_CONFIG_VISIO_ACCESS_KEY_ID=<Scaleway API access key>
+RCLONE_CONFIG_VISIO_SECRET_ACCESS_KEY=<Scaleway API secret key with Object Storage rights>
+
+# remote:bucket/prefix — the `visio` remote defined above.
+BACKUP_REMOTE_PATH=visio:<bucket name>/pg
+
+# Pruning. The privacy policy's retention table publishes the remote number
+# ("sauvegardes : 30 jours") — if you change it here, change the page too.
+BACKUP_KEEP_LOCAL_DAYS=7
+BACKUP_KEEP_REMOTE_DAYS=30

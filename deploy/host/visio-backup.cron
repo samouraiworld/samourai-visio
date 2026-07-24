@@ -1,0 +1,13 @@
+# Nightly database backup for visio.samourai.app — scripts/backup.sh.
+#
+# Install: replace <user> with the deploy user (must be in the docker group)
+# and the two absolute paths, then:
+#   sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
+#
+# stdout goes to journald via logger; failures also leave a stale
+# ~/backups/LAST_OK, which `preflight.sh stack` turns red within a day — the
+# cron itself never fails silently.
+#
+# preflight.sh `config` asserts this file is installed and points at
+# backup.sh.
+17 3 * * * <user> VISIO_DIR=<absolute path to ~/visio> <absolute path to the repo clone>/scripts/backup.sh 2>&1 | logger -t visio-backup

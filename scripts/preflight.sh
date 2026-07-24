@@ -51,15 +51,15 @@ phase_config() {
 
   # ── Files present ────────────────────────────────────────────────────────
   local missing=""
-  for f in .env env.d/common env.d/postgresql livekit-server.yaml compose.yaml compose.override.yaml; do
+  for f in .env env.d/common env.d/postgresql env.d/backup livekit-server.yaml compose.yaml compose.override.yaml; do
     [ -f "$f" ] || missing="$missing $f"
   done
-  if [ -z "$missing" ]; then ok "all six config files present"
+  if [ -z "$missing" ]; then ok "all seven config files present"
   else bad "missing config files" "$missing"; return; fi
 
   # ── Unfilled placeholders ────────────────────────────────────────────────
   # Catches <from Clerk dashboard>, <resend api key>, <openssl rand ...>.
-  local ph; ph="$(grep -nE '<[^>]+>' .env env.d/common env.d/postgresql livekit-server.yaml 2>/dev/null | grep -v '^\s*#' || true)"
+  local ph; ph="$(grep -nE '<[^>]+>' .env env.d/common env.d/postgresql env.d/backup livekit-server.yaml 2>/dev/null | grep -v '^\s*#' || true)"
   if [ -z "$ph" ]; then ok "no unfilled <placeholder> in any config file"
   else bad "unfilled placeholders remain" "$(echo "$ph" | cut -d: -f1,2 | tr '\n' ' ')"; fi
 
@@ -259,12 +259,33 @@ PY
 
   # ── Permissions ──────────────────────────────────────────────────────────
   local perm=""
-  for f in .env env.d/common env.d/postgresql; do
+  for f in .env env.d/common env.d/postgresql env.d/backup; do
     local m; m="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null)"
     [ "$m" = "600" ] || perm="$perm $f($m)"
   done
   if [ -z "$perm" ]; then ok "secret files are mode 600"
   else bad "secret files are world- or group-readable" "$perm"; fi
+
+  # ── Backups: the cron must exist and point at the script ─────────────────
+  # scripts/backup.sh dumps, verifies, ships off-box and only then touches
+  # ~/backups/LAST_OK; the stack phase asserts that marker's freshness. Here:
+  # the machinery is actually installed. BACKUP_REMOTE_PATH is checked for
+  # shape only — placeholders are caught by the generic check above, and the
+  # remote's reachability is proven by the run itself, not simulated here.
+  local bc="$ETC/cron.d/visio-backup"
+  if [ ! -f "$bc" ]; then
+    bad "backup cron not installed: $bc" \
+        "deploy/host/visio-backup.cron — without it every dump is a manual act of memory"
+  else
+    local bref; bref="$(grep -c 'backup\.sh' "$bc")"
+    if [ "$bref" -ge 1 ]; then ok "backup cron installed and points at backup.sh"
+    else bad "$bc does not reference backup.sh" "the cron runs something else, or nothing"; fi
+  fi
+  local brp; brp="$(envval env.d/backup BACKUP_REMOTE_PATH)"
+  case "$brp" in
+    *:*) ok "BACKUP_REMOTE_PATH is remote:bucket-shaped (remote: $(echo "$brp" | cut -d: -f1))" ;;
+    *)   bad "BACKUP_REMOTE_PATH is '${brp:-unset}'" "expected remote:bucket/prefix (deploy/env.d/backup.example)" ;;
+  esac
 
   # ── Log retention (the privacy policy's 7-day promise) ───────────────────
   # landing/confidentialite/ states IP-bearing logs are deleted after 7 days.
@@ -424,6 +445,27 @@ PY
   if [ -z "$nonj" ]; then ok "every running container logs to journald (nginx-proxy included)"
   else bad "container(s) on another log driver — the 7-day clock does not apply to them" \
            "$nonj — recreate them (up -d / --force-recreate), a restart is not enough"; fi
+
+  # ── Backups, runtime half ────────────────────────────────────────────────
+  # backup.sh writes ~/backups/LAST_OK only after the remote copy is verified
+  # by size, so a fresh marker means an off-box backup genuinely exists. A
+  # cron that silently stopped (removed, wrong path, rclone broken, bucket
+  # credentials revoked) turns this red within a day.
+  local lo="$HOME/backups/LAST_OK"
+  if [ ! -f "$lo" ]; then
+    bad "no backup has ever completed ($lo missing)" \
+        "run scripts/backup.sh once by hand — an untested backup pipeline is not a backup"
+  else
+    local lage; lage=$(( ($(date +%s) - $(cat "$lo")) / 3600 ))
+    if [ "$lage" -le 26 ]; then
+      ok "last verified off-box backup is ${lage}h old"
+    else
+      bad "last verified off-box backup is ${lage}h old (expected daily)" \
+          "journalctl -t visio-backup for the failure; the marker only moves after a verified remote copy"
+    fi
+  fi
+  skip "remote bucket contents not re-listed here" \
+       "LAST_OK is written only after backup.sh verifies the remote object's size; the restore drill (RUNBOOK §8ter) is the proof that matters"
 
   # The public promise is "7 days, then deletion", and rotation is daily, so
   # no surviving entry may be older than 8 days. This is the only check that
