@@ -72,6 +72,7 @@ check "no database dumps or runtime data tracked" \
 # ── .gitignore actually covers the paths the runbook creates ────────────────
 uncovered=""
 for p in deploy/.env deploy/.env.prod deploy/env.d/common deploy/env.d/postgresql \
+         deploy/env.d/backup \
          deploy/data/databases/backend/PG_VERSION deploy/data/redis/appendonly.aof \
          deploy/secrets/django_secret_key backup.sql backups/meet.sql.gz \
          deploy/compose.yaml deploy/livekit-server.yaml; do

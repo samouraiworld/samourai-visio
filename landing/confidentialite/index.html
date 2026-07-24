@@ -36,6 +36,9 @@
    * Account deletion is on request, deliberately: a Samouraï account is
      shared across apps (Clerk), so an idle-on-Visio timer would delete
      accounts still active on Memba or Zentai.
+   * The 30-day backup retention is BACKUP_KEEP_REMOTE_DAYS in env.d/backup
+     (scripts/backup.sh prunes the bucket with --min-age). Changing one
+     means changing the other.
 
   If any of those stops being true, this page has to change with it.
 -->
@@ -145,6 +148,7 @@
       <tr><td>Flux audio et vidéo</td><td><b>Aucune</b> — rien n'est écrit sur disque</td></tr>
       <tr><td>Salons créés sans compte</td><td><b>Aucune</b> — jamais enregistrés dans notre base de données&nbsp;; le salon disparaît de lui-même quelques minutes après le départ du dernier participant</td></tr>
       <tr><td>Compte et salons associés</td><td>Jusqu'à suppression du compte, sur demande (voir «&nbsp;Vos droits&nbsp;»)</td></tr>
+      <tr><td>Sauvegardes de la base de données (comptes, salons)</td><td><b>30 jours</b> glissants, hébergées en France (Scaleway)</td></tr>
       <tr><td>Nom d'affichage saisi comme invité</td><td>Dans votre navigateur uniquement, jusqu'à effacement de vos données de navigation</td></tr>
     </table>
     </div>
@@ -182,7 +186,8 @@
     <p>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation,
     d'opposition et de portabilité sur vos données. Écrivez à
     <a href="mailto:support@samourai.coop">support@samourai.coop</a>&nbsp;; nous répondons
-    sous un mois.</p>
+    sous un mois. Les données effacées disparaissent aussi des sauvegardes, au plus
+    tard à l'expiration de leur cycle de 30 jours.</p>
     <p>Si vous rejoignez des réunions sans compte, nous ne détenons aucune donnée
     permettant de vous identifier&nbsp;: il n'y a alors rien à consulter ni à effacer.</p>
     <p>Vous pouvez également introduire une réclamation auprès de la
