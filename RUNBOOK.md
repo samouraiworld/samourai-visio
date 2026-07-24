@@ -300,7 +300,7 @@ Clerk reports `backchannel_logout_supported: false` and `frontchannel_logout_sup
 
 ### `livekit-server.yaml`
 
-Copy [`deploy/livekit-server.yaml.example`](deploy/livekit-server.yaml.example) — it is the upstream example plus a `turn:` block, which upstream omits entirely.
+Copy [`deploy/livekit-server.yaml.example`](deploy/livekit-server.yaml.example) — it is the upstream example plus a `turn:` block, which upstream omits entirely, and a `room:` block — **the only participant and idle caps this stack has**. Meet exposes none of its own, it never calls CreateRoom (every room is auto-created on first join), and LiveKit's default for `max_participants` is 0, meaning unlimited. `preflight.sh config` asserts the caps are set.
 
 Set the same `LIVEKIT_API_SECRET` against key `meet`, then **assert it matches**:
 
@@ -597,7 +597,7 @@ A free public WebRTC service with open signup is a bandwidth and moderation liab
 
 - [x] **Mentions légales** (LCEN art. 6-III) and **politique de confidentialité** (GDPR art. 13) — published at `/accueil/mentions-legales/` and `/accueil/confidentialite/`, naming Samouraï Coop as publisher and Scaleway SAS as host. Abuse contact `support@samourai.coop` is on both.
 - [ ] **Run the §8bis install block on the host.** The config, the gates and the page now agree — logs are deleted after 7 days by journald, guest rooms are never stored at all, accounts are deleted on request — but the journald half only exists once §8bis has been executed on the host. `preflight.sh` fails until it has.
-- [ ] **Caps** — max participants per room, max room duration. Meet exposes neither; enforce LiveKit-side (`max_participants`, `empty_timeout`).
+- [ ] **Caps: add the `room:` block to the host's `livekit-server.yaml`** (copy it from the example, §4) and `docker compose up -d --force-recreate livekit`. `max_participants: 30` until the load measurement says otherwise; `empty_timeout` is what makes the privacy page's vanishing-room sentence true. Room **duration** stays uncapped — LiveKit v1.13.4 has no such knob at any layer Meet uses; revisit only if abuse shows up. `preflight.sh config` asserts the caps, `check-upstream-contract.sh` pins the key names against the livekit tag.
 - [ ] **CGU: copy `deploy/nginx/` to the host with the rest.** Our own conditions are written (`landing/conditions-utilisation/`), and the gateway override 301s upstream's three DINUM routes to our pages (§7bis) — but both only exist on the host once `landing/` and `nginx/` are copied and the stack recreated. `preflight.sh public` asserts the page and the redirects.
 - [ ] **Backups** — `pg_dump` on a cron, off-box
 - [ ] **Monitoring** — Sentry already runs at `sentry.samourai.pro`; add uptime + a bandwidth alert

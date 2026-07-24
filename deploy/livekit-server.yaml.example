@@ -22,6 +22,32 @@ redis:
 keys:
   meet: <same value as LIVEKIT_API_SECRET in env.d/common>
 
+room:
+  # Meet never calls CreateRoom (verified v1.24.0: the backend only uses
+  # list_rooms / send_data / update_room_metadata) — every room is
+  # auto-created when the first token-holder connects, so these server-level
+  # defaults bind EVERY room. They are the only caps this stack has: Meet
+  # exposes none of its own.
+  #
+  # The guest flow (a room conjured from any URL) exists only because of
+  # auto_create. The LiveKit default is true; set explicitly so a future
+  # upstream default change cannot silently kill the product's core path.
+  auto_create: true
+  # 0 means UNLIMITED — that is the LiveKit default and exactly the state
+  # this block exists to remove. 30 is deliberately conservative: LiveKit's
+  # own benchmark puts 4-8 vCPU at roughly 40-75 participants, and no load
+  # measurement has been made on this host yet. Raise it after measuring
+  # (roadmap 1.7), not before. A 31st participant is rejected at join.
+  max_participants: 30
+  # Seconds an empty room survives. 300 is the LiveKit default, made
+  # explicit because the privacy policy states guest rooms vanish "quelques
+  # minutes après le départ du dernier participant" — this is the setting
+  # that makes that sentence true.
+  empty_timeout: 300
+  # Seconds a room survives after its last participant LEAVES (as opposed to
+  # never-joined). Explicit for the same reason.
+  departure_timeout: 20
+
 rtc:
   # A port RANGE performs better than a single port under load — upstream
   # recommends one >= vCPU count. port_range_start/end and udp_port are
