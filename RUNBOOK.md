@@ -170,6 +170,15 @@ openssl rand -base64 64 | tr -d '\n'   # DJANGO_SECRET_KEY  (88 chars — WRAPS)
 > [!WARNING]
 > `openssl rand -base64 64` wraps at 64 columns and emits **two lines**. Pasted into an env file, `DJANGO_SECRET_KEY` is truncated at the wrap and the remainder becomes a junk variable — with no error. The `tr -d '\n'` is not optional. `-base64 48` produces exactly 64 characters and does not wrap, which is why only the third command needs it.
 
+> [!NOTE]
+> The fetched `default.conf.template` is **reference material only** since the
+> gateway override: `compose.override.yaml` mounts the repo's
+> [`deploy/nginx/default.conf.template`](deploy/nginx/default.conf.template)
+> at the same target, which is upstream's file plus 301s for the SPA's
+> hardcoded DINUM legal routes (§7bis). Keep fetching it — it is what you
+> diff against when the upstream-contract gate flags gateway drift (§10).
+> Copy the repo's `deploy/nginx/` to `~/visio/nginx/` alongside `landing/`.
+
 Then assert every line is a well-formed `KEY=value`:
 
 ```bash
@@ -453,19 +462,23 @@ files-without-a-URL case it is designed to catch.
 
 ### The legal pages ship with it
 
-`landing/` also carries `mentions-legales/` and `confidentialite/`, served at
-`/accueil/mentions-legales/` and `/accueil/confidentialite/`.
+`landing/` also carries `mentions-legales/`, `confidentialite/` and
+`conditions-utilisation/`, served under `/accueil/`.
 
 > [!WARNING]
-> **Never link to `/mentions-legales` or `/conditions-utilisation` at the site
-> root.** Those routes are upstream's, and on this instance they serve DINUM's
-> own notices: they name the DINUM as publisher with the French State's SIREN
-> `120 001 011`, name a serving public official as *directrice de la
-> publication*, give Outscale as the host, and describe the service as reserved
-> for State administrations. None of it is true here, and **no environment
-> variable overrides them** — the content is hardcoded in the React components.
-> `scripts/check-hygiene.sh` fails the build if anything under `landing/` links
-> to them.
+> **Never link to `/mentions-legales`, `/conditions-utilisation` or
+> `/accessibilite` at the site root.** Those routes are upstream's, and the SPA
+> hardcodes DINUM's own notices on them: DINUM as publisher with the French
+> State's SIREN `120 001 011`, a serving public official as *directrice de la
+> publication*, Outscale as host, a service reserved for State administrations,
+> and DINUM's RGAA accessibility declaration. **No environment variable
+> overrides them.** Two defences: `scripts/check-hygiene.sh` fails the build if
+> anything under `landing/` links to them, and the gateway override
+> ([`deploy/nginx/default.conf.template`](deploy/nginx/default.conf.template))
+> answers all three routes with a **301 to our pages** before the SPA can —
+> `preflight.sh public` asserts the redirects, and
+> `check-upstream-contract.sh` pins the template against upstream so gateway
+> drift cannot ship silently on a version bump (§10).
 
 ### No third-party resource, and it is enforced
 
@@ -585,7 +598,7 @@ A free public WebRTC service with open signup is a bandwidth and moderation liab
 - [x] **Mentions légales** (LCEN art. 6-III) and **politique de confidentialité** (GDPR art. 13) — published at `/accueil/mentions-legales/` and `/accueil/confidentialite/`, naming Samouraï Coop as publisher and Scaleway SAS as host. Abuse contact `support@samourai.coop` is on both.
 - [ ] **Run the §8bis install block on the host.** The config, the gates and the page now agree — logs are deleted after 7 days by journald, guest rooms are never stored at all, accounts are deleted on request — but the journald half only exists once §8bis has been executed on the host. `preflight.sh` fails until it has.
 - [ ] **Caps** — max participants per room, max room duration. Meet exposes neither; enforce LiveKit-side (`max_participants`, `empty_timeout`).
-- [ ] **CGU** — still upstream's at `/conditions-utilisation` and they describe a service reserved for State administrations. Nothing links to them (§7bis), but they remain reachable by URL on this host. Write ours, or accept and document that gap.
+- [ ] **CGU: copy `deploy/nginx/` to the host with the rest.** Our own conditions are written (`landing/conditions-utilisation/`), and the gateway override 301s upstream's three DINUM routes to our pages (§7bis) — but both only exist on the host once `landing/` and `nginx/` are copied and the stack recreated. `preflight.sh public` asserts the page and the redirects.
 - [ ] **Backups** — `pg_dump` on a cron, off-box
 - [ ] **Monitoring** — Sentry already runs at `sentry.samourai.pro`; add uptime + a bandwidth alert
 - [ ] **Bandwidth ceiling** — know the number at which you throttle or pay, and decide in advance which
@@ -612,7 +625,11 @@ docker compose config --images > ~/backups/images-$(date +%F-%H%M).txt
 docker compose run --rm backend python manage.py showmigrations \
   > ~/backups/migrations-$(date +%F-%H%M).txt
 
-# 4. Bump the tags in compose.override.yaml (NOT compose.yaml — that gets
+# 4. If the contract gate flagged the gateway template, re-derive it now:
+#    fresh upstream default.conf.template + the SAMOURAI-marked blocks, into
+#    deploy/nginx/default.conf.template (then copy to ~/visio/nginx/).
+#
+# 5. Bump the tags in compose.override.yaml (NOT compose.yaml — that gets
 #    re-fetched verbatim), then:
 docker compose pull
 docker compose up -d          # NOT `restart`

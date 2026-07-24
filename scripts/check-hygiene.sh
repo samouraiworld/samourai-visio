@@ -117,7 +117,8 @@ check "no third-party resource is loaded by the theme or the landing pages" "${e
 # overrides them — so this service must ship its own, and must never link to
 # theirs. Both halves are checked.
 legal=""
-for f in landing/mentions-legales/index.html landing/confidentialite/index.html; do
+for f in landing/mentions-legales/index.html landing/confidentialite/index.html \
+         landing/conditions-utilisation/index.html; do
   [ -s "$f" ] || legal="$legal$f is missing or empty"$'\n'
 done
 [ -s landing/mentions-legales/index.html ] &&

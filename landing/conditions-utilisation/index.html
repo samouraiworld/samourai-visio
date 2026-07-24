@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conditions d'utilisation — Samouraï Visio</title>
+<meta name="description" content="Les règles d'utilisation de Samouraï Visio : ce que le service fournit, ce que nous attendons de vous, et ce que nous ne garantissons pas.">
+<meta name="theme-color" content="#141416">
+<meta name="robots" content="index,follow">
+<link rel="icon" href="../logo-mark.png">
+<link rel="stylesheet" href="../legal.css">
+
+<!--
+  Conditions d'utilisation — the terms of service.
+  Page content is French because the service is; comments are English like the
+  rest of the repo.
+
+  This page exists because upstream's /conditions-utilisation serves DINUM's
+  own terms on this host: they describe a service reserved for State
+  administrations, which is false here, and no environment variable overrides
+  them — the content is hardcoded in the React components (routes.ts:
+  /mentions-legales, /conditions-utilisation, /accessibilite, verified at
+  v1.24.0). Hence our own page, served from the ./landing mount, and a
+  gateway-level 301 for all three upstream routes
+  (deploy/nginx/default.conf.template) so DINUM's notices are no longer
+  reachable on this host at all.
+
+  Claims on this page must track reality the same way the privacy policy
+  does: no recording (RECORDING_ENABLE upstream default false), guest rooms
+  ownerless and unpersisted (viewsets.py:257-277), abuse handling limited to
+  making an address unreachable (mirrors mentions-legales). If any of those
+  changes, this page changes with it.
+-->
+</head>
+<body>
+
+<a class="skip" href="#contenu">Aller au contenu</a>
+
+<header class="top">
+  <div class="wrap inner">
+    <a class="brand" href="../"><img src="../logo-mark.png" alt="">Samouraï&nbsp;<span class="thin">Visio</span></a>
+    <a class="back" href="../">← Retour à l'accueil</a>
+  </div>
+</header>
+
+<main id="contenu">
+  <div class="wrap">
+    <p class="eyebrow">Règles d'utilisation</p>
+    <h1>Conditions d'utilisation</h1>
+    <p class="updated">Dernière mise à jour : 24 juillet 2026</p>
+
+    <div class="note">
+      <p><b>En résumé.</b> Samouraï Visio est un service de visioconférence
+      gratuit&nbsp;: vous rejoignez ou créez une réunion depuis un simple lien,
+      sans compte. En l'utilisant, vous acceptez les règles ci-dessous. Elles
+      tiennent en une page, et nous les avons écrites pour être lues.</p>
+    </div>
+
+    <h2>Ce que vous acceptez</h2>
+    <p>Ces conditions encadrent l'utilisation de Samouraï Visio
+    (visio.samourai.app), édité par Samouraï Coop — voir les
+    <a href="../mentions-legales/">mentions légales</a>. Utiliser le service
+    vaut acceptation de ces conditions&nbsp;; si elles ne vous conviennent pas,
+    n'utilisez pas le service.</p>
+
+    <h2>Le service</h2>
+    <ul>
+      <li>Rejoindre une réunion ne demande <b>aucun compte</b>&nbsp;: un lien
+      suffit, vous choisissez un nom d'affichage et vous entrez.</li>
+      <li>Créer une réunion ne demande pas de compte non plus. Un
+      <b>compte Samouraï</b> permet en plus de posséder des salons permanents,
+      dont vous administrez l'accès.</li>
+      <li>Les réunions ne sont <b>jamais enregistrées ni transcrites</b> par le
+      service.</li>
+      <li>Le service repose sur le logiciel libre
+      <a href="https://github.com/suitenumerique/meet" rel="noopener">La Suite Meet</a>
+      (DINUM, licence MIT), exploité par Samouraï Coop sans aucune affiliation
+      avec l'État — voir les <a href="../mentions-legales/">mentions légales</a>.</li>
+    </ul>
+
+    <h2>Vos engagements</h2>
+    <p>Le service est un outil de communication entre personnes qui se font
+    confiance. En l'utilisant, vous vous engagez à&nbsp;:</p>
+    <ul>
+      <li><b>Respecter la loi.</b> Pas de harcèlement, de menaces, de contenus
+      illicites ni d'atteintes aux droits d'autrui.</li>
+      <li><b>Ne pas enregistrer une réunion sans l'accord de tous les
+      participants.</b> Le service ne le fait jamais&nbsp;; la loi française
+      encadre strictement l'enregistrement de conversations privées, et un
+      enregistrement local reste techniquement possible pour chaque
+      participant — c'est votre responsabilité, pas une capacité du
+      service.</li>
+      <li><b>Ne pas perturber le service</b>&nbsp;: pas de surcharge
+      volontaire, de contournement de ses protections ni d'usage automatisé
+      abusif.</li>
+    </ul>
+    <p>Les échanges d'un salon transitent par nos serveurs sans y être ni
+    stockés ni modérés a priori&nbsp;: chacun reste responsable de ce qu'il y
+    dit et de ce qu'il y partage. Les mineurs utilisent le service sous la
+    responsabilité de leurs représentants légaux.</p>
+
+    <h2>Salons et liens</h2>
+    <p>Le lien d'un salon en est la clé&nbsp;: <b>toute personne qui possède le
+    lien peut entrer</b>. Choisissez à qui vous le transmettez. Un salon créé
+    sans compte n'a pas de propriétaire&nbsp;: personne n'en administre
+    l'accès, et nos moyens d'action se limitent à rendre l'adresse
+    inaccessible. Nous préférons l'écrire clairement plutôt que de laisser
+    croire à une capacité de modération que nous n'avons pas.</p>
+
+    <h2>Votre compte</h2>
+    <p>Un compte Samouraï est commun à tous les services de la
+    coopérative&nbsp;: le créer sur Visio le rend utilisable sur les autres
+    applications. Vous êtes responsable de la confidentialité de vos moyens de
+    connexion. Vous pouvez demander la suppression de votre compte à tout
+    moment — voir la <a href="../confidentialite/">politique de
+    confidentialité</a>.</p>
+    <p>Nous pouvons suspendre un compte utilisé en violation de ces
+    conditions, avec un préavis par e-mail sauf abus manifeste.</p>
+
+    <h2>Disponibilité</h2>
+    <p>Le service est fourni gratuitement et «&nbsp;en l'état&nbsp;», sans
+    garantie de fonctionnement ininterrompu&nbsp;: des interruptions restent
+    possibles, pour maintenance, mise à jour ou incident. Le service peut
+    évoluer&nbsp;; s'il devait fermer, nous l'annoncerions sur la page
+    d'accueil avec un préavis raisonnable.</p>
+
+    <h2>Signalement d'un abus</h2>
+    <p>Tout usage contraire à la loi ou à ces conditions peut être signalé à
+    <a href="mailto:support@samourai.coop">support@samourai.coop</a>. Le
+    traitement des signalements est décrit dans les
+    <a href="../mentions-legales/">mentions légales</a>.</p>
+
+    <h2>Propriété intellectuelle</h2>
+    <p>Le logiciel est libre (La Suite Meet, licence MIT — voir les
+    <a href="../mentions-legales/">mentions légales</a>). Ce que vous dites ou
+    partagez dans un salon reste à vous&nbsp;: rien n'est stocké, rien n'est
+    réutilisé, aucun droit ne nous est cédé.</p>
+
+    <h2>Données personnelles</h2>
+    <p>Le traitement des données personnelles est décrit dans notre
+    <a href="../confidentialite/">politique de confidentialité</a>.</p>
+
+    <h2>Modifications</h2>
+    <p>Toute évolution de ces conditions sera publiée sur cette page, avec sa
+    date de mise à jour. Les changements substantiels seront signalés sur la
+    page d'accueil.</p>
+
+    <h2>Droit applicable</h2>
+    <p>Ces conditions sont régies par le droit français. En cas de différend,
+    écrivez-nous d'abord à
+    <a href="mailto:support@samourai.coop">support@samourai.coop</a>&nbsp;: la
+    quasi-totalité des problèmes se règlent là. À défaut, les tribunaux
+    français sont compétents.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap inner">
+    <span>Samouraï Coop — service édité en France</span>
+    <span class="links">
+      <a href="../">Accueil</a>
+      <a href="../mentions-legales/">Mentions légales</a>
+      <a href="../confidentialite/">Confidentialité</a>
+      <a href="https://samourai.app">samourai.app</a>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

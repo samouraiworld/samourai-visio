@@ -92,6 +92,15 @@ services:
       # The image's nginx does `try_files $uri $uri/ /index.html`, so the
       # directory resolves to its index.html.
       - ./landing:/usr/share/nginx/html/accueil:ro
+      # Gateway config: REPLACES the upstream compose mount at the same
+      # target (compose merges volumes by target path). Our copy is
+      # upstream's template plus 301s for the three legal routes the SPA
+      # hardcodes with DINUM's notices (/mentions-legales,
+      # /conditions-utilisation, /accessibilite). Drift against upstream is
+      # gated by check-upstream-contract.sh; deleting this line silently
+      # restores upstream's mount and DINUM's pages — preflight asserts the
+      # merged source path to catch exactly that.
+      - ./nginx/default.conf.template:/etc/nginx/templates/docs.conf.template:ro
     networks:
       - proxy-tier
       - default
