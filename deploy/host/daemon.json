@@ -1,0 +1,4 @@
+{
+  "log-driver": "journald",
+  "userland-proxy": false
+}

@@ -42,6 +42,17 @@ printf 'png\n'  > "$WORK/custom/logo.png"
 printf '<html></html>\n' > "$WORK/landing/index.html"
 chmod 600 "$WORK/.env" "$WORK/env.d/common" "$WORK/env.d/postgresql"
 
+# Host-side log-retention files, reached through VISIO_ETC. Copying the SHIPPED
+# files doubles as an assertion that what deploy/host/ carries actually passes
+# the checks. The rsyslog logrotate is fabricated in its tightened form (the
+# check must pass on daily/7 and fail on the distro default of weekly/4).
+mkdir -p "$WORK/etc/systemd/journald.conf.d" "$WORK/etc/docker" "$WORK/etc/logrotate.d"
+cp deploy/host/visio-retention.conf "$WORK/etc/systemd/journald.conf.d/visio-retention.conf"
+cp deploy/host/daemon.json          "$WORK/etc/docker/daemon.json"
+printf '/var/log/syslog\n/var/log/auth.log\n{\n\trotate 7\n\tdaily\n\tmissingok\n}\n' \
+  > "$WORK/etc/logrotate.d/rsyslog"
+export VISIO_ETC="$WORK/etc"
+
 fails() { bash scripts/preflight.sh config 2>/dev/null | grep -c 'FAIL'; }
 
 echo "baseline: the good fixture must pass cleanly"
@@ -72,6 +83,10 @@ mutate 's|^FRONTEND_EXTERNAL_HOME_URL="\(.*\)/"|FRONTEND_EXTERNAL_HOME_URL="\1"|
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/DJANGO_LANGUAGE_CODE=fr/' env.d/common "unsupported language code"
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/#DJANGO_LANGUAGE_CODE=fr-fr/' env.d/common "language left at the English default"
 mutate '\|/usr/share/nginx/html/accueil|d' compose.override.yaml "landing bind-mount dropped from the override"
+mutate 's/^MaxRetentionSec=7day/MaxRetentionSec=1month/' etc/systemd/journald.conf.d/visio-retention.conf "journal retention loosened beyond the published 7 days"
+mutate 's/"log-driver": "journald"/"log-driver": "json-file"/' etc/docker/daemon.json "docker default log driver reverted to json-file"
+mutate 's/driver: journald/driver: json-file/' compose.override.yaml "compose logging driver reverted to json-file"
+mutate 's/daily/weekly/' etc/logrotate.d/rsyslog "rsyslog logrotate back at the distro default"
 
 # A malformed (wrapped-secret-style) line: a bare continuation with no '='.
 echo "special: wrapped-secret continuation line"
@@ -102,6 +117,14 @@ chmod 644 "$WORK/env.d/common"
 n="$(fails)"
 if [ "$n" -ge 1 ]; then ok "detected: world-readable secret"; else err "NOT detected: world-readable secret"; fi
 chmod 600 "$WORK/env.d/common"
+
+# Journald retention drop-in missing entirely — the state of a host where
+# RUNBOOK §8bis was never run, which is exactly what the check exists to catch.
+echo "special: journald retention drop-in missing"
+mv "$WORK/etc/systemd/journald.conf.d/visio-retention.conf" "$WORK/visio-retention.conf.hidden"
+n="$(fails)"
+if [ "$n" -ge 1 ]; then ok "detected: journald drop-in missing"; else err "NOT detected: journald drop-in missing"; fi
+mv "$WORK/visio-retention.conf.hidden" "$WORK/etc/systemd/journald.conf.d/visio-retention.conf"
 
 # Final: fixture is clean again, proving every revert worked.
 echo "final: fixture restored"

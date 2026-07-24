@@ -25,6 +25,17 @@
    * localStorage held only i18nextLng and silent-login-retry; the latter
      disappears with FRONTEND_IS_SILENT_LOGIN_ENABLED=false.
    * Recording is off (recording.is_enabled = false).
+   * Rooms conjured without an account are never written to the database:
+     RoomViewSet.retrieve builds the response in memory — id None, LiveKit
+     token, no model write (core/api/viewsets.py:257-277 at v1.24.0, asserted
+     by check-upstream-contract.sh). LiveKit drops its own in-memory room
+     state minutes after the last participant leaves.
+   * The 7-day log retention is enforced by journald on the host
+     (deploy/host/visio-retention.conf, RUNBOOK §8bis) and asserted by
+     preflight.sh — config for the files, stack for the oldest live entry.
+   * Account deletion is on request, deliberately: a Samouraï account is
+     shared across apps (Clerk), so an idle-on-Visio timer would delete
+     accounts still active on Memba or Zentai.
 
   If any of those stops being true, this page has to change with it.
 -->
@@ -132,8 +143,8 @@
       <tr><th>Donnée</th><th>Conservation</th></tr>
       <tr><td>Journaux techniques (adresses IP)</td><td><b>7 jours</b>, puis suppression</td></tr>
       <tr><td>Flux audio et vidéo</td><td><b>Aucune</b> — rien n'est écrit sur disque</td></tr>
-      <tr><td>Salons créés sans compte</td><td>Purgés chaque mois</td></tr>
-      <tr><td>Compte et salons associés</td><td>Jusqu'à suppression du compte, ou <b>12 mois</b> sans connexion</td></tr>
+      <tr><td>Salons créés sans compte</td><td><b>Aucune</b> — jamais enregistrés dans notre base de données&nbsp;; le salon disparaît de lui-même quelques minutes après le départ du dernier participant</td></tr>
+      <tr><td>Compte et salons associés</td><td>Jusqu'à suppression du compte, sur demande (voir «&nbsp;Vos droits&nbsp;»)</td></tr>
       <tr><td>Nom d'affichage saisi comme invité</td><td>Dans votre navigateur uniquement, jusqu'à effacement de vos données de navigation</td></tr>
     </table>
     </div>

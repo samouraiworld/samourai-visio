@@ -19,11 +19,16 @@ services:
   postgresql:
     image: postgres:16
     restart: unless-stopped
+    # journald, not json-file: the privacy policy promises IP-bearing logs are
+    # deleted after 7 days, and json-file rotates by SIZE only — at low
+    # traffic a size cap retains entries for months. This anchor only routes
+    # every service's stdout to journald; the 7-day clock itself lives in
+    # /etc/systemd/journald.conf.d/ (deploy/host/, RUNBOOK §8bis), and
+    # deploy/host/daemon.json makes journald the default for containers
+    # OUTSIDE this project — nginx-proxy, which logs every client IP.
+    # `docker compose logs` still works: the journald driver supports it.
     logging: &logging
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+      driver: journald
 
   redis:
     # Upstream ships redis:5 (years past EOL) with no volume. Sessions are
