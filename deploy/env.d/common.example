@@ -37,6 +37,23 @@ DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
 
+# BACKEND default locale. Upstream defaults to `en-us` (settings.py:217).
+# `LANGUAGE_CODE` carries no environ_name override, so it takes the default
+# DJANGO_ prefix. Supported: en-us, fr-fr, nl-nl, de-de (settings.py:227-234)
+# — anything else falls back without an error.
+#
+# What this does NOT do — verified against the v1.24.0 bundle:
+#   * It does not set the INTERFACE language. The frontend resolves that
+#     client-side with i18next browser detection (order: localStorage then
+#     navigator, fallbackLng 'fr'); LANGUAGE_CODE appears in none of the JS
+#     chunks. A visitor with an en-US browser sees English whatever you set.
+#   * It does not force invitation e-mails to French. LocaleMiddleware plus
+#     invitation.py's get_language() mean the SENDER's Accept-Language wins;
+#     this value is only the last-resort fallback.
+# It does set the default User.language and that fallback, so it is still
+# the right value for a French service — just not a switch for the UI.
+DJANGO_LANGUAGE_CODE=fr-fr
+
 # Empty by default in Production. Same-origin POSTs pass on host comparison,
 # so this is normally unnecessary. Uncomment only if login POSTs 403.
 # Comma-separated WITH scheme (this one is compared against the Origin header).
@@ -174,15 +191,21 @@ ALLOW_UNREGISTERED_ROOMS=True
 # any URL. The trade is that such rooms have no owner, no admin controls
 # (is_administrable: false) and no attribution for moderation.
 #
-# Default is true. Every anonymous visitor is redirected to Clerk with
-# prompt=none once per retry interval (silentLogin.ts rate-limits it via
-# localStorage), and the callback special-cases only error=login_required —
-# anything else lands in login_failure.
-# Keeping it TRUE means returning signed-in users are recognised without
-# clicking "log in". Setting it FALSE removes a redirect from every guest's
-# first visit, at the cost of that convenience.
-# Decide after testing the anonymous path against Clerk (RUNBOOK §8).
-#FRONTEND_IS_SILENT_LOGIN_ENABLED=false
+# DISABLED deliberately (decision 2026-07-24). Upstream defaults to true, which
+# sends EVERY anonymous visitor to Clerk with prompt=none before they click
+# anything — a round trip to a US processor on the guest path, on a service
+# whose stated position is no third parties. Verified live before the change:
+# an anonymous visit left `silent-login-retry` in localStorage, i.e. it fired.
+#
+# With this false, a guest's browser never contacts Clerk at all, which is what
+# lets the privacy policy state it plainly (landing/confidentialite/).
+#
+# Cost: a Samouraï user already signed in elsewhere must click "se connecter"
+# instead of being recognised silently. Accepted.
+# Bonus: the callback only handles error=login_required gracefully — anything
+# else (interaction_required, consent_required) landed in login_failure, so
+# this also removes a bounce risk from every first-time guest.
+FRONTEND_IS_SILENT_LOGIN_ENABLED=false
 
 # ── Branding ──
 # The setting is FRONTEND_CUSTOM_CSS_URL. FRONTEND_CSS_URL does not exist, and
@@ -192,6 +215,24 @@ FRONTEND_CUSTOM_CSS_URL=/custom/style.css
 # Leave false. Enabling it renders the French Republic footer and loads
 # /assets/marianne.svg and /assets/devise.svg, which are not in the image.
 #FRONTEND_USE_FRENCH_GOV_FOOTER=false
+
+# ── Public landing page ──
+# Sends ANONYMOUS visitors who land on `/` to our own home page. Signed-in
+# users keep Meet's home (create instant / scheduled room), and rooms
+# (/<slug>) are never affected — this is the upstream-supported way to put a
+# custom front door on the service without forking the frontend.
+#
+# Mechanism: settings.py:401 -> /api/v1.0/config/ -> Home.tsx does a HEAD
+# probe, then window.location.replace(). Because the probe must succeed, the
+# URL has to be reachable from the visitor's browser — keep it same-origin.
+#
+# Served by the ./landing bind-mount in compose.override.yaml. Same silent
+# failure as the CSS: the frontend nginx does `error_page 404 =200 /index.html`,
+# so a missing mount returns 200 text/html (the SPA) rather than a 404, and
+# the redirect would land the visitor back on the app looking like a loop.
+# Trailing slash matters — without it nginx issues an extra 301.
+# Unset it to restore upstream's own home page.
+FRONTEND_EXTERNAL_HOME_URL="https://${MEET_HOST}/accueil/"
 
 # ── Monitoring ──
 # The trap: settings.py:69 documents this as DJANGO_SENTRY_DSN, but :448

@@ -71,6 +71,9 @@ mkdir -p ~/visio && cd ~/visio
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
 3. Branding: copy `theme/custom.css` → `custom/style.css`, and `logo.png` → `custom/logo.png`.
+   Then copy this repo's `landing/` directory → `~/visio/landing/` — that's the
+   public home page anonymous visitors get instead of Meet's (RUNBOOK §7bis).
+   It is served same-origin, so the URL stays on `visio.samourai.app`.
 4. Generate the three secrets — **RUNBOOK §3**. Note `DJANGO_SECRET_KEY` needs `openssl rand -base64 64 | tr -d '\n'` (it wraps otherwise).
 
 ### GATE — config

@@ -77,6 +77,16 @@ services:
       # replaces Vite's build output (index-*.js, index-*.css, the MediaPipe
       # wasm) and the app will not boot. Asset overrides must be per-file.
       - ./custom:/usr/share/nginx/html/custom:ro
+      # Public landing page, served same-origin at https://<MEET_HOST>/accueil/
+      # so the URL never leaves visio.samourai.app. Meet sends anonymous
+      # visitors here from `/` via FRONTEND_EXTERNAL_HOME_URL; signed-in users
+      # keep Meet's own home, and rooms (/<slug>) stay untouched upstream UI.
+      #
+      # Safe as a DIRECTORY mount (unlike /assets above) because `accueil` is a
+      # new path, not an existing one in the image — nothing is shadowed.
+      # The image's nginx does `try_files $uri $uri/ /index.html`, so the
+      # directory resolves to its index.html.
+      - ./landing:/usr/share/nginx/html/accueil:ro
     networks:
       - proxy-tier
       - default
