@@ -37,12 +37,21 @@ DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
 
-# Interface AND transactional e-mail language. Upstream defaults to `en-us`
-# (settings.py:217) — a French-sovereignty service shipping an English UI is
-# a real defect, and it is silent: nothing warns you.
+# BACKEND default locale. Upstream defaults to `en-us` (settings.py:217).
 # `LANGUAGE_CODE` carries no environ_name override, so it takes the default
-# DJANGO_ prefix. Supported values are en-us, fr-fr, nl-nl, de-de
-# (settings.py:227-234) — anything else falls back without an error.
+# DJANGO_ prefix. Supported: en-us, fr-fr, nl-nl, de-de (settings.py:227-234)
+# — anything else falls back without an error.
+#
+# What this does NOT do — verified against the v1.24.0 bundle:
+#   * It does not set the INTERFACE language. The frontend resolves that
+#     client-side with i18next browser detection (order: localStorage then
+#     navigator, fallbackLng 'fr'); LANGUAGE_CODE appears in none of the JS
+#     chunks. A visitor with an en-US browser sees English whatever you set.
+#   * It does not force invitation e-mails to French. LocaleMiddleware plus
+#     invitation.py's get_language() mean the SENDER's Accept-Language wins;
+#     this value is only the last-resort fallback.
+# It does set the default User.language and that fallback, so it is still
+# the right value for a French service — just not a switch for the UI.
 DJANGO_LANGUAGE_CODE=fr-fr
 
 # Empty by default in Production. Same-origin POSTs pass on host comparison,

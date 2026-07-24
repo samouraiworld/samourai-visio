@@ -45,16 +45,29 @@
   4. --ink-4 éclairci (#5C5C62 -> #808086) : l'original tombait à 2.83:1 sur
      le fond, sous le seuil AA de 4.5:1, et il porte du texte réel.
 
-  Contrastes vérifiés sur #141416 (WCAG AA) :
-    coral  #FD6262   6.29:1     lavande #889CE7  7.08:1
-    ink-3  #8A8A8F   5.45:1     ink-4   #808086  4.76:1
-    vert   #6FBF73   8.35:1     encre #1a0d0d sur coral  6.38:1
+  Contrastes recalculés avec la même formule que scripts/check-contrast.py
+  (les valeurs publiées ici auparavant étaient surestimées d'environ 1.5%,
+  ce qui faisait passer --ink-4 pour conforme alors qu'il ne l'est pas
+  partout). Sur le fond #141416 :
+    coral  #FD6262   6.22:1     lavande #889CE7  6.97:1
+    ink-2  #B7B7BC   9.21:1     ink-3   #8A8A8F  5.36:1
+    vert   #6FBF73   8.21:1     encre #1a0d0d sur coral  6.41:1
+  ATTENTION : --ink-4 (#808086, 4.69:1 sur #141416) ne vaut QUE sur ce fond.
+  Sur .member-card, éclairci par ses dégradés, il tombe à 4.46:1 et à 3.90:1
+  en mobile. Ne pas l'utiliser sur une surface autre que --bg.
   ATTENTION : le coral ne peut PAS porter de texte blanc (2.97:1) — les
   boutons coral utilisent une encre sombre. Même contrainte que theme/custom.css.
 -->
 
 <style>
-@import url('https://fonts.bunny.net/css?family=inter:400,500,600,700,800&display=swap');
+/* Aucune @import de police tierce. Deux raisons, toutes deux vérifiées :
+   1. Disponibilité. Une feuille de style en attente bloque l'exécution des
+      <script> inline, et TOUT l'interactif de cette page (les quatre CTA, le
+      formulaire de code, l'adresse affichée) dépend du script en bas de page.
+      Un CDN lent laissait donc la porte d'entrée publique blanche et inerte.
+   2. Souveraineté. Une requête tierce fuite l'IP et l'User-Agent de chaque
+      visiteur, sur une page dont l'argument est précisément l'inverse.
+   La pile système ci-dessous ne coûte aucune requête réseau. */
 
 :root{
   --bg:#141416; --bg-deep:#0F0F11; --bg-elev:#1B1C1E; --bg-card:#17181A;
@@ -68,8 +81,10 @@
   /* Éclairci depuis #5C5C62 : il portait du texte réel à 2.83:1. */
   --ink-4:#808086;
 
-  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,'SF Mono','SFMono-Regular',Menlo,monospace;
+  /* Inter d'abord si l'utilisateur l'a localement, sinon la pile système.
+     Aucune n'est téléchargée : rien ici ne déclenche de requête. */
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,'SF Mono','SFMono-Regular','JetBrains Mono',Menlo,Consolas,monospace;
   --maxw:1120px;
 }
 
@@ -247,7 +262,12 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .price{font-family:var(--mono);color:var(--ink);display:flex;align-items:baseline;gap:5px}
 .price b{font-size:clamp(1.9rem,3.6vw,2.35rem);font-weight:700;letter-spacing:-.03em}
 .price span{color:var(--ink-3);font-size:.92rem}
-.member-note{font-size:.75rem;color:var(--ink-4);font-family:var(--mono)}
+/* --ink-2, pas --ink-4 : cette note ne rend PAS sur --bg mais sur .member-card,
+   dont les deux dégradés radiaux éclaircissent le fond. Mesuré sur les pixels
+   réels : ink-4 y tombe à 4.46:1 en desktop et 3.90:1 sous 640px (la carte
+   passe en colonne et la note atterrit dans le lavis lavande) — sous le seuil
+   AA. ink-3 n'y suffit pas non plus (4.46:1). */
+.member-note{font-size:.75rem;color:var(--ink-2);font-family:var(--mono)}
 @media(max-width:640px){.member-card{flex-direction:column;align-items:flex-start}}
 
 /* ── CTA final + pied ── */
@@ -315,9 +335,14 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
     <div>
       <div class="eyebrow reveal"><span class="dot">●</span> Souveraine · libre · gérée par une coopérative</div>
       <h1 class="reveal d1">Vos appels<br>n'appartiennent<br>qu'à <span class="lav">vous</span>.</h1>
+      <!-- « rien à récolter sur vous » a été retiré : le service traite bien
+           des données (identité Clerk, logs d'accès, journaux d'envoi TEM) et
+           aucune politique de confidentialité n'est encore publiée. La
+           formulation ci-dessous porte sur le modèle économique, ce qui est
+           exact et défendable. -->
       <p class="sub reveal d2">Coopérative française, serveurs français, logiciel libre de l'État.
-        Aucune publicité à vendre — donc rien à récolter sur vous. Partagez un lien, vos invités
-        rejoignent.</p>
+        Aucune publicité à vendre — donc aucune raison de vous profiler. Partagez un lien, vos
+        invités rejoignent.</p>
       <div class="cta-row reveal d2">
         <button class="btn btn-coral btn-lg js-start" type="button">Démarrer un appel →</button>
         <a class="btn btn-ghost btn-lg" href="#why">Pourquoi souveraine ?</a>
@@ -420,8 +445,14 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
     </div>
     <div class="compare" role="table" aria-label="Comparatif Big SaaS et Samouraï Visio">
       <div class="row" role="row"><span role="columnheader">&nbsp;</span><span class="col" role="columnheader">Big&nbsp;SaaS</span><span class="col" role="columnheader">Visio</span></div>
-      <div class="row" role="row"><span class="feat" role="cell">Invités sans installation</span><span class="col no" role="cell">rare</span><span class="col us" role="cell">toujours</span></div>
-      <div class="row" role="row"><span class="feat" role="cell">Appels enregistrés par défaut</span><span class="col no" role="cell">souvent</span><span class="col us" role="cell">jamais</span></div>
+      <!-- La ligne « Invités sans installation / rare » a été supprimée : elle
+           était fausse. Google Meet, Teams et Zoom permettent tous de rejoindre
+           depuis le navigateur. Et « enregistrés par défaut / souvent » l'était
+           aussi — aucun des trois n'enregistre par défaut. Deux lignes qu'un
+           lecteur qui utilise Meet falsifiait d'un coup d'œil, ce qui aurait
+           discrédité les trois lignes suivantes, qui sont vraies et portent
+           l'argument. -->
+      <div class="row" role="row"><span class="feat" role="cell">Enregistrement des appels</span><span class="col no" role="cell">à la main de l'hôte</span><span class="col us" role="cell">impossible</span></div>
       <div class="row" role="row"><span class="feat" role="cell">Auto-hébergeable</span><span class="col no" role="cell">non</span><span class="col yes us" role="cell">oui</span></div>
       <div class="row" role="row"><span class="feat" role="cell">Code open-source</span><span class="col no" role="cell">non</span><span class="col yes us" role="cell">MIT</span></div>
       <div class="row" role="row"><span class="feat" role="cell">Détenu par</span><span class="col no" role="cell">des actionnaires</span><span class="col us" role="cell">une coopérative</span></div>
@@ -518,9 +549,16 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
         — MIT, par la <a href="https://www.numerique.gouv.fr/" rel="noopener">DINUM</a>.
         Hébergé en France par Samouraï&nbsp;Coop. Sans affiliation avec le gouvernement français.
         <a href="https://github.com/samouraiworld/samourai-visio" rel="noopener">Notre configuration est publique</a>.</p>
+      <!-- PAS de lien vers /mentions-legales ni /conditions-utilisation : ces
+           routes servent les pages d'upstream, qui déclarent la DINUM comme
+           éditeur (SIREN 120 001 011), nomment une directrice de publication
+           en poste, et présentent le service comme réservé aux administrations
+           de l'État. Y renvoyer contredirait la ligne « Sans affiliation avec
+           le gouvernement français » juste au-dessus, et attribuerait notre
+           service à une entité publique. À rétablir seulement quand des pages
+           Samouraï Coop existent (LCEN art. 6-III + RGPD art. 13) — elles
+           pourront être servies depuis ce même montage ./landing. -->
       <div class="links">
-        <a href="/mentions-legales">Mentions légales</a>
-        <a href="/conditions-utilisation">Conditions d'utilisation</a>
         <a href="https://samourai.app">samourai.app</a>
       </div>
     </div>

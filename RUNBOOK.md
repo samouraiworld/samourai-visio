@@ -209,8 +209,9 @@ DJANGO_SETTINGS_MODULE=meet.settings
 DJANGO_CONFIGURATION=Production
 PYTHONPATH=/app
 MEET_BASE_URL="https://${MEET_HOST}"
-# Upstream defaults to en-us (settings.py:217). Supported: en-us, fr-fr,
-# nl-nl, de-de — anything else silently falls back to English.
+# BACKEND default locale (settings.py:217). Sets the default User.language and
+# the last-resort e-mail fallback. It does NOT set the SPA's interface language
+# — that is resolved client-side by i18next from the visitor's browser.
 DJANGO_LANGUAGE_CODE=fr-fr
 
 # ── Mail — Scaleway Transactional Email (French, EU) ──
@@ -471,7 +472,8 @@ To hand the front door back to upstream, unset the variable.
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
 - [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
 - [ ] **"Démarrer une réunion" works** — the button lands you in a joinable room. This also re-exercises `ALLOW_UNREGISTERED_ROOMS`
-- [ ] **Interface is in French** — the app, *and* the invitation email. `DJANGO_LANGUAGE_CODE` needs the container recreated (`up -d`), not merely restarted
+- [ ] **Backend default locale is `fr-fr`** — `/api/v1.0/config/` reports it. This needs the container **recreated** (`up -d`), not merely restarted.
+      ⚠️ It does **not** set the interface language: the SPA resolves that client-side via i18next browser detection (`localStorage`, then `navigator`; `fallbackLng: 'fr'`), and `LANGUAGE_CODE` appears in none of its JS chunks. Invitation e-mails follow the **sender's** `Accept-Language`. Check the UI language in a browser set to French — there is no server-side switch for it
 - [ ] `/admin` reachable, non-admins rejected
 - [ ] Reboot the host. All five services plus nginx-proxy return unattended, TLS still serves, a room still joins
 - [ ] `docker compose restart redis` → still logged in *(proves the AOF volume took)*

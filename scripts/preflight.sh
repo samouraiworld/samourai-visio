@@ -133,7 +133,8 @@ phase_config() {
   local lang; lang=$(envval env.d/common DJANGO_LANGUAGE_CODE)
   case "$lang" in
     fr-fr|en-us|nl-nl|de-de) ok "DJANGO_LANGUAGE_CODE=$lang is a supported locale" ;;
-    "") bad "DJANGO_LANGUAGE_CODE is unset — the UI and invitation e-mails ship in English (upstream default en-us)" ;;
+    "") bad "DJANGO_LANGUAGE_CODE is unset — the backend default locale stays en-us (upstream default)" \
+            "sets the default User.language and the last-resort e-mail fallback; it does NOT set the SPA's interface language" ;;
     *)  bad "DJANGO_LANGUAGE_CODE=$lang is not one of en-us, fr-fr, nl-nl, de-de" \
             "unsupported values fall back to English with no error" ;;
   esac
@@ -186,7 +187,8 @@ except Exception as e:
     print(f"cannot parse compose config: {e}"); raise SystemExit
 bad = []
 tg = {v.get("target") for v in svc.get("frontend", {}).get("volumes", [])}
-for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/custom"):
+for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/custom",
+             "/usr/share/nginx/html/accueil"):
     if want not in tg:
         bad.append(f"frontend missing mount {want}")
 for n in ("postgresql", "redis", "backend", "frontend", "livekit"):
@@ -197,7 +199,7 @@ if "/data" not in {v.get("target") for v in svc.get("redis", {}).get("volumes", 
 print("; ".join(bad))
 PY
 )"
-  if [ -z "$merge" ]; then ok "override merges with upstream: both frontend mounts, restart policies, redis volume"
+  if [ -z "$merge" ]; then ok "override merges with upstream: all three frontend mounts, restart policies, redis volume"
   else bad "compose merge problems" "$merge"; fi
 
   # ── Permissions ──────────────────────────────────────────────────────────
@@ -386,13 +388,22 @@ phase_public() {
     skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
   fi
 
-  # ── Interface language actually applied ──────────────────────────────────
+  # ── Backend default locale ───────────────────────────────────────────────
+  # This proves the BACKEND locale only. It does NOT prove the interface
+  # language: the SPA picks its own via i18next browser detection
+  # (order: localStorage, navigator — fallbackLng 'fr'), and LANGUAGE_CODE
+  # appears in none of the JS chunks it serves. Invitation e-mails follow the
+  # SENDER's Accept-Language through LocaleMiddleware, with this value as the
+  # last-resort fallback. Labelling this "interface language" would be a check
+  # reporting coverage it does not have.
   local lc; lc="$(echo "$cfg" | sed -n 's/.*"LANGUAGE_CODE"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
   case "$lc" in
-    fr-fr) ok "interface language is fr-fr" ;;
+    fr-fr) ok "backend default locale is fr-fr (proves the container was recreated, not merely restarted)" ;;
     "")    skip "LANGUAGE_CODE absent from /api/v1.0/config/" ;;
-    *)     bad "interface language is $lc, not fr-fr" "DJANGO_LANGUAGE_CODE is unset or the backend was not recreated (restart does not reload env)" ;;
+    *)     bad "backend default locale is $lc, not fr-fr" "DJANGO_LANGUAGE_CODE unset, or the backend was restarted instead of recreated (restart does not reload env)" ;;
   esac
+  skip "interface language cannot be asserted from the server" \
+       "the SPA resolves it client-side from the visitor's browser; check it in a browser with a French locale"
 
   # ── Guest path: the ONLY test that exercises ALLOW_UNREGISTERED_ROOMS ─────
   # It fires only on Http404 — a slug NOT in the database. A room created by a

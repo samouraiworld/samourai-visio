@@ -71,6 +71,7 @@ mutate 's/^  tls_port: 0/  tls_port: 5349/' livekit-server.yaml "TURN without tl
 mutate 's|^FRONTEND_EXTERNAL_HOME_URL="\(.*\)/"|FRONTEND_EXTERNAL_HOME_URL="\1"|' env.d/common "landing URL without trailing slash"
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/DJANGO_LANGUAGE_CODE=fr/' env.d/common "unsupported language code"
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/#DJANGO_LANGUAGE_CODE=fr-fr/' env.d/common "language left at the English default"
+mutate '\|/usr/share/nginx/html/accueil|d' compose.override.yaml "landing bind-mount dropped from the override"
 
 # A malformed (wrapped-secret-style) line: a bare continuation with no '='.
 echo "special: wrapped-secret continuation line"
