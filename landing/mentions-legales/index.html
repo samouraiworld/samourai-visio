@@ -11,18 +11,21 @@
 <link rel="stylesheet" href="../legal.css">
 
 <!--
-  Mentions légales — LCEN art. 6-III.
+  Mentions légales — the French LCEN art. 6-III publisher notice.
+  Page content is French because the service is; comments are English like the
+  rest of the repo.
 
-  Ces pages existent parce que les routes d'upstream (/mentions-legales,
-  /conditions-utilisation) servent celles de la DINUM : elles désignent l'État
-  comme éditeur, avec son SIREN et une directrice de publication en poste, et
-  présentent le service comme réservé aux administrations. Rien de cela n'est
-  vrai de cette instance, et aucun réglage ne permet de les surcharger — le
-  contenu est codé en dur dans les composants React. D'où des pages à nous,
-  servies depuis le montage ./landing, vers lesquelles la landing pointe.
+  This page exists because upstream's own routes (/mentions-legales,
+  /conditions-utilisation) serve DINUM's notices on this host: they name the
+  French State as publisher with its SIREN, name a serving public official as
+  publication director, and describe the service as reserved for State
+  administrations. None of that is true here, and no environment variable
+  overrides them — the content is hardcoded in the React components. Hence our
+  own pages, served from the ./landing mount, which the landing links to.
+  scripts/check-hygiene.sh fails the build if anything links back to theirs.
 
-  Adresse de l'hébergeur relevée sur ses propres mentions légales
-  (scaleway.com/fr/mentions-legales, consulté le 2026-07-24), pas de mémoire.
+  The host's registered address was read from Scaleway's own legal notice
+  (scaleway.com/fr/mentions-legales, retrieved 2026-07-24), not from memory.
 -->
 </head>
 <body>

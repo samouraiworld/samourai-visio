@@ -15,7 +15,7 @@ Upstream is MIT-licensed and built by [DINUM](https://www.numerique.gouv.fr/). T
 | `clerk.` / `accounts.` | **Clerk auth — shared by everything** | — | live ⚠️ do not touch |
 | `memba.` | Memba | `samouraiworld/memba` | live |
 | `zentai.` | Zentai | `Code/Zentai` | deployed (Scaleway) |
-| `visio.` | **La Suite Meet** | **this repo** | not deployed |
+| `visio.` | **La Suite Meet** | **this repo** | **live, not yet promoted** — see [docs/ETAT_ET_FEUILLE_DE_ROUTE_2026-07-24.md](docs/ETAT_ET_FEUILLE_DE_ROUTE_2026-07-24.md) |
 
 Related but separate:
 

@@ -16,58 +16,57 @@
 <meta name="twitter:card" content="summary">
 
 <!--
-  Samouraï Visio — page d'accueil publique.
+  Samouraï Visio — public landing page.
+  Page copy is French because the service is; comments are English like the
+  rest of the repo.
 
-  Servie par le bind-mount ./landing -> /usr/share/nginx/html/accueil du
-  conteneur frontend (deploy/compose.override.yaml), donc à la même origine
-  que l'application : l'URL reste sur visio.samourai.app.
+  Served by the ./landing -> /usr/share/nginx/html/accueil bind-mount on the
+  frontend container (deploy/compose.override.yaml), so it is same-origin with
+  the app and the address bar never leaves visio.samourai.app.
 
-  Meet y envoie les visiteurs anonymes via FRONTEND_EXTERNAL_HOME_URL
-  (settings.py:401 en v1.24.0 -> /api/v1.0/config/ -> Home.tsx). Les
-  utilisateurs connectés gardent la home de Meet, et les salons (/<slug>)
-  restent l'interface DINUM inchangée.
+  Meet sends ANONYMOUS visitors here via FRONTEND_EXTERNAL_HOME_URL
+  (settings.py:401 at v1.24.0 -> /api/v1.0/config/ -> Home.tsx). Signed-in
+  users keep Meet's own home, and rooms (/<slug>) stay the untouched DINUM UI.
 
-  Fichier autonome : aucun build, aucune dépendance. Il survit aux montées
-  de version d'upstream parce qu'il ne touche pas à l'application.
+  Self-contained: no build, no dependency, no network request. It survives
+  upstream upgrades because it never touches the application.
 
-  ── Écarts assumés par rapport à la maquette validée du 2026-07-23 ──
-  1. « Nommez un salon · tapez ce que vous voulez après la barre oblique »
-     était FAUX. Le routeur de Meet valide les identifiants contre
-     [a-zA-Z0-9]{3}-?[a-zA-Z0-9]{4}-?[a-zA-Z0-9]{3} (routes.ts:40) : un nom
-     libre comme /reunion-equipe affiche « Verify your meeting code »
-     (vérifié en production). Le widget garde son concept, mais affiche un
-     code réellement valide, et l'étape 01 dit la vérité.
-  2. Le sélecteur « FR · EN » est retiré : il n'existe pas de version
-     anglaise de cette page, et un sélecteur mort est pire que pas de
-     sélecteur.
-  3. Le bouton « Devenir membre » est un état « Bientôt » plutôt qu'un
-     href="#" : la page est publique et le parcours d'adhésion n'existe pas.
-  4. --ink-4 éclairci (#5C5C62 -> #808086) : l'original tombait à 2.83:1 sur
-     le fond, sous le seuil AA de 4.5:1, et il porte du texte réel.
+  ── Deliberate departures from the approved 2026-07-23 mockup ──
+  1. "Name a room · type whatever you want after the slash" was FALSE. Meet's
+     router validates ids against [a-zA-Z0-9]{3}-?[a-zA-Z0-9]{4}-?[a-zA-Z0-9]{3}
+     (routes.ts:40): a free-form name like /reunion-equipe renders "Verify your
+     meeting code" — confirmed in production. The widget keeps its concept but
+     shows a genuinely valid code. A demo that lies is worse than no demo.
+  2. The "FR · EN" switch is gone: there is no English version of this page,
+     and a dead switch is worse than none.
+  3. "Devenir membre" is an explicit disabled "Bientôt" rather than href="#":
+     the page is public and the checkout flow does not exist.
+  4. --ink-4 lightened (#5C5C62 -> #808086): the original measured 2.83:1 on
+     the background, under the 4.5:1 AA floor, and it carries real text.
 
-  Contrastes recalculés avec la même formule que scripts/check-contrast.py
-  (les valeurs publiées ici auparavant étaient surestimées d'environ 1.5%,
-  ce qui faisait passer --ink-4 pour conforme alors qu'il ne l'est pas
-  partout). Sur le fond #141416 :
-    coral  #FD6262   6.22:1     lavande #889CE7  6.97:1
-    ink-2  #B7B7BC   9.21:1     ink-3   #8A8A8F  5.36:1
-    vert   #6FBF73   8.21:1     encre #1a0d0d sur coral  6.41:1
-  ATTENTION : --ink-4 (#808086, 4.69:1 sur #141416) ne vaut QUE sur ce fond.
-  Sur .member-card, éclairci par ses dégradés, il tombe à 4.46:1 et à 3.90:1
-  en mobile. Ne pas l'utiliser sur une surface autre que --bg.
-  ATTENTION : le coral ne peut PAS porter de texte blanc (2.97:1) — les
-  boutons coral utilisent une encre sombre. Même contrainte que theme/custom.css.
+  Contrast recomputed with the same formula as scripts/check-contrast.py (the
+  ratios previously published here were overstated by ~1.5%, which is what made
+  --ink-4 look conforming). Against #141416:
+    coral  #FD6262   6.22:1     lavender #889CE7  6.97:1
+    ink-2  #B7B7BC   9.21:1     ink-3    #8A8A8F  5.36:1
+    green  #6FBF73   8.21:1     ink #1a0d0d on coral  6.41:1
+  WARNING: --ink-4 (#808086, 4.69:1 on #141416) holds ONLY on that backdrop.
+  On .member-card, lightened by its gradients, it drops to 4.46:1 and to
+  3.90:1 on mobile. Do not use it on any surface other than --bg.
+  WARNING: coral CANNOT carry white text (2.97:1) — coral buttons use a dark
+  ink. Same constraint as theme/custom.css.
 -->
 
 <style>
-/* Aucune @import de police tierce. Deux raisons, toutes deux vérifiées :
-   1. Disponibilité. Une feuille de style en attente bloque l'exécution des
-      <script> inline, et TOUT l'interactif de cette page (les quatre CTA, le
-      formulaire de code, l'adresse affichée) dépend du script en bas de page.
-      Un CDN lent laissait donc la porte d'entrée publique blanche et inerte.
-   2. Souveraineté. Une requête tierce fuite l'IP et l'User-Agent de chaque
-      visiteur, sur une page dont l'argument est précisément l'inverse.
-   La pile système ci-dessous ne coûte aucune requête réseau. */
+/* No third-party font @import. Two reasons, both verified:
+   1. Availability. A pending stylesheet blocks inline <script> execution, and
+      EVERY interactive element here (the four CTAs, the code form, the address
+      readout) depends on the script at the bottom of this file. A stalled CDN
+      therefore left the public front door blank and inert.
+   2. Sovereignty. A third-party request leaks each visitor's IP and
+      User-Agent, on a page whose whole argument is the opposite.
+   The system stack below costs no network request at all.
+   Enforced by scripts/check-hygiene.sh. */
 
 :root{
   --bg:#141416; --bg-deep:#0F0F11; --bg-elev:#1B1C1E; --bg-card:#17181A;
@@ -78,11 +77,11 @@
   --green:#6FBF73;
 
   --ink:#F4F4F5; --ink-2:#B7B7BC; --ink-3:#8A8A8F;
-  /* Éclairci depuis #5C5C62 : il portait du texte réel à 2.83:1. */
+  /* Lightened from #5C5C62: it carried real text at 2.83:1. */
   --ink-4:#808086;
 
-  /* Inter d'abord si l'utilisateur l'a localement, sinon la pile système.
-     Aucune n'est téléchargée : rien ici ne déclenche de requête. */
+  /* Inter first if the user has it locally, then the system stack. Neither is
+     downloaded: nothing here triggers a request. */
   --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
   --mono:ui-monospace,'SF Mono','SFMono-Regular','JetBrains Mono',Menlo,Consolas,monospace;
   --maxw:1120px;
@@ -141,7 +140,7 @@ nav .inner{display:flex;align-items:center;justify-content:space-between;height:
 .btn[disabled]:hover{transform:none}
 :focus-visible{outline:2px solid var(--lav);outline-offset:3px;border-radius:6px}
 
-/* ── Héros ── */
+/* ── Hero ── */
 .hero{position:relative;padding-top:clamp(56px,9vw,104px);padding-bottom:clamp(48px,7vw,88px);overflow:hidden}
 .hero .glow{position:absolute;inset:0;pointer-events:none;z-index:0;
   background:
@@ -157,7 +156,7 @@ nav .inner{display:flex;align-items:center;justify-content:space-between;height:
 .hero .sub{margin-top:22px;max-width:46ch;font-size:clamp(1.02rem,1.5vw,1.18rem);color:var(--ink-2)}
 .hero .cta-row{margin-top:30px;display:flex;gap:12px;flex-wrap:wrap}
 
-/* La barre d'adresse : le moment signature */
+/* The address bar: the signature moment of the page */
 .roombar-card{background:linear-gradient(180deg,var(--bg-elev),var(--bg-card));
   border:1px solid var(--border-lt);border-radius:16px;padding:22px;
   box-shadow:0 24px 60px -30px rgba(0,0,0,.8)}
@@ -178,7 +177,7 @@ nav .inner{display:flex;align-items:center;justify-content:space-between;height:
   padding:5px 12px;display:inline-flex;align-items:center;gap:7px}
 .chip .tick{color:var(--green)}
 
-/* Rejoindre par code — pour qui a reçu un code plutôt qu'un lien */
+/* Join by code — for someone handed a code rather than a link */
 .joinline{margin-top:18px;border-top:1px solid var(--border);padding-top:16px}
 .joinline label{display:block;font-size:.78rem;color:var(--ink-3);margin-bottom:8px}
 .joinline .r{display:flex;gap:8px;flex-wrap:wrap}
@@ -188,18 +187,18 @@ nav .inner{display:flex;align-items:center;justify-content:space-between;height:
 .joinline input::placeholder{color:var(--ink-4)}
 .joinline .err{display:block;font-size:.78rem;color:var(--coral);min-height:1.1em;margin-top:6px}
 
-/* ── Cadre de section ── */
+/* ── Section frame ── */
 section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--border)}
 .kicker{display:flex;align-items:center;gap:12px;margin-bottom:26px}
 .kicker .line{height:1px;flex:1;background:var(--border)}
 
-/* ── Open source / crédits ── */
+/* ── Open source / credits ── */
 .os-body{margin-top:24px;columns:2;column-gap:clamp(28px,5vw,56px)}
 .os-body .body{color:var(--ink-2);font-size:1rem;break-inside:avoid;margin-bottom:16px}
 .os-body .body b{color:var(--ink);font-weight:600}
 @media(max-width:760px){.os-body{columns:1}}
-/* 190px : les cinq sources tiennent sur une rangée à pleine largeur
-   (5×190 + 4×12 = 998px pour ~1024px utiles) plutôt que 4 + 1 orphelin. */
+/* 190px: the five source cards hold one row at full width
+   (5x190 + 4x12 = 998px against ~1024px usable) instead of 4 + 1 orphan. */
 .sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
   gap:12px;margin-top:32px}
 .src{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
@@ -209,7 +208,7 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .src .ds{font-size:.82rem;color:var(--ink-3);line-height:1.4;flex:1}
 .src .u{font-family:var(--mono);font-size:.72rem;color:var(--lav);word-break:break-all}
 
-/* ── Souveraineté ── */
+/* ── Sovereignty ── */
 .sov{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,5vw,64px);align-items:start}
 .sov h2 .co{color:var(--coral)}
 .sov .body{color:var(--ink-2);font-size:1.04rem;margin-top:18px;max-width:40ch}
@@ -225,7 +224,7 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .compare .no{color:var(--ink-4)}
 .compare .us{color:var(--coral);font-weight:600}
 
-/* ── Catalogue ── */
+/* ── Product catalogue ── */
 .inset{background:var(--bg-deep);border:1px solid var(--border);border-radius:18px;
   padding:clamp(22px,3vw,34px)}
 .inset .tag{font-family:var(--mono);font-size:.7rem;letter-spacing:.14em;
@@ -243,12 +242,12 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
   padding:3px 8px;border-radius:20px;border:1px solid var(--border-lt);color:var(--ink-3);white-space:nowrap}
 .st.now{color:var(--coral);border-color:var(--coral-line);background:var(--coral-soft)}
 .st.soon{color:var(--lav);border-color:rgba(136,156,231,.32);background:var(--lav-soft)}
-/* Beta : livré et utilisable — vert, 7.98:1 sur la carte. */
+/* Beta: shipped and usable — green, 7.98:1 on the card. */
 .st.beta{color:var(--green);border-color:rgba(111,191,115,.34);background:rgba(111,191,115,.10)}
-/* R&D : le stade le plus amont — ambre, 11.12:1 sur la carte. */
+/* R&D: the earliest stage — amber, 11.12:1 on the card. */
 .st.rnd{color:#FFC24B;border-color:rgba(255,165,2,.34);background:rgba(255,165,2,.10)}
 
-/* ── Bande membre ── */
+/* ── Membership band ── */
 .member{padding-block:clamp(40px,6vw,76px);border-top:1px solid var(--border)}
 .member-card{display:flex;align-items:center;justify-content:space-between;gap:32px;flex-wrap:wrap;
   border:1px solid var(--coral-line);border-radius:18px;padding:clamp(24px,3.4vw,38px);
@@ -262,15 +261,15 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .price{font-family:var(--mono);color:var(--ink);display:flex;align-items:baseline;gap:5px}
 .price b{font-size:clamp(1.9rem,3.6vw,2.35rem);font-weight:700;letter-spacing:-.03em}
 .price span{color:var(--ink-3);font-size:.92rem}
-/* --ink-2, pas --ink-4 : cette note ne rend PAS sur --bg mais sur .member-card,
-   dont les deux dégradés radiaux éclaircissent le fond. Mesuré sur les pixels
-   réels : ink-4 y tombe à 4.46:1 en desktop et 3.90:1 sous 640px (la carte
-   passe en colonne et la note atterrit dans le lavis lavande) — sous le seuil
-   AA. ink-3 n'y suffit pas non plus (4.46:1). */
+/* --ink-2, not --ink-4: this note does NOT render on --bg but on
+   .member-card, whose two radial gradients lighten the backdrop. Measured on
+   real pixels: ink-4 drops to 4.46:1 on desktop and 3.90:1 below 640px (the
+   card goes column and the note lands in the lavender wash) — under AA.
+   ink-3 is not sufficient there either (4.46:1). */
 .member-note{font-size:.75rem;color:var(--ink-2);font-family:var(--mono)}
 @media(max-width:640px){.member-card{flex-direction:column;align-items:flex-start}}
 
-/* ── CTA final + pied ── */
+/* ── Final CTA + footer ── */
 .final{text-align:center;padding-block:clamp(60px,9vw,120px);border-top:1px solid var(--border);
   position:relative;overflow:hidden}
 .final .glow2{position:absolute;inset:0;pointer-events:none;
@@ -327,7 +326,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </nav>
 
-<!-- ── HÉROS ── -->
+<!-- ── HERO ── -->
 <header class="hero">
   <div class="glow" aria-hidden="true"></div>
   <canvas class="tiles" id="tiles" aria-hidden="true"></canvas>
@@ -335,11 +334,10 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
     <div>
       <div class="eyebrow reveal"><span class="dot">●</span> Souveraine · libre · gérée par une coopérative</div>
       <h1 class="reveal d1">Vos appels<br>n'appartiennent<br>qu'à <span class="lav">vous</span>.</h1>
-      <!-- « rien à récolter sur vous » a été retiré : le service traite bien
-           des données (identité Clerk, logs d'accès, journaux d'envoi TEM) et
-           aucune politique de confidentialité n'est encore publiée. La
-           formulation ci-dessous porte sur le modèle économique, ce qui est
-           exact et défendable. -->
+      <!-- "rien à récolter sur vous" was removed: the service does process
+           personal data (Clerk identity, access logs, TEM delivery logs). The
+           wording below is a claim about the business model, which is exact
+           and defensible. Detail lives in confidentialite/. -->
       <p class="sub reveal d2">Coopérative française, serveurs français, logiciel libre de l'État.
         Aucune publicité à vendre — donc aucune raison de vous profiler. Partagez un lien, vos
         invités rejoignent.</p>
@@ -378,13 +376,13 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </header>
 
-<!-- ── OPEN SOURCE / CRÉDITS ──
-     Remplace l'ancienne section « Comment ça marche ». Deux raisons : le
-     produit n'a pas besoin d'être expliqué en trois étapes, et son
-     argumentaire tournait autour de « aucun compte nécessaire », ce qui
-     travaille contre l'adhésion à 5,99€ qu'on veut vendre plus tard.
-     Les crédits ci-dessous sont la réponse à « ne pas passer pour des
-     pilleurs ». Chaque URL a été vérifiée (HTTP 200) avant publication. -->
+<!-- ── OPEN SOURCE / CREDITS ──
+     Replaces the former "how it works" section. Two reasons: the product does
+     not need a three-step explainer, and that section's argument rested on
+     "no account needed", which works against the 5,99€ membership we intend
+     to sell later. The credits below are the answer to "don't look like we
+     are pillaging upstream". Every URL was verified (HTTP 200) before
+     publication. -->
 <section class="block" id="open">
   <div class="wrap">
     <div class="kicker"><span class="eyebrow">Open source</span><span class="line"></span></div>
@@ -430,7 +428,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </section>
 
-<!-- ── SOUVERAINETÉ ── -->
+<!-- ── SOVEREIGNTY ── -->
 <section class="block" id="why">
   <div class="wrap sov">
     <div>
@@ -445,13 +443,12 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
     </div>
     <div class="compare" role="table" aria-label="Comparatif Big SaaS et Samouraï Visio">
       <div class="row" role="row"><span role="columnheader">&nbsp;</span><span class="col" role="columnheader">Big&nbsp;SaaS</span><span class="col" role="columnheader">Visio</span></div>
-      <!-- La ligne « Invités sans installation / rare » a été supprimée : elle
-           était fausse. Google Meet, Teams et Zoom permettent tous de rejoindre
-           depuis le navigateur. Et « enregistrés par défaut / souvent » l'était
-           aussi — aucun des trois n'enregistre par défaut. Deux lignes qu'un
-           lecteur qui utilise Meet falsifiait d'un coup d'œil, ce qui aurait
-           discrédité les trois lignes suivantes, qui sont vraies et portent
-           l'argument. -->
+      <!-- The "Invités sans installation / rare" row was removed: it was
+           false. Google Meet, Teams and Zoom all allow browser join. So was
+           "recorded by default / often" — none of the three records by
+           default. Two rows any reader who uses Meet could falsify at a
+           glance, which would have discredited the remaining rows, which are
+           true and carry the argument. -->
       <div class="row" role="row"><span class="feat" role="cell">Enregistrement des appels</span><span class="col no" role="cell">à la main de l'hôte</span><span class="col us" role="cell">impossible</span></div>
       <div class="row" role="row"><span class="feat" role="cell">Auto-hébergeable</span><span class="col no" role="cell">non</span><span class="col yes us" role="cell">oui</span></div>
       <div class="row" role="row"><span class="feat" role="cell">Code open-source</span><span class="col no" role="cell">non</span><span class="col yes us" role="cell">MIT</span></div>
@@ -460,7 +457,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </section>
 
-<!-- ── FAMILLE / CATALOGUE ── -->
+<!-- ── PRODUCT FAMILY / CATALOGUE ── -->
 <section class="block" id="family">
   <div class="wrap">
     <div class="kicker"><span class="eyebrow">Fait partie de la famille</span><span class="line"></span></div>
@@ -503,10 +500,10 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </section>
 
-<!-- ── BANDE MEMBRE ──
-     Le parcours d'adhésion n'existe pas encore (le hub porte le même stub).
-     Sur une page publique, un bouton mort vaut moins qu'un état honnête :
-     le prix est annoncé, l'action est explicitement « bientôt ». -->
+<!-- ── MEMBERSHIP BAND ──
+     The checkout flow does not exist yet (the hub carries the same stub). On a
+     public page, a dead button is worth less than an honest state: the price
+     is announced, the action is explicitly "coming". -->
 <section class="member">
   <div class="wrap">
     <div class="member-card">
@@ -527,7 +524,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   </div>
 </section>
 
-<!-- ── CTA FINAL ── -->
+<!-- ── FINAL CTA ── -->
 <section class="final">
   <div class="glow2" aria-hidden="true"></div>
   <div class="wrap inner">
@@ -549,11 +546,13 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
         — MIT, par la <a href="https://www.numerique.gouv.fr/" rel="noopener">DINUM</a>.
         Hébergé en France par Samouraï&nbsp;Coop. Sans affiliation avec le gouvernement français.
         <a href="https://github.com/samouraiworld/samourai-visio" rel="noopener">Notre configuration est publique</a>.</p>
-      <!-- Chemins RELATIFS vers nos propres pages, servies depuis ce montage.
-           Ne jamais pointer vers /mentions-legales ni /conditions-utilisation
-           à la racine : ces routes appartiennent à upstream et servent les
-           mentions de la DINUM, qui désignent l'État comme éditeur avec son
-           SIREN et une directrice de publication en poste. -->
+      <!-- RELATIVE paths to our own pages, served from this same mount.
+           Never point at /mentions-legales or /conditions-utilisation at the
+           site root: those routes belong to upstream and serve DINUM's
+           notices, which name the French State as publisher with its SIREN and
+           a serving public official as publication director.
+           scripts/check-hygiene.sh fails the build if anyone reintroduces
+           such a link. -->
       <div class="links">
         <a href="mentions-legales/">Mentions légales</a>
         <a href="confidentialite/">Confidentialité</a>
@@ -576,16 +575,16 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
 (function () {
   'use strict';
 
-  // Format d'identifiant d'upstream : trois segments de lettres minuscules,
-  // 3-4-3 (generateRoomId.ts). Le routeur valide contre
-  // (?:[a-zA-Z0-9]{3}-?[a-zA-Z0-9]{4}-?[a-zA-Z0-9]{3}) — un nom libre comme
-  // « reunion-equipe » affiche « Verify your meeting code ». Vérifié en prod.
+  // Upstream's room-id format: three segments of lowercase letters, 3-4-3
+  // (generateRoomId.ts). The router validates against
+  // (?:[a-zA-Z0-9]{3}-?[a-zA-Z0-9]{4}-?[a-zA-Z0-9]{3}) — a free-form name like
+  // "reunion-equipe" renders "Verify your meeting code". Verified in prod.
   var ALPHABET = 'abcdefghijklmnopqrstuvwxyz';
 
   function segment(n) {
     var out = '', buf = new Uint32Array(n), i;
-    // crypto.getRandomValues et non Math.random : l'identifiant EST le secret
-    // d'accès au salon, il ne doit pas être prédictible.
+    // crypto.getRandomValues, not Math.random: the id IS the room's access
+    // secret, so it must not be predictable.
     crypto.getRandomValues(buf);
     for (i = 0; i < n; i++) out += ALPHABET[buf[i] % ALPHABET.length];
     return out;
@@ -593,9 +592,8 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
 
   function newRoomId() { return [segment(3), segment(4), segment(3)].join('-'); }
 
-  // Un seul identifiant pour toute la page : ce que la barre affiche est
-  // exactement le salon qu'on ouvre. Une démo qui ment est pire qu'une
-  // absence de démo.
+  // One id for the whole page: what the address bar shows is exactly the room
+  // that opens. A demo that lies is worse than no demo.
   var roomId = newRoomId();
 
   function go() { window.location.assign('/' + roomId); }
@@ -603,7 +601,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   var i, starts = document.querySelectorAll('.js-start');
   for (i = 0; i < starts.length; i++) starts[i].addEventListener('click', go);
 
-  // Effet de frappe sur l'adresse du salon.
+  // Typing effect on the room address.
   function typeInto(el, word) {
     if (!el) return;
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -618,8 +616,8 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   var t2 = document.getElementById('typed2');
   if (t2) t2.textContent = roomId;
 
-  // Rejoindre par code — reprend normalizeRoomId d'upstream : on accepte un
-  // collage avec ou sans tirets, et une URL de salon complète.
+  // Join by code — mirrors upstream's normalizeRoomId: accepts a paste with or
+  // without dashes, and a full room URL.
   function normalize(raw) {
     var v = (raw || '').trim();
     var m = v.match(/([a-zA-Z0-9]{3}-?[a-zA-Z0-9]{4}-?[a-zA-Z0-9]{3})\/?$/);
@@ -642,7 +640,7 @@ footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);backgroun
   });
   input.addEventListener('input', function () { err.textContent = ''; });
 
-  // Fond ambiant : grille de tuiles de participants, un « intervenant actif ».
+  // Ambient backdrop: a grid of participant tiles with one "active speaker".
   (function () {
     var c = document.getElementById('tiles');
     if (!c || !c.getContext) return;

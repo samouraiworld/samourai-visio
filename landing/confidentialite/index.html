@@ -11,20 +11,22 @@
 <link rel="stylesheet" href="../legal.css">
 
 <!--
-  Politique de confidentialité — RGPD art. 13.
+  Politique de confidentialité — the GDPR art. 13 privacy notice.
+  Page content is French because the service is; comments are English like the
+  rest of the repo.
 
-  Tout ce qui est affirmé ici a été vérifié sur l'instance en production le
-  2026-07-24, pas déduit de la documentation :
-   * 28 requêtes chargées, toutes en même origine après le retrait de l'@import
-     de police dans theme/custom.css et landing/index.html.
-   * /api/v1.0/config/ renvoie "analytics": {} et "support": {} — rien de
-     configuré. Aucun SENTRY_DSN n'est défini.
-   * document.cookie est vide côté JS : le cookie de session Django est HttpOnly.
-   * localStorage ne contenait que i18nextLng et silent-login-retry ; cette
-     seconde clé disparaît avec FRONTEND_IS_SILENT_LOGIN_ENABLED=false.
-   * L'enregistrement est désactivé (recording.is_enabled = false).
+  Every claim on this page was verified against the production instance on
+  2026-07-24, not inferred from documentation:
+   * 28 requests loaded, all same-origin once the font @import was removed from
+     theme/custom.css and landing/index.html.
+   * /api/v1.0/config/ returns "analytics": {} and "support": {} — nothing
+     configured. No SENTRY_DSN is set.
+   * document.cookie is empty from JS: the Django session cookie is HttpOnly.
+   * localStorage held only i18nextLng and silent-login-retry; the latter
+     disappears with FRONTEND_IS_SILENT_LOGIN_ENABLED=false.
+   * Recording is off (recording.is_enabled = false).
 
-  Si l'un de ces points change, cette page doit changer avec lui.
+  If any of those stops being true, this page has to change with it.
 -->
 </head>
 <body>
