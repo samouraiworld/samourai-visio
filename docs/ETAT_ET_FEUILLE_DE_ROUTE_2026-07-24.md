@@ -118,6 +118,17 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 > the contract gate pins the key names against the livekit tag read from the
 > compose pin. Host: add the block to `~/visio/livekit-server.yaml` +
 > recreate livekit.
+> **1.5 is closed in the repo** (fourth PR): `scripts/backup.sh` — nightly
+> pg_dump through the container, dump verified (gzip, header, size), shipped
+> via rclone to an S3-compatible bucket (documented default: Scaleway Object
+> Storage fr-par, per the sovereignty principle; config in the new
+> `env.d/backup`, template tracked), remote object verified by size before
+> the `~/backups/LAST_OK` marker moves. Local 7 days, bucket 30 days — and
+> the privacy page's retention table now publishes that 30-day number, plus
+> the erasure-reaches-backups clause. Preflight: cron installed + env file
+> present/600/placeholder-free (config), `LAST_OK` fresher than 26 h (stack).
+> Restore drill in RUNBOOK §8ter — the doc's own rule, "an untested backup
+> is not a backup", is now an install step LOurs checks off, not a wish.
 
 ### Phase 2 — engineering debt from the 2026-07-24 review
 
