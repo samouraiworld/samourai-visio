@@ -183,7 +183,9 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .os-body .body{color:var(--ink-2);font-size:1rem;break-inside:avoid;margin-bottom:16px}
 .os-body .body b{color:var(--ink);font-weight:600}
 @media(max-width:760px){.os-body{columns:1}}
-.sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(224px,1fr));
+/* 190px : les cinq sources tiennent sur une rangée à pleine largeur
+   (5×190 + 4×12 = 998px pour ~1024px utiles) plutôt que 4 + 1 orphelin. */
+.sources{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));
   gap:12px;margin-top:32px}
 .src{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
   padding:18px;display:flex;flex-direction:column;gap:6px;transition:border-color .16s,background .16s}
@@ -226,7 +228,10 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
   padding:3px 8px;border-radius:20px;border:1px solid var(--border-lt);color:var(--ink-3);white-space:nowrap}
 .st.now{color:var(--coral);border-color:var(--coral-line);background:var(--coral-soft)}
 .st.soon{color:var(--lav);border-color:rgba(136,156,231,.32);background:var(--lav-soft)}
-.st.wip{color:#FFC24B;border-color:rgba(255,165,2,.34);background:rgba(255,165,2,.10)}
+/* Beta : livré et utilisable — vert, 7.98:1 sur la carte. */
+.st.beta{color:var(--green);border-color:rgba(111,191,115,.34);background:rgba(111,191,115,.10)}
+/* R&D : le stade le plus amont — ambre, 11.12:1 sur la carte. */
+.st.rnd{color:#FFC24B;border-color:rgba(255,165,2,.34);background:rgba(255,165,2,.10)}
 
 /* ── Bande membre ── */
 .member{padding-block:clamp(40px,6vw,76px);border-top:1px solid var(--border)}
@@ -256,12 +261,17 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .final .roombar{max-width:420px;margin:28px auto 0;text-align:left}
 .final .cta-row{margin-top:22px;display:flex;justify-content:center}
 footer{border-top:1px solid var(--border);padding-block:34px}
-footer .inner{display:flex;align-items:center;justify-content:space-between;gap:18px;flex-wrap:wrap}
+footer .inner{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;flex-wrap:wrap}
+footer .f-left{display:flex;flex-direction:column;gap:12px}
 footer .credit{font-size:.86rem;color:var(--ink-3);max-width:62ch}
 footer .credit a{color:var(--lav);border-bottom:1px solid transparent}
 footer .credit a:hover{border-color:var(--lav)}
 footer .links{display:flex;flex-wrap:wrap;gap:16px;font-size:.82rem;color:var(--ink-4)}
 footer .links a:hover{color:var(--ink-2)}
+footer .socials{display:flex;flex-wrap:wrap;gap:8px}
+footer .socials a{font-family:var(--mono);font-size:.72rem;color:var(--ink-3);
+  border:1px solid var(--border);border-radius:20px;padding:5px 12px;transition:.16s}
+footer .socials a:hover{color:var(--ink);border-color:var(--border-lt);background:var(--bg-card)}
 
 @media(max-width:860px){
   .hero .inner,.sov{grid-template-columns:1fr}
@@ -305,9 +315,9 @@ footer .links a:hover{color:var(--ink-2)}
     <div>
       <div class="eyebrow reveal"><span class="dot">●</span> Souveraine · libre · gérée par une coopérative</div>
       <h1 class="reveal d1">Vos appels<br>n'appartiennent<br>qu'à <span class="lav">vous</span>.</h1>
-      <p class="sub reveal d2">Gérée par une coopérative, sur un logiciel libre issu du commun
-        numérique, sur des serveurs français. Aucun modèle publicitaire à nourrir — donc rien
-        à récolter. Partagez un lien, vos invités rejoignent en un clic.</p>
+      <p class="sub reveal d2">Coopérative française, serveurs français, logiciel libre de l'État.
+        Aucune publicité à vendre — donc rien à récolter sur vous. Partagez un lien, vos invités
+        rejoignent.</p>
       <div class="cta-row reveal d2">
         <button class="btn btn-coral btn-lg js-start" type="button">Démarrer un appel →</button>
         <a class="btn btn-ghost btn-lg" href="#why">Pourquoi souveraine ?</a>
@@ -353,47 +363,43 @@ footer .links a:hover{color:var(--ink-2)}
 <section class="block" id="open">
   <div class="wrap">
     <div class="kicker"><span class="eyebrow">Open source</span><span class="line"></span></div>
-    <h2>Nous n'avons pas écrit ce logiciel.<br>Nous l'avons adopté — et nous le disons.</h2>
+    <h2>Contribuer à l'émergence d'un open source français de qualité.</h2>
 
     <div class="os-body">
-      <p class="body">Samouraï Visio tourne sur <b>La Suite Meet</b>, développé et publié sous
-        licence MIT par la <b>DINUM</b>, la direction interministérielle du numérique de l'État
-        français. Ce code a été ouvert précisément pour que d'autres puissent le faire tourner.
-        C'est ce qu'on appelle un commun numérique : un bien financé une fois par la collectivité,
-        et réutilisable par tous.</p>
+      <p class="body">Nous mettons nos équipes d'ingénieurs et de créatifs au service de
+        l'écosystème open source français. Deux façons&nbsp;: contribuer aux outils communs,
+        et en faire des services que tout le monde peut utiliser.</p>
 
-      <p class="body">Notre travail n'est donc pas d'avoir écrit ce logiciel, mais de l'exploiter
-        correctement — l'héberger en France, l'habiller, le tenir à jour, et le rendre accessible
-        à des gens qui n'ont ni serveur ni envie d'en administrer un. Nous ne <i>forkons</i> pas :
-        nous suivons la version publiée par la DINUM, pour que chacune de leurs améliorations
-        arrive jusqu'à vous plutôt que de se perdre dans une version parallèle.</p>
-
-      <p class="body">Cette démarche nous dépasse largement, et c'est précisément ce qui nous
-        intéresse. Une alternative publique et européenne aux suites américaines se construit
-        au grand jour, avec une déclinaison coopérative. Nous voulons y contribuer, pas nous
-        servir dedans.</p>
+      <p class="body">Visio en est un. Le logiciel est <b>La Suite Meet</b>, publié sous licence
+        MIT par la <b>DINUM</b>. Nous ne le forkons pas&nbsp;: nous l'exploitons en France et
+        suivons leur version, pour que leurs améliorations arrivent jusqu'à vous.</p>
     </div>
 
     <div class="sources">
       <a class="src" href="https://github.com/suitenumerique/meet" rel="noopener">
         <span class="nm">La Suite Meet</span>
-        <span class="ds">Le logiciel que vous utilisez ici. Code source complet, licence MIT.</span>
+        <span class="ds">Le logiciel de cette page. Licence MIT.</span>
         <span class="u">github.com/suitenumerique/meet</span>
       </a>
       <a class="src" href="https://www.numerique.gouv.fr/" rel="noopener">
         <span class="nm">DINUM</span>
-        <span class="ds">Ses auteurs — la direction interministérielle du numérique de l'État.</span>
+        <span class="ds">Ses auteurs. Le numérique de l'État.</span>
         <span class="u">numerique.gouv.fr</span>
       </a>
       <a class="src" href="https://lasuite.numerique.gouv.fr/" rel="noopener">
         <span class="nm">La Suite numérique</span>
-        <span class="ds">La suite d'outils publics dont Meet fait partie : docs, agenda, fichiers.</span>
+        <span class="ds">La suite publique dont Meet fait partie.</span>
         <span class="u">lasuite.numerique.gouv.fr</span>
       </a>
       <a class="src" href="https://visio.lasuite.coop/" rel="noopener">
         <span class="nm">visio.lasuite.coop</span>
-        <span class="ds">L'instance coopérative de référence. La nôtre s'en inspire directement.</span>
+        <span class="ds">L'instance coopérative de référence.</span>
         <span class="u">visio.lasuite.coop</span>
+      </a>
+      <a class="src" href="https://github.com/samouraiworld/samourai-visio" rel="noopener">
+        <span class="nm">Notre déploiement</span>
+        <span class="ds">Notre configuration, publiée. Reproduisez-la.</span>
+        <span class="u">github.com/samouraiworld/samourai-visio</span>
       </a>
     </div>
   </div>
@@ -405,12 +411,12 @@ footer .links a:hover{color:var(--ink-2)}
     <div>
       <div class="kicker"><span class="eyebrow">Souveraineté</span></div>
       <h2>La plupart des visios sont un <span class="co">business de données</span> déguisé en outil sympathique.</h2>
-      <p class="body">Samouraï Visio, non. Aucun actionnaire à rémunérer, aucune publicité à vendre.
-        La coopérative en est propriétaire, le code est ouvert, et l'infrastructure nous appartient —
-        vous pouvez même l'héberger vous-même.</p>
-      <p class="body">Libre à utiliser, libre à quitter, libre à faire tourner ailleurs. Un compte
-        Samouraï vous donne un salon permanent que vous administrez, et le même identifiant sur
-        toutes nos apps. C'est ça, la souveraineté : pas un argument marketing, une architecture.</p>
+      <p class="body">Samouraï Visio, non. Aucun actionnaire, aucune publicité. La coopérative en
+        est propriétaire, le code est ouvert, l'infrastructure est la nôtre — vous pouvez même
+        l'héberger vous-même.</p>
+      <p class="body">Un compte Samouraï vous donne un salon permanent que vous administrez, et le
+        même identifiant sur toutes nos apps. La souveraineté n'est pas un argument marketing :
+        c'est une architecture.</p>
     </div>
     <div class="compare" role="table" aria-label="Comparatif Big SaaS et Samouraï Visio">
       <div class="row" role="row"><span role="columnheader">&nbsp;</span><span class="col" role="columnheader">Big&nbsp;SaaS</span><span class="col" role="columnheader">Visio</span></div>
@@ -437,9 +443,9 @@ footer .links a:hover{color:var(--ink-2)}
           <div class="dm">visio.samourai.app</div>
         </div>
         <div class="app">
-          <div class="r"><span class="nm">Wesh</span><span class="st wip">En cours</span></div>
-          <div class="tg">Messagerie P2P. Sans serveur, sans trace.</div>
-          <div class="dm">wesh.samourai.app</div>
+          <div class="r"><span class="nm">Greffon</span><span class="st beta">Beta</span></div>
+          <div class="tg">Auto-hébergez vos apps souveraines en un clic.</div>
+          <div class="dm">greffon.io</div>
         </div>
         <div class="app">
           <div class="r"><span class="nm">Docs</span><span class="st soon">Bientôt</span></div>
@@ -457,9 +463,9 @@ footer .links a:hover{color:var(--ink-2)}
           <div class="dm">memba.samourai.app</div>
         </div>
         <div class="app">
-          <div class="r"><span class="nm">Greffon</span><span class="st wip">En cours</span></div>
-          <div class="tg">Auto-hébergez vos apps souveraines en un clic.</div>
-          <div class="dm">greffon.io</div>
+          <div class="r"><span class="nm">Wesh</span><span class="st rnd">R&amp;D</span></div>
+          <div class="tg">Messagerie P2P. Sans serveur, sans trace.</div>
+          <div class="dm">wesh.samourai.app</div>
         </div>
       </div>
     </div>
@@ -476,9 +482,8 @@ footer .links a:hover{color:var(--ink-2)}
       <div class="member-txt">
         <div class="eyebrow" style="color:var(--lav)">Membre Samouraï</div>
         <h3>Un compte. Toutes les apps.</h3>
-        <p>Un salon permanent que vous administrez, Visio, Wesh, Docs et toute la gamme —
-          un seul identifiant, et vous soutenez directement une coopérative plutôt que
-          des actionnaires.</p>
+        <p>Un salon permanent que vous administrez, et le même identifiant sur toute la
+          gamme. Vous financez une coopérative, pas des actionnaires.</p>
       </div>
       <div class="member-buy">
         <div class="price"><b>5,99€</b><span>/mois</span></div>
@@ -508,16 +513,25 @@ footer .links a:hover{color:var(--ink-2)}
 
 <footer>
   <div class="wrap inner">
-    <!-- Pas de lien vers samouraiworld/samourai-visio : le dépôt est privé, le
-         lien renverrait un 404. À rétablir si le dépôt passe public. -->
-    <p class="credit">Propulsé par <a href="https://github.com/suitenumerique/meet" rel="noopener">La&nbsp;Suite Meet</a>
-      — open source, MIT, développé par la <a href="https://www.numerique.gouv.fr/" rel="noopener">DINUM</a>.
-      Hébergé en France par Samouraï&nbsp;Coop. Sans affiliation avec le gouvernement français.</p>
-    <div class="links">
-      <a href="/mentions-legales">Mentions légales</a>
-      <a href="/conditions-utilisation">Conditions d'utilisation</a>
-      <a href="https://samourai.app">samourai.app</a>
+    <div class="f-left">
+      <p class="credit">Propulsé par <a href="https://github.com/suitenumerique/meet" rel="noopener">La&nbsp;Suite Meet</a>
+        — MIT, par la <a href="https://www.numerique.gouv.fr/" rel="noopener">DINUM</a>.
+        Hébergé en France par Samouraï&nbsp;Coop. Sans affiliation avec le gouvernement français.
+        <a href="https://github.com/samouraiworld/samourai-visio" rel="noopener">Notre configuration est publique</a>.</p>
+      <div class="links">
+        <a href="/mentions-legales">Mentions légales</a>
+        <a href="/conditions-utilisation">Conditions d'utilisation</a>
+        <a href="https://samourai.app">samourai.app</a>
+      </div>
     </div>
+    <nav class="socials" aria-label="Samouraï Coop sur les réseaux">
+      <a href="https://twitter.com/samouraicoop" rel="noopener">X</a>
+      <a href="https://github.com/samouraiworld" rel="noopener">GitHub</a>
+      <a href="https://linkedin.com/company/samouraicoop" rel="noopener">LinkedIn</a>
+      <a href="https://youtube.com/@SamouraiTV" rel="noopener">YouTube</a>
+      <a href="https://instagram.com/samourai.tv" rel="noopener">Instagram</a>
+      <a href="https://discord.gg/samourai" rel="noopener">Discord</a>
+    </nav>
   </div>
 </footer>
 
