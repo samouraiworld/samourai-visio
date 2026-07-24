@@ -34,6 +34,7 @@ fetch src/backend/meet/settings.py         settings.py    || exit 1
 fetch env.d/production.dist/common         common         || exit 1
 fetch docs/examples/compose/compose.yaml   compose.yaml   || exit 1
 fetch src/frontend/panda.config.ts         panda.config.ts|| exit 1
+fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then
@@ -121,6 +122,22 @@ if grep -q ':latest' "$WORK/compose.yaml"; then
   pass "upstream still ships :latest — compose.override.yaml pins are still required"
 else
   fyi "upstream no longer ships :latest; our pins are now belt-and-braces."
+fi
+
+# ── Unregistered rooms stay unpersisted ─────────────────────────────────────
+# The privacy policy states that rooms created without an account are never
+# stored server-side (landing/confidentialite/). That holds only while the
+# ALLOW_UNREGISTERED_ROOMS path keeps building its response in memory —
+# id None, LiveKit token, no model write (viewsets.py:257-277 at v1.24.0).
+# If upstream starts persisting them, the page is wrong the day the image is
+# bumped, and a periodic purge becomes a real obligation.
+SEG="$(sed -n '/Allow unregistered rooms when activated/,/def list/p' "$WORK/viewsets.py")"
+if [ -z "$SEG" ]; then
+  bad "cannot locate the unregistered-room path in viewsets.py — re-verify the privacy policy's 'never stored' claim"
+elif echo "$SEG" | grep -q '"id": None' && ! echo "$SEG" | grep -qE '\.(create|save|get_or_create)\('; then
+  pass "unregistered rooms are still synthetic (id None, no model write) — the 'never stored' claim holds"
+else
+  bad "the unregistered-room path changed and may now persist rooms — the privacy policy's 'never stored' claim must be re-verified"
 fi
 
 echo

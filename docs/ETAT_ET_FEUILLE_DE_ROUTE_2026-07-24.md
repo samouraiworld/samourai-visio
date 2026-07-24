@@ -82,6 +82,20 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 | 1.6 | **Monitoring** | Uptime + bandwidth alert. Note the trap: `settings.py:69` documents `DJANGO_SENTRY_DSN` but `:448` declares `environ_name="SENTRY_DSN"` — the documented name does nothing. |
 | 1.7 | **Load measurement** | At 10 and 50 concurrent participants, then extrapolate. LiveKit's own benchmark puts 4–8 vCPU at roughly 40–75 participants; do not promise 200. |
 
+> **Progress — 2026-07-24, after this document was written.**
+> **1.1 is closed in the repo**: log retention is implemented (journald,
+> `deploy/host/`, RUNBOOK §8bis, preflight checks with self-test mutations),
+> and the two promises that machinery could not honestly back were reworded to
+> verified reality — rooms created without an account are **never stored**
+> (`core/api/viewsets.py:257-277` builds the response in memory; now asserted
+> by `check-upstream-contract.sh`), and account deletion is **on request**,
+> deliberately, because Clerk accounts are shared with Memba/Zentai and an
+> idle-on-Visio timer would delete accounts active elsewhere. The host-side
+> install (RUNBOOK §8bis) joins the Phase 0 window; `preflight.sh` fails until
+> it has run.
+> **1.2 is half closed**: VAT `FR 54 830 485 108` added to the mentions
+> légales; the publisher telephone number is still missing.
+
 ### Phase 2 — engineering debt from the 2026-07-24 review
 
 Ranked. All verified, none blocking.

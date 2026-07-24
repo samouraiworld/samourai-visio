@@ -18,12 +18,14 @@
 #   scripts/preflight.sh all       # all three, in order (default)
 #
 # Run from the deploy directory on the host (the one holding compose.yaml),
-# or set VISIO_DIR. Never prints a secret.
+# or set VISIO_DIR. VISIO_ETC overrides /etc for the host-file checks — the
+# self-test uses it to point them at a fixture. Never prints a secret.
 
 set -uo pipefail
 
 PHASE="${1:-all}"
 DIR="${VISIO_DIR:-$PWD}"
+ETC="${VISIO_ETC:-/etc}"
 MEET_HOST_DEFAULT="visio.samourai.app"
 LIVEKIT_HOST_DEFAULT="livekit.samourai.app"
 
@@ -194,12 +196,14 @@ for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/c
 for n in ("postgresql", "redis", "backend", "frontend", "livekit"):
     if not svc.get(n, {}).get("restart"):
         bad.append(f"{n} has no restart policy (will not survive a reboot)")
+    if svc.get(n, {}).get("logging", {}).get("driver") != "journald":
+        bad.append(f"{n} does not log to journald (the 7-day retention never applies to it)")
 if "/data" not in {v.get("target") for v in svc.get("redis", {}).get("volumes", [])}:
     bad.append("redis has no /data volume (every restart logs out every user)")
 print("; ".join(bad))
 PY
 )"
-  if [ -z "$merge" ]; then ok "override merges with upstream: all three frontend mounts, restart policies, redis volume"
+  if [ -z "$merge" ]; then ok "override merges with upstream: all three frontend mounts, restart policies, journald logging, redis volume"
   else bad "compose merge problems" "$merge"; fi
 
   # ── Permissions ──────────────────────────────────────────────────────────
@@ -210,6 +214,58 @@ PY
   done
   if [ -z "$perm" ]; then ok "secret files are mode 600"
   else bad "secret files are world- or group-readable" "$perm"; fi
+
+  # ── Log retention (the privacy policy's 7-day promise) ───────────────────
+  # landing/confidentialite/ states IP-bearing logs are deleted after 7 days.
+  # json-file cannot do age-based retention, so everything logs to journald
+  # and journald enforces the clock. Three pieces, each silent when missing:
+  # the compose logging driver (asserted in the merge block above), the
+  # journald drop-in, and the daemon default for containers outside this
+  # compose project — nginx-proxy, which logs every client IP.
+  if [ -d "$ETC/systemd" ]; then
+    local jr="$ETC/systemd/journald.conf.d/visio-retention.conf"
+    if [ ! -f "$jr" ]; then
+      bad "journald retention drop-in missing: $jr" \
+          "install per RUNBOOK §8bis, or the published 7-day log retention is not enforced"
+    else
+      local ret maxf stor
+      ret="$(grep -m1 '^MaxRetentionSec=' "$jr" | cut -d= -f2)"
+      maxf="$(grep -m1 '^MaxFileSec=' "$jr" | cut -d= -f2)"
+      stor="$(grep -m1 '^Storage=' "$jr" | cut -d= -f2)"
+      if [ "$ret" = "7day" ] && [ "$maxf" = "1day" ] && [ "$stor" = "persistent" ]; then
+        ok "journald drop-in enforces the 7-day retention the privacy policy promises"
+      else
+        bad "journald drop-in drifted (MaxRetentionSec=${ret:-unset} MaxFileSec=${maxf:-unset} Storage=${stor:-unset})" \
+            "expected 7day / 1day / persistent — the published retention and the enforced one must match"
+      fi
+    fi
+
+    local dj="$ETC/docker/daemon.json"
+    local drv
+    drv="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("log-driver",""))' "$dj" 2>/dev/null)"
+    if [ "$drv" = "journald" ]; then
+      ok "docker default log driver is journald (covers nginx-proxy and any future container)"
+    else
+      bad "docker default log driver is '${drv:-unreadable}', not journald ($dj)" \
+          "containers outside this compose project keep unbounded json-file logs — nginx-proxy logs every client IP"
+    fi
+
+    local lr="$ETC/logrotate.d/rsyslog"
+    if [ -f "$lr" ]; then
+      local slow; slow="$(grep -nE 'weekly|rotate 4' "$lr" || true)"
+      if [ -z "$slow" ]; then
+        ok "rsyslog file copies rotate daily and keep 7 (auth.log, kern.log)"
+      else
+        bad "rsyslog logrotate keeps file copies beyond 7 days" \
+            "$(echo "$slow" | tr '\n' ' ') — tighten per RUNBOOK §8bis"
+      fi
+    else
+      skip "no $lr" "no rsyslog file copies to rotate; journald retention covers the journal itself"
+    fi
+  else
+    skip "not a systemd host ($ETC/systemd missing)" \
+         "log retention cannot be asserted here — on the deploy host this must never skip"
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -301,6 +357,43 @@ PY
   local unap; unap="$(dc exec -T backend python manage.py showmigrations --plan 2>/dev/null | grep -c '^\[ \]' || echo 0)"
   if [ "$unap" = "0" ]; then ok "no unapplied migrations"
   else bad "$unap unapplied migration(s)" "run: docker compose run --rm backend python manage.py migrate"; fi
+
+  # ── Log retention, runtime half ──────────────────────────────────────────
+  # The config phase proves the FILES; this proves the runtime picked them up.
+  # A container keeps the log driver it was CREATED with — neither `restart`
+  # nor a daemon.json edit changes it. Only recreation does. This inspects
+  # every running container on the box, so it catches nginx-proxy too, which
+  # lives in another compose project.
+  local nonj=""
+  while read -r cname; do
+    local cdrv
+    cdrv="$(docker inspect -f '{{.HostConfig.LogConfig.Type}}' "$cname" 2>/dev/null)"
+    [ "$cdrv" = "journald" ] || nonj="$nonj $cname(${cdrv:-unknown})"
+  done < <(docker ps --format '{{.Names}}')
+  if [ -z "$nonj" ]; then ok "every running container logs to journald (nginx-proxy included)"
+  else bad "container(s) on another log driver — the 7-day clock does not apply to them" \
+           "$nonj — recreate them (up -d / --force-recreate), a restart is not enough"; fi
+
+  # The public promise is "7 days, then deletion", and rotation is daily, so
+  # no surviving entry may be older than 8 days. This is the only check that
+  # proves deletion actually HAPPENS — the drop-in existing proves intent.
+  # `head -1` closes the pipe after one line, so this never streams the
+  # journal. A journal younger than the window passes trivially, which is
+  # correct: the invariant holds.
+  local oldest
+  oldest="$(journalctl -q -o short-unix 2>/dev/null | head -1 | cut -d' ' -f1 | cut -d. -f1)"
+  if [ -z "$oldest" ]; then
+    skip "cannot read the journal (journalctl missing, or empty journal)" \
+         "the 7-day deletion is unproven on this host"
+  else
+    local age; age=$(( ($(date +%s) - oldest) / 86400 ))
+    if [ "$age" -le 8 ]; then
+      ok "oldest journal entry is ${age} day(s) old — inside the published 7-day window"
+    else
+      bad "oldest journal entry is ${age} days old — retention is configured but not deleting" \
+          "restart systemd-journald after installing the drop-in, then journalctl --vacuum-time=7d"
+    fi
+  fi
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
