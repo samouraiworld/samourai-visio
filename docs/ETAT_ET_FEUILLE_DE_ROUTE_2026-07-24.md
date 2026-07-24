@@ -95,6 +95,18 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 > it has run.
 > **1.2 is half closed**: VAT `FR 54 830 485 108` added to the mentions
 > légales; the publisher telephone number is still missing.
+> **1.3 is closed in the repo** (second PR): our own CGU at
+> `landing/conditions-utilisation/`, linked from every footer — and the gap
+> the item actually described is closed too: a gateway override
+> (`deploy/nginx/default.conf.template`, upstream's template plus marked
+> blocks) 301s all **three** hardcoded DINUM routes to our pages —
+> `/mentions-legales`, `/conditions-utilisation` **and `/accessibilite`**,
+> which this document had not listed. Gates: preflight asserts the redirects
+> (config: file + merged mount source; public: live 301s), and
+> `check-upstream-contract.sh` diffs the template against upstream with our
+> blocks stripped, so gateway drift blocks the next version bump instead of
+> shipping. Host needs `deploy/nginx/` copied to `~/visio/nginx/` in the
+> Phase 0 window (RUNBOOK §3 note + §9).
 
 ### Phase 2 — engineering debt from the 2026-07-24 review
 

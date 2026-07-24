@@ -29,7 +29,9 @@ curl -sSf -o "$WORK/compose.yaml" \
   || { echo "cannot fetch upstream compose"; exit 1; }
 cp deploy/compose.override.yaml "$WORK/compose.override.yaml"
 cp deploy/hosts.example "$WORK/.env"
-mkdir -p "$WORK/env.d" "$WORK/custom" "$WORK/landing"
+mkdir -p "$WORK/env.d" "$WORK/custom" "$WORK/landing" "$WORK/nginx"
+# The shipped gateway copy must itself satisfy the redirect check.
+cp deploy/nginx/default.conf.template "$WORK/nginx/default.conf.template"
 
 # Replace <placeholders> with well-formed, single-line fake values. The same
 # token replaces the LiveKit secret in both files, so they match.
@@ -83,6 +85,8 @@ mutate 's|^FRONTEND_EXTERNAL_HOME_URL="\(.*\)/"|FRONTEND_EXTERNAL_HOME_URL="\1"|
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/DJANGO_LANGUAGE_CODE=fr/' env.d/common "unsupported language code"
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/#DJANGO_LANGUAGE_CODE=fr-fr/' env.d/common "language left at the English default"
 mutate '\|/usr/share/nginx/html/accueil|d' compose.override.yaml "landing bind-mount dropped from the override"
+mutate 's|return 301 /accueil/mentions-legales/;|return 404;|' nginx/default.conf.template "legal redirect stripped from the gateway template"
+mutate '\|nginx/default.conf.template|d' compose.override.yaml "gateway mount dropped (upstream's template would silently mount instead)"
 mutate 's/^MaxRetentionSec=7day/MaxRetentionSec=1month/' etc/systemd/journald.conf.d/visio-retention.conf "journal retention loosened beyond the published 7 days"
 mutate 's/"log-driver": "journald"/"log-driver": "json-file"/' etc/docker/daemon.json "docker default log driver reverted to json-file"
 mutate 's/driver: journald/driver: json-file/' compose.override.yaml "compose logging driver reverted to json-file"
@@ -117,6 +121,14 @@ chmod 644 "$WORK/env.d/common"
 n="$(fails)"
 if [ "$n" -ge 1 ]; then ok "detected: world-readable secret"; else err "NOT detected: world-readable secret"; fi
 chmod 600 "$WORK/env.d/common"
+
+# Gateway template file missing — Docker would mount a directory in its place
+# and nginx would fail to start; the config phase must catch it before `up`.
+echo "special: gateway template missing"
+mv "$WORK/nginx/default.conf.template" "$WORK/nginx/default.conf.template.hidden"
+n="$(fails)"
+if [ "$n" -ge 1 ]; then ok "detected: gateway template missing"; else err "NOT detected: gateway template missing"; fi
+mv "$WORK/nginx/default.conf.template.hidden" "$WORK/nginx/default.conf.template"
 
 # Journald retention drop-in missing entirely — the state of a host where
 # RUNBOOK §8bis was never run, which is exactly what the check exists to catch.
