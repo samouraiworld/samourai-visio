@@ -35,6 +35,7 @@ fetch env.d/production.dist/common         common         || exit 1
 fetch docs/examples/compose/compose.yaml   compose.yaml   || exit 1
 fetch src/frontend/panda.config.ts         panda.config.ts|| exit 1
 fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
+fetch docker/files/production/default.conf.template gateway.conf || exit 1
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then
@@ -138,6 +139,21 @@ elif echo "$SEG" | grep -q '"id": None' && ! echo "$SEG" | grep -qE '\.(create|s
   pass "unregistered rooms are still synthetic (id None, no model write) — the 'never stored' claim holds"
 else
   bad "the unregistered-room path changed and may now persist rooms — the privacy policy's 'never stored' claim must be re-verified"
+fi
+
+# ── Gateway template: our copy must equal upstream's, marked blocks aside ───
+# deploy/nginx/default.conf.template replaces the upstream-fetched gateway
+# (same compose mount target) to 301 the SPA's hardcoded DINUM legal routes
+# to our own pages. It has to stay a verbatim copy otherwise, or gateway
+# drift ships silently on the next image bump. diff -B: blank-line noise
+# left by stripping the markers is not drift.
+OURS="$(dirname "$0")/../deploy/nginx/default.conf.template"
+if [ ! -f "$OURS" ]; then
+  bad "deploy/nginx/default.conf.template is missing while compose.override.yaml mounts it"
+elif sed '/# SAMOURAI-BEGIN/,/# SAMOURAI-END/d' "$OURS" | diff -B -q - "$WORK/gateway.conf" >/dev/null 2>&1; then
+  pass "gateway override is upstream's template plus only the SAMOURAI-marked blocks"
+else
+  bad "gateway template drifted from upstream at ${REF} — re-derive deploy/nginx/default.conf.template (fresh upstream copy + the marked blocks)"
 fi
 
 echo

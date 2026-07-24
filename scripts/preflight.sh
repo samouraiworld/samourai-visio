@@ -129,6 +129,27 @@ phase_config() {
     skip "no landing page configured" "upstream's own home page will be served to anonymous visitors"
   fi
 
+  # ── Gateway override: the legal-page redirects must exist on disk ────────
+  # Upstream's SPA hardcodes DINUM's notices at /mentions-legales,
+  # /conditions-utilisation and /accessibilite; our gateway copy 301s them to
+  # our own pages. Two silent failure modes: the file is missing or stripped
+  # of its redirects (checked here), or the override mount is gone — in which
+  # case upstream's compose still mounts ITS template at the same target and
+  # the redirects vanish with the mount check still green (checked in the
+  # merge block below, by source path).
+  if [ -s nginx/default.conf.template ]; then
+    local rdr; rdr="$(grep -c 'return 301 /accueil/' nginx/default.conf.template)"
+    if [ "$rdr" -ge 6 ]; then
+      ok "gateway template carries the legal-page redirects ($rdr locations)"
+    else
+      bad "nginx/default.conf.template has $rdr redirect location(s), expected 6" \
+          "DINUM's hardcoded legal pages become reachable again on this host"
+    fi
+  else
+    bad "nginx/default.conf.template missing or empty" \
+        "Docker would mount a directory in its place and the gateway would not start"
+  fi
+
   # ── Interface language ───────────────────────────────────────────────────
   # Upstream defaults to en-us and never warns. Only four values are wired
   # (settings.py:227-234); anything else falls back silently to English.
@@ -188,11 +209,20 @@ try:
 except Exception as e:
     print(f"cannot parse compose config: {e}"); raise SystemExit
 bad = []
-tg = {v.get("target") for v in svc.get("frontend", {}).get("volumes", [])}
+vols = svc.get("frontend", {}).get("volumes", [])
+tg = {v.get("target") for v in vols}
 for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/custom",
              "/usr/share/nginx/html/accueil"):
     if want not in tg:
         bad.append(f"frontend missing mount {want}")
+# The gateway target must be OUR copy, not upstream's ./default.conf.template:
+# if the override line is deleted, upstream's compose still mounts its file at
+# the same target, the mount check above stays green, and the legal-page
+# redirects silently vanish.
+gw = next((v.get("source", "") for v in vols
+           if v.get("target") == "/etc/nginx/templates/docs.conf.template"), "")
+if "nginx/default.conf.template" not in gw:
+    bad.append(f"gateway template source is {gw!r}, not our nginx/ copy (legal redirects lost)")
 for n in ("postgresql", "redis", "backend", "frontend", "livekit"):
     if not svc.get(n, {}).get("restart"):
         bad.append(f"{n} has no restart policy (will not survive a reboot)")
@@ -497,6 +527,13 @@ phase_public() {
     else
       bad "privacy policy is not served at ${base}/confidentialite/"
     fi
+    local cu; cu="$(curl -sSL --max-time 15 "${base}/conditions-utilisation/" 2>/dev/null)"
+    if echo "$cu" | grep -q "vaut acceptation"; then
+      ok "our conditions d'utilisation are served"
+    else
+      bad "conditions d'utilisation are not served at ${base}/conditions-utilisation/" \
+          "the only terms reachable on this host are then upstream's, which describe a service for State administrations"
+    fi
 
     # ── The no-third-party claim, verified where it is made ──────────────────
     # The landing and the privacy policy both state that nothing is loaded from
@@ -511,6 +548,27 @@ phase_public() {
     fi
   else
     skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
+  fi
+
+  # ── DINUM's hardcoded legal routes must redirect off this host ───────────
+  # The SPA ships /mentions-legales, /conditions-utilisation and
+  # /accessibilite with DINUM's own notices, and answers 200 for every path —
+  # so a status assertion alone is meaningful here: only our gateway
+  # locations produce a redirect on these URLs. Checked independently of the
+  # landing page: the redirects live in nginx, not in Meet's config.
+  local rr=""
+  for p in /mentions-legales /conditions-utilisation /accessibilite; do
+    local rout; rout="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "https://${MEET_HOST}${p}" 2>/dev/null)"
+    case "$rout" in
+      30?\ *"/accueil/"*) : ;;
+      *) rr="$rr $p(${rout:-no answer})" ;;
+    esac
+  done
+  if [ -z "$rr" ]; then
+    ok "DINUM's hardcoded legal routes all 301 to our pages"
+  else
+    bad "upstream legal route(s) still served on this host" \
+        "$rr — the gateway override is not mounted or lost its redirects; those pages name the French State as publisher"
   fi
 
   # ── Backend default locale ───────────────────────────────────────────────

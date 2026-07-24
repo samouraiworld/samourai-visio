@@ -1,0 +1,94 @@
+# SAMOURAI-BEGIN provenance
+# Verbatim copy of upstream docker/files/production/default.conf.template at
+# v1.24.0, plus the blocks between SAMOURAI-BEGIN/END markers. It replaces the
+# host-fetched copy through the compose.override.yaml mount (same target path
+# — compose replaces volumes keyed by target), because upstream's SPA
+# hardcodes DINUM's legal pages at /mentions-legales, /conditions-utilisation
+# and /accessibilite (src/frontend/src/routes.ts) and no env var disables
+# them: they name the French State as publisher and describe a service
+# reserved for State administrations. The redirect block below answers those
+# routes before the SPA can.
+#
+# Drift control: check-upstream-contract.sh diffs this file, SAMOURAI blocks
+# stripped, against upstream's copy at the pinned tag — the same regime as
+# theme/custom.css against panda.config.ts. If that gate goes red on a
+# version bump, re-derive this copy: fresh upstream file + these blocks.
+#
+# envsubst: the stock nginx entrypoint substitutes only ${VARS} that exist in
+# the environment; nginx runtime vars ($http_host, $uri) survive, and the
+# added blocks deliberately contain none.
+# SAMOURAI-END
+
+upstream meet_backend {
+    server ${BACKEND_INTERNAL_HOST}:8000 fail_timeout=0;
+}
+
+upstream meet_frontend {
+    server ${FRONTEND_INTERNAL_HOST}:8080 fail_timeout=0;
+}
+
+server {
+    listen 8083;
+    server_name localhost;
+    charset utf-8;
+
+    # Disables server version feedback on pages and in headers
+    server_tokens off;
+
+    proxy_ssl_server_name on;
+
+    location @proxy_to_meet_backend {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        proxy_redirect off;
+        proxy_pass http://meet_backend;
+    }
+
+    location @proxy_to_meet_frontend {
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        proxy_redirect off;
+        proxy_pass http://meet_frontend;
+    }
+
+    # SAMOURAI-BEGIN legal-page redirects
+    # Exact-match locations take precedence over every prefix location, so
+    # these fire before `location /` can hand the path to the SPA. 301, not
+    # 302: these routes must never come back.
+    #
+    # absolute_redirect off makes every redirect this server emits (ours and
+    # nginx's own slash-completions) a relative Location. The default would
+    # build http:// URLs — this server listens in plaintext behind the
+    # TLS-terminating proxy and would embed its own scheme.
+    absolute_redirect off;
+
+    location = /mentions-legales  { return 301 /accueil/mentions-legales/; }
+    location = /mentions-legales/ { return 301 /accueil/mentions-legales/; }
+    location = /conditions-utilisation  { return 301 /accueil/conditions-utilisation/; }
+    location = /conditions-utilisation/ { return 301 /accueil/conditions-utilisation/; }
+    # DINUM's RGAA accessibility declaration. Nothing equivalent exists for
+    # this instance (the legal obligation does not reach Samouraï Coop), so
+    # send it home rather than serve a declaration about someone else's
+    # service.
+    location = /accessibilite  { return 301 /accueil/; }
+    location = /accessibilite/ { return 301 /accueil/; }
+    # SAMOURAI-END
+
+    location / {
+        try_files $uri @proxy_to_meet_frontend;
+    }
+
+    location /api {
+        try_files $uri @proxy_to_meet_backend;
+    }
+
+    location /admin {
+        try_files $uri @proxy_to_meet_backend;
+    }
+
+    location /static {
+        try_files $uri @proxy_to_meet_backend;
+    }
+}

@@ -133,6 +133,18 @@ jobs:
           done < /tmp/images
           exit $status
 
+      - name: Gateway template parses (production image's own nginx -t)
+        working-directory: deploy
+        # The template replaces upstream's gateway config (same mount target)
+        # to 301 the SPA's hardcoded DINUM legal routes. A syntax error here
+        # is a total outage: the frontend container's nginx refuses to start.
+        # --add-host: `nginx -t` resolves upstream server names at parse time.
+        run: |
+          docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 \
+            -e BACKEND_INTERNAL_HOST=backend -e FRONTEND_INTERNAL_HOST=frontend \
+            -v "$PWD/nginx/default.conf.template:/etc/nginx/templates/docs.conf.template:ro" \
+            nginxinc/nginx-unprivileged:1.30.3-alpine3.23 nginx -t
+
       - name: Our override merges with upstream instead of clobbering it
         working-directory: deploy
         run: |
