@@ -367,7 +367,7 @@ Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 > VISIO_DIR=~/visio /path/to/repo/scripts/preflight.sh public   # after TLS   — the live surface
 > ```
 >
-> It fails on: unfilled placeholders, a wrapped secret, JSON-shaped lists, a LiveKit-secret mismatch, the wrong CSS variable, a missing bind-mount (checking content-type, not status, because the SPA fallback returns 200 for a missing file), a floating image tag, an unresolved `${VAR}`, a spoofable `X-Forwarded-Proto`, and a guest-join path that does not actually work. It prints `SKIP` for the handful of things a script cannot prove — UDP reachability, the Scaleway security group, `prompt=none` — and each SKIP explains why. **A SKIP is not a pass.**
+> It fails on: unfilled placeholders, a wrapped secret, JSON-shaped lists, a LiveKit-secret mismatch, the wrong CSS variable, a missing bind-mount (checking content-type, not status, because the SPA fallback returns 200 for a missing file), a floating image tag, an unresolved `${VAR}`, a spoofable `X-Forwarded-Proto`, a guest-join path that does not actually work, and a log-retention setup that does not match what the privacy policy publishes (§8bis). It prints `SKIP` for the handful of things a script cannot prove — UDP reachability, the Scaleway security group, `prompt=none` — and each SKIP explains why. **A SKIP is not a pass.**
 
 ```bash
 docker compose up -d
@@ -512,12 +512,78 @@ it leaked every visitor's IP and User-Agent on every page, rooms included.
 
 ---
 
+## 8bis. Log retention — the privacy policy's 7-day clock
+
+The privacy policy (`landing/confidentialite/`) states that IP-bearing
+technical logs are kept **7 days, then deleted**. Docker's default json-file
+driver cannot honour a time bound — it rotates by **size** only, so at low
+traffic it retains entries for months. Every container therefore logs to
+**journald**, and journald enforces the clock. Three pieces:
+
+| Piece | File | Covers |
+|---|---|---|
+| Compose logging anchor | [`deploy/compose.override.yaml`](deploy/compose.override.yaml) | the five stack services |
+| Docker daemon default | [`deploy/host/daemon.json`](deploy/host/daemon.json) | every other container — **nginx-proxy logs every client IP** |
+| journald drop-in | [`deploy/host/visio-retention.conf`](deploy/host/visio-retention.conf) | the clock itself: `MaxRetentionSec=7day`, daily rotation, persistent storage, 1 GB ceiling |
+
+Install, on the host:
+
+```bash
+# 1. journald: the 7-day clock
+sudo cp deploy/host/visio-retention.conf /etc/systemd/journald.conf.d/
+sudo systemctl restart systemd-journald
+
+# 2. Docker daemon default. MERGE if /etc/docker/daemon.json already exists —
+#    deploy/host/daemon.json also carries userland-proxy:false, which the
+#    published TURN relay range wants anyway (see compose.override.yaml).
+sudo cp deploy/host/daemon.json /etc/docker/daemon.json
+sudo systemctl restart docker      # containers return via restart policies
+
+# 3. The stack: the override sets `driver: journald`; recreation applies it.
+docker compose up -d               # recreates on config change — NOT `restart`
+
+# 4. nginx-proxy lives in its own compose project and keeps the driver it was
+#    CREATED with — daemon.json is only read at creation. Recreate it:
+(cd ~/proxy && docker compose up -d --force-recreate)
+
+# 5. Purge the backlog accumulated before the clock existed. The old
+#    json-file logs die with the recreated containers.
+sudo journalctl --rotate && sudo journalctl --vacuum-time=7d
+
+# 6. rsyslog keeps FILE copies (auth.log, kern.log) on the distro default of
+#    weekly × 4 ≈ up to 5 weeks. Tighten them to daily × 7:
+sudo sed -i 's/weekly/daily/; s/rotate 4/rotate 7/' /etc/logrotate.d/rsyslog
+```
+
+Verify — `preflight.sh config` asserts the files, `preflight.sh stack` the
+runtime:
+
+```bash
+docker ps -q | xargs docker inspect -f '{{.Name}} {{.HostConfig.LogConfig.Type}}'
+# every line must end in "journald" — a container created before the change
+# keeps json-file forever; a restart does not fix it, only recreation does
+journalctl -q -o short-unix | head -1   # oldest surviving entry: ≤ 8 days old
+```
+
+`docker compose logs` keeps working — the journald driver supports it.
+
+> [!NOTE]
+> The page's two other retention promises are **by construction**, not by
+> machinery, since the 2026-07-24 rewording: rooms created without an account
+> are never written to the database at all (`core/api/viewsets.py:257-277`
+> builds the response in memory — asserted by `check-upstream-contract.sh`),
+> and account deletion is **on request** — deliberately, because a Samouraï
+> account is shared across apps, so an idle-on-Visio timer would delete
+> accounts still active on Memba or Zentai.
+
+---
+
 ## 9. Before you promote it
 
 A free public WebRTC service with open signup is a bandwidth and moderation liability. Have these live **before** any announcement:
 
 - [x] **Mentions légales** (LCEN art. 6-III) and **politique de confidentialité** (GDPR art. 13) — published at `/accueil/mentions-legales/` and `/accueil/confidentialite/`, naming Samouraï Coop as publisher and Scaleway SAS as host. Abuse contact `support@samourai.coop` is on both.
-- [ ] **Enforce the retention the privacy policy already promises.** The page states access logs are kept **7 days**, rooms created without an account are purged **monthly**, and accounts are deleted after **12 months** without a sign-in. None of that is implemented yet — nginx-proxy's json-file logs are unbounded by default. **A published retention period that is not enforced is worse than none**: it is a written commitment to a control that does not exist. Implement before promotion, or amend the page.
+- [ ] **Run the §8bis install block on the host.** The config, the gates and the page now agree — logs are deleted after 7 days by journald, guest rooms are never stored at all, accounts are deleted on request — but the journald half only exists once §8bis has been executed on the host. `preflight.sh` fails until it has.
 - [ ] **Caps** — max participants per room, max room duration. Meet exposes neither; enforce LiveKit-side (`max_participants`, `empty_timeout`).
 - [ ] **CGU** — still upstream's at `/conditions-utilisation` and they describe a service reserved for State administrations. Nothing links to them (§7bis), but they remain reachable by URL on this host. Write ours, or accept and document that gap.
 - [ ] **Backups** — `pg_dump` on a cron, off-box
