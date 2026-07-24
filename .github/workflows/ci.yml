@@ -148,7 +148,8 @@ jobs:
           # Compose merges volumes keyed by TARGET. If upstream's nginx template
           # mount disappeared, the override replaced it rather than adding to it.
           for want in ("/etc/nginx/templates/docs.conf.template",
-                       "/usr/share/nginx/html/custom"):
+                       "/usr/share/nginx/html/custom",
+                       "/usr/share/nginx/html/accueil"):
               if want not in targets:
                   fails.append(f"frontend is missing mount {want} (have: {sorted(targets)})")
 

@@ -88,6 +88,45 @@ for f in LICENSE NOTICE.md; do
   fi
 done
 
+# ── No third-party resource reaches a visitor's browser ─────────────────────
+# The service claims, on its own public pages, that it loads nothing from a
+# third party. That claim has to be enforced, not remembered: a font @import
+# in theme/custom.css already leaked every visitor's IP and User-Agent to a CDN
+# once (audit 2026-07-24), on every page of the app including inside rooms.
+#
+# Scans the files that are actually delivered to browsers, for anything that
+# fetches from an origin we do not control. Anchors on the URL-bearing CSS/HTML
+# constructs only — ordinary <a href> links are fine, they are navigation the
+# visitor chooses, not an automatic request.
+ext=""
+for f in theme/custom.css $(git ls-files 'landing/*.html' 'landing/*.css'); do
+  [ -f "$f" ] || continue
+  # strip comments so documentation about the rule cannot trip the rule
+  stripped=$(sed -e 's|/\*.*\*/||g' -e '/\/\*/,/\*\//d' -e 's|<!--.*-->||g' -e '/<!--/,/-->/d' "$f")
+  hits=$(printf '%s\n' "$stripped" | grep -nEo \
+    '@import[^;]*https?://[^;]*|<(script|iframe)[^>]+src="https?://[^"]+|<link[^>]+href="https?://[^"]+|url\(["'"'"']?https?://[^)]+' \
+    || true)
+  [ -n "$hits" ] && ext="$ext$f: $hits"$'\n'
+done
+check "no third-party resource is loaded by the theme or the landing pages" "${ext%$'\n'}"
+
+# ── Legal pages exist and name the publisher ────────────────────────────────
+# Upstream's own /mentions-legales and /conditions-utilisation declare DINUM as
+# publisher, with the French State's SIREN and a serving public official as
+# publication director. They are hardcoded React components — no env var
+# overrides them — so this service must ship its own, and must never link to
+# theirs. Both halves are checked.
+legal=""
+for f in landing/mentions-legales/index.html landing/confidentialite/index.html; do
+  [ -s "$f" ] || legal="$legal$f is missing or empty"$'\n'
+done
+[ -s landing/mentions-legales/index.html ] &&
+  grep -q "830 485 108" landing/mentions-legales/index.html ||
+  legal="${legal}landing/mentions-legales/index.html does not carry Samouraï Coop's SIREN"$'\n'
+badlink=$(grep -rlE 'href="/(mentions-legales|conditions-utilisation)' landing/ 2>/dev/null || true)
+[ -n "$badlink" ] && legal="${legal}links to upstream's DINUM legal pages: $badlink"$'\n'
+check "legal pages are ours, and nothing links to upstream's" "${legal%$'\n'}"
+
 # ── Scripts stay executable and syntactically valid ─────────────────────────
 badsh=""
 for s in $(git ls-files 'scripts/*.sh'); do

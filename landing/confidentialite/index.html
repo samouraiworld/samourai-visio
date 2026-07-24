@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Politique de confidentialité — Samouraï Visio</title>
+<meta name="description" content="Quelles données Samouraï Visio traite, pourquoi, combien de temps, et avec qui. Sans traceur, sans mesure d'audience, sans enregistrement.">
+<meta name="theme-color" content="#141416">
+<meta name="robots" content="index,follow">
+<link rel="icon" href="../logo-mark.png">
+<link rel="stylesheet" href="../legal.css">
+
+<!--
+  Politique de confidentialité — RGPD art. 13.
+
+  Tout ce qui est affirmé ici a été vérifié sur l'instance en production le
+  2026-07-24, pas déduit de la documentation :
+   * 28 requêtes chargées, toutes en même origine après le retrait de l'@import
+     de police dans theme/custom.css et landing/index.html.
+   * /api/v1.0/config/ renvoie "analytics": {} et "support": {} — rien de
+     configuré. Aucun SENTRY_DSN n'est défini.
+   * document.cookie est vide côté JS : le cookie de session Django est HttpOnly.
+   * localStorage ne contenait que i18nextLng et silent-login-retry ; cette
+     seconde clé disparaît avec FRONTEND_IS_SILENT_LOGIN_ENABLED=false.
+   * L'enregistrement est désactivé (recording.is_enabled = false).
+
+  Si l'un de ces points change, cette page doit changer avec lui.
+-->
+</head>
+<body>
+
+<a class="skip" href="#contenu">Aller au contenu</a>
+
+<header class="top">
+  <div class="wrap inner">
+    <a class="brand" href="../"><img src="../logo-mark.png" alt="">Samouraï&nbsp;<span class="thin">Visio</span></a>
+    <a class="back" href="../">← Retour à l'accueil</a>
+  </div>
+</header>
+
+<main id="contenu">
+  <div class="wrap">
+    <p class="eyebrow">Données personnelles</p>
+    <h1>Politique de confidentialité</h1>
+    <p class="updated">Dernière mise à jour : 24 juillet 2026</p>
+
+    <div class="note">
+      <p><b>En résumé.</b> Vos appels ne sont jamais enregistrés ni transcrits. Le
+      service ne charge aucune ressource tierce, n'utilise aucun traceur, aucune
+      mesure d'audience et aucun cookie publicitaire. Rejoindre une réunion ne
+      demande aucun compte et ne crée aucun profil.</p>
+    </div>
+
+    <h2>Qui est responsable de vos données</h2>
+    <p>Samouraï Coop (SCOP sous forme de SARL), 149 avenue du Maine, 75014 Paris,
+    SIREN 830 485 108, est responsable du traitement. Voir les
+    <a href="../mentions-legales/">mentions légales</a>.
+    Contact&nbsp;: <a href="mailto:support@samourai.coop">support@samourai.coop</a>.</p>
+
+    <h2>Ce que nous traitons, et pourquoi</h2>
+
+    <h3>Si vous rejoignez une réunion sans compte</h3>
+    <div class="tw">
+    <table>
+      <tr><th>Donnée</th><th>Pourquoi</th><th>Base légale</th></tr>
+      <tr><td><b>Le nom que vous saisissez</b> sur l'écran d'accueil</td>
+          <td>Vous identifier auprès des autres participants. Il est conservé par
+              <i>votre</i> navigateur pour vous éviter de le retaper, et n'est pas
+              associé à un compte.</td>
+          <td>Intérêt légitime</td></tr>
+      <tr><td><b>Adresse IP</b>, dans les journaux techniques du serveur</td>
+          <td>Sécurité, diagnostic de panne, prévention des abus.</td>
+          <td>Intérêt légitime</td></tr>
+      <tr><td><b>Flux audio, vidéo et partage d'écran</b></td>
+          <td>Transmis en temps réel entre participants, via notre serveur en France.
+              <b>Jamais enregistrés, jamais stockés.</b></td>
+          <td>Exécution du service</td></tr>
+    </table>
+    </div>
+    <p>Aucun compte n'est créé, et votre navigateur ne contacte aucun prestataire
+    d'authentification.</p>
+
+    <h3>Si vous avez un compte Samouraï</h3>
+    <div class="tw">
+    <table>
+      <tr><th>Donnée</th><th>Pourquoi</th><th>Base légale</th></tr>
+      <tr><td><b>Adresse e-mail</b> et <b>nom d'utilisateur</b></td>
+          <td>Créer et administrer votre compte, vous permettre de posséder des salons
+              permanents.</td>
+          <td>Exécution du service</td></tr>
+      <tr><td><b>Salons que vous possédez</b> et leurs réglages</td>
+          <td>Vous les restituer d'une session à l'autre.</td>
+          <td>Exécution du service</td></tr>
+      <tr><td><b>Adresses e-mail des personnes invitées</b>, si vous envoyez une
+              invitation</td>
+          <td>Acheminer l'invitation. Elles ne sont pas réutilisées et ne servent à
+              aucune sollicitation.</td>
+          <td>Intérêt légitime</td></tr>
+    </table>
+    </div>
+    <p>Un compte Samouraï est commun à tous les services Samouraï. Le créer sur Visio
+    le rend utilisable sur les autres applications de la coopérative.</p>
+
+    <h2>Avec qui ces données sont partagées</h2>
+    <p>Nous ne vendons, ne louons et n'échangeons aucune donnée. Nos seuls
+    sous-traitants sont ceux qui font fonctionner le service&nbsp;:</p>
+    <div class="tw">
+    <table>
+      <tr><th>Prestataire</th><th>Rôle</th><th>Localisation</th></tr>
+      <tr><td><b>Scaleway SAS</b></td><td>Hébergement des serveurs et de la base de données</td><td>France (Paris)</td></tr>
+      <tr><td><b>Scaleway Transactional Email</b></td><td>Acheminement des e-mails d'invitation</td><td>France</td></tr>
+      <tr><td><b>Clerk</b></td><td>Authentification des comptes Samouraï</td><td>États-Unis</td></tr>
+    </table>
+    </div>
+    <div class="note">
+      <p><b>Le point que nous ne cachons pas.</b> Notre prestataire d'authentification,
+      Clerk, est une société américaine&nbsp;: les données de compte (adresse e-mail,
+      nom d'utilisateur) y sont traitées, ce qui implique un transfert hors Union
+      européenne, encadré par les clauses contractuelles types de la Commission
+      européenne. C'est le seul maillon non européen de notre infrastructure, il est
+      contraire à ce que nous visons, et nous étudions son remplacement par une
+      solution européenne auto-hébergée.</p>
+      <p>Ce transfert ne concerne <b>que les titulaires d'un compte</b>. Si vous
+      rejoignez une réunion sans compte, votre navigateur ne contacte jamais Clerk.</p>
+    </div>
+
+    <h2>Combien de temps</h2>
+    <div class="tw">
+    <table>
+      <tr><th>Donnée</th><th>Conservation</th></tr>
+      <tr><td>Journaux techniques (adresses IP)</td><td><b>7 jours</b>, puis suppression</td></tr>
+      <tr><td>Flux audio et vidéo</td><td><b>Aucune</b> — rien n'est écrit sur disque</td></tr>
+      <tr><td>Salons créés sans compte</td><td>Purgés chaque mois</td></tr>
+      <tr><td>Compte et salons associés</td><td>Jusqu'à suppression du compte, ou <b>12 mois</b> sans connexion</td></tr>
+      <tr><td>Nom d'affichage saisi comme invité</td><td>Dans votre navigateur uniquement, jusqu'à effacement de vos données de navigation</td></tr>
+    </table>
+    </div>
+
+    <h2>Cookies et stockage local</h2>
+    <p>Nous n'utilisons <b>aucun cookie de mesure d'audience ni de publicité</b>. C'est
+    la raison pour laquelle ce site ne vous impose aucune bannière de consentement&nbsp;:
+    il n'y a rien à consentir.</p>
+    <ul>
+      <li><b>Cookie de session</b> — uniquement si vous vous connectez. Il vous maintient
+      authentifié, expire après 12 heures, et n'est pas lisible par des scripts.</li>
+      <li><b>Stockage local du navigateur</b> — conserve vos préférences d'usage&nbsp;: la
+      langue de l'interface, le nom que vous utilisez pour rejoindre une réunion, et vos
+      réglages de micro et caméra. Ces informations ne quittent jamais votre appareil.</li>
+    </ul>
+
+    <h2>Ce que nous ne faisons pas</h2>
+    <ul>
+      <li>Aucun enregistrement ni transcription des réunions.</li>
+      <li>Aucune mesure d'audience, aucun traceur, aucun pixel.</li>
+      <li>Aucune ressource chargée depuis un tiers — ni police, ni script, ni image.
+      Toutes les requêtes de ce service vont vers nos propres serveurs, ce qui est
+      vérifiable dans l'onglet réseau de votre navigateur.</li>
+      <li>Aucun profilage, aucune décision automatisée, aucune publicité.</li>
+      <li>Aucune revente ni transmission commerciale de données.</li>
+    </ul>
+
+    <h2>Sécurité</h2>
+    <p>Les échanges sont chiffrés en transit&nbsp;: TLS pour le site, DTLS-SRTP pour les
+    flux audio et vidéo. Ces flux transitent par notre serveur pour être redistribués
+    entre participants&nbsp;; ils y sont relayés, jamais conservés. Nous ne pratiquons pas
+    le chiffrement de bout en bout&nbsp;: nous préférons l'écrire que le laisser supposer.</p>
+
+    <h2>Vos droits</h2>
+    <p>Vous disposez d'un droit d'accès, de rectification, d'effacement, de limitation,
+    d'opposition et de portabilité sur vos données. Écrivez à
+    <a href="mailto:support@samourai.coop">support@samourai.coop</a>&nbsp;; nous répondons
+    sous un mois.</p>
+    <p>Si vous rejoignez des réunions sans compte, nous ne détenons aucune donnée
+    permettant de vous identifier&nbsp;: il n'y a alors rien à consulter ni à effacer.</p>
+    <p>Vous pouvez également introduire une réclamation auprès de la
+    <a href="https://www.cnil.fr" rel="noopener">CNIL</a>, autorité de contrôle française.</p>
+
+    <h2>Modifications</h2>
+    <p>Toute évolution de cette politique sera publiée sur cette page, avec sa date de
+    mise à jour. Les changements substantiels seront signalés sur la page d'accueil.</p>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap inner">
+    <span>Samouraï Coop — service édité et hébergé en France</span>
+    <span class="links">
+      <a href="../">Accueil</a>
+      <a href="../mentions-legales/">Mentions légales</a>
+      <a href="https://samourai.app">samourai.app</a>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

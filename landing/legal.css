@@ -1,0 +1,89 @@
+/* ─────────────────────────────────────────────────────────────
+   Feuille commune aux pages légales de Samouraï Visio.
+   Servie en même origine depuis le montage ./landing — aucune
+   requête tierce, comme le reste du service.
+   Mêmes jetons que landing/index.html : contrastes déjà mesurés
+   sur #141416 (coral 6.22:1, lavande 6.97:1, ink-2 9.21:1,
+   ink-3 5.36:1). --ink-4 n'est PAS utilisé ici : il ne tient AA
+   que sur --bg et rien ne garantit ce fond dans un long texte.
+   ───────────────────────────────────────────────────────────── */
+
+:root{
+  --bg:#141416; --bg-card:#17181A; --border:#26262B; --border-lt:#3A3B41;
+  --coral:#FD6262; --coral-soft:rgba(253,98,98,.12); --coral-line:rgba(253,98,98,.32);
+  --lav:#889CE7;
+  --ink:#F4F4F5; --ink-2:#B7B7BC; --ink-3:#8A8A8F;
+  --sans:'Inter',system-ui,-apple-system,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,'SF Mono','SFMono-Regular','JetBrains Mono',Menlo,Consolas,monospace;
+  --maxw:760px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;background:var(--bg);color:var(--ink-2);font-family:var(--sans);
+  line-height:1.7;-webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+a{color:var(--lav)}
+a:hover{color:var(--ink)}
+:focus-visible{outline:2px solid var(--lav);outline-offset:3px;border-radius:4px}
+.skip{position:absolute;left:-9999px;top:0;background:var(--coral);color:#1a0d0d;
+  padding:12px 18px;font-weight:600;z-index:100;border-radius:0 0 8px 0}
+.skip:focus{left:0}
+
+.wrap{max-width:var(--maxw);margin:0 auto;padding-inline:clamp(20px,5vw,32px)}
+
+header.top{border-bottom:1px solid var(--border)}
+header.top .inner{display:flex;align-items:center;justify-content:space-between;
+  height:62px;gap:16px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:700;color:var(--ink);
+  letter-spacing:-.02em;text-decoration:none}
+.brand:hover{color:var(--ink)}
+.brand img{width:22px;height:22px;border-radius:5px}
+.brand .thin{color:var(--ink-3);font-weight:500}
+.back{font-size:.88rem;color:var(--ink-3);text-decoration:none}
+.back:hover{color:var(--ink)}
+
+main{padding-block:clamp(36px,6vw,64px)}
+.eyebrow{font-family:var(--mono);font-size:.72rem;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--coral);margin:0 0 14px}
+h1{color:var(--ink);font-size:clamp(1.8rem,4.5vw,2.6rem);line-height:1.1;
+  letter-spacing:-.035em;margin:0 0 10px;font-weight:700}
+.updated{font-family:var(--mono);font-size:.78rem;color:var(--ink-3);margin:0 0 40px}
+h2{color:var(--ink);font-size:1.18rem;letter-spacing:-.02em;margin:40px 0 12px;
+  font-weight:600;padding-top:20px;border-top:1px solid var(--border)}
+h3{color:var(--ink);font-size:1rem;margin:24px 0 8px;font-weight:600}
+p{margin:0 0 14px}
+ul{margin:0 0 14px;padding-left:20px}
+li{margin-bottom:8px}
+b,strong{color:var(--ink);font-weight:600}
+
+/* Bloc d'identité : les mentions que la loi impose de rendre lisibles. */
+.ident{background:var(--bg-card);border:1px solid var(--border);border-radius:12px;
+  padding:22px 24px;margin:0 0 18px}
+.ident dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:8px 20px}
+.ident dt{font-family:var(--mono);font-size:.74rem;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink-3);padding-top:3px}
+.ident dd{margin:0;color:var(--ink)}
+@media(max-width:560px){
+  .ident dl{grid-template-columns:1fr;gap:2px 0}
+  .ident dd{margin-bottom:12px}
+}
+
+.note{background:var(--bg-card);border:1px solid var(--coral-line);
+  border-left:3px solid var(--coral);border-radius:0 10px 10px 0;
+  padding:16px 20px;margin:0 0 18px}
+.note p:last-child{margin-bottom:0}
+
+table{width:100%;border-collapse:collapse;margin:0 0 18px;font-size:.92rem}
+.tw{overflow-x:auto;margin-bottom:18px}
+.tw table{margin-bottom:0}
+th,td{text-align:left;padding:11px 14px;border-top:1px solid var(--border);
+  vertical-align:top}
+th{color:var(--ink-3);font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;
+  text-transform:uppercase;font-weight:500;border-top:0}
+td b{color:var(--ink)}
+
+footer{border-top:1px solid var(--border);padding-block:28px;margin-top:56px;
+  font-size:.84rem;color:var(--ink-3)}
+footer .inner{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
+footer .links{display:flex;flex-wrap:wrap;gap:16px}

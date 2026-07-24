@@ -103,6 +103,42 @@ phase_config() {
   if [ -z "$ba" ]; then ok "branding assets present and non-empty"
   else bad "missing branding assets (Docker will mount a directory in their place)" "$ba"; fi
 
+  # ── Landing page: the setting and the files must agree ───────────────────
+  # Both halves fail silently on their own. A set URL with no files behind it
+  # bounces every anonymous visitor onto the SPA fallback (200 text/html), and
+  # files with no URL set are simply never reached.
+  local ehu; ehu=$(envval env.d/common FRONTEND_EXTERNAL_HOME_URL)
+  if [ -n "$ehu" ]; then
+    if [ -s landing/index.html ]; then
+      ok "landing page present and FRONTEND_EXTERNAL_HOME_URL set"
+    else
+      bad "FRONTEND_EXTERNAL_HOME_URL is set but landing/index.html is missing or empty" \
+          "anonymous visitors would be redirected to the SPA fallback, which looks like a redirect loop"
+    fi
+    case "$ehu" in
+      */) : ;;
+      *) bad "FRONTEND_EXTERNAL_HOME_URL has no trailing slash" \
+             "nginx answers /accueil with a 301 to /accueil/ — redirect the visitor once, not twice" ;;
+    esac
+  elif [ -s landing/index.html ]; then
+    bad "landing/index.html exists but FRONTEND_EXTERNAL_HOME_URL is unset" \
+        "the page is served but nothing ever sends visitors to it"
+  else
+    skip "no landing page configured" "upstream's own home page will be served to anonymous visitors"
+  fi
+
+  # ── Interface language ───────────────────────────────────────────────────
+  # Upstream defaults to en-us and never warns. Only four values are wired
+  # (settings.py:227-234); anything else falls back silently to English.
+  local lang; lang=$(envval env.d/common DJANGO_LANGUAGE_CODE)
+  case "$lang" in
+    fr-fr|en-us|nl-nl|de-de) ok "DJANGO_LANGUAGE_CODE=$lang is a supported locale" ;;
+    "") bad "DJANGO_LANGUAGE_CODE is unset — the backend default locale stays en-us (upstream default)" \
+            "sets the default User.language and the last-resort e-mail fallback; it does NOT set the SPA's interface language" ;;
+    *)  bad "DJANGO_LANGUAGE_CODE=$lang is not one of en-us, fr-fr, nl-nl, de-de" \
+            "unsupported values fall back to English with no error" ;;
+  esac
+
   # ── TURN config traps ────────────────────────────────────────────────────
   if grep -qE '^[[:space:]]*enabled:[[:space:]]*true' livekit-server.yaml 2>/dev/null; then
     if grep -qE '^[[:space:]]*tls_port:[[:space:]]*0' livekit-server.yaml; then
@@ -151,7 +187,8 @@ except Exception as e:
     print(f"cannot parse compose config: {e}"); raise SystemExit
 bad = []
 tg = {v.get("target") for v in svc.get("frontend", {}).get("volumes", [])}
-for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/custom"):
+for want in ("/etc/nginx/templates/docs.conf.template", "/usr/share/nginx/html/custom",
+             "/usr/share/nginx/html/accueil"):
     if want not in tg:
         bad.append(f"frontend missing mount {want}")
 for n in ("postgresql", "redis", "backend", "frontend", "livekit"):
@@ -162,7 +199,7 @@ if "/data" not in {v.get("target") for v in svc.get("redis", {}).get("volumes", 
 print("; ".join(bad))
 PY
 )"
-  if [ -z "$merge" ]; then ok "override merges with upstream: both frontend mounts, restart policies, redis volume"
+  if [ -z "$merge" ]; then ok "override merges with upstream: all three frontend mounts, restart policies, redis volume"
   else bad "compose merge problems" "$merge"; fi
 
   # ── Permissions ──────────────────────────────────────────────────────────
@@ -331,6 +368,74 @@ phase_public() {
   else
     bad "custom_css_url is absent or null in /api/v1.0/config/" "FRONTEND_CUSTOM_CSS_URL is unset, misspelled, or the backend was not restarted"
   fi
+
+  # ── Landing page: advertised AND actually served ─────────────────────────
+  # Two independent failures. The backend can advertise a URL that serves the
+  # SPA fallback, which sends every anonymous visitor back into the app — it
+  # reads as a redirect loop and would be debugged as an auth problem.
+  local ehu; ehu="$(echo "$cfg" | sed -n 's/.*"external_home_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  if [ -n "$ehu" ]; then
+    ok "backend advertises external_home_url ($ehu)"
+    # Content, not status: a missing mount also returns 200 text/html.
+    local body; body="$(curl -sSL --max-time 15 "$ehu" 2>/dev/null)"
+    if echo "$body" | grep -q 'id="start-btn"'; then
+      ok "landing page is really served at $ehu"
+    else
+      bad "external_home_url does not serve the landing page" \
+          "the ./landing bind-mount is missing — the SPA fallback answers 200 text/html, so anonymous visitors bounce straight back into the app"
+    fi
+
+    # ── Legal pages, content-asserted ────────────────────────────────────────
+    # Same SPA-fallback trap: a missing file answers 200 text/html, so the
+    # status code proves nothing. Assert on our own SIREN, which upstream's
+    # DINUM pages could never contain — that distinguishes "our page is served"
+    # from "the app answered something".
+    local base; base="${ehu%/}"
+    local ml; ml="$(curl -sSL --max-time 15 "${base}/mentions-legales/" 2>/dev/null)"
+    if echo "$ml" | grep -q "830 485 108"; then
+      ok "our mentions légales are served (LCEN art. 6-III)"
+    else
+      bad "mentions légales are not served at ${base}/mentions-legales/" \
+          "without them the footer link is dead, and the only legal pages reachable on this host are upstream's, which name DINUM as publisher"
+    fi
+    local pc; pc="$(curl -sSL --max-time 15 "${base}/confidentialite/" 2>/dev/null)"
+    if echo "$pc" | grep -q "responsable du traitement"; then
+      ok "our privacy policy is served (GDPR art. 13)"
+    else
+      bad "privacy policy is not served at ${base}/confidentialite/"
+    fi
+
+    # ── The no-third-party claim, verified where it is made ──────────────────
+    # The landing and the privacy policy both state that nothing is loaded from
+    # a third party. Assert it against what production actually serves, not
+    # against the repo — the deployed theme is a copy an operator may edit.
+    local css; css="$(curl -sS --max-time 15 "https://${MEET_HOST}/custom/style.css" 2>/dev/null)"
+    if printf '%s' "$css" | grep -qE '@import[^;]*https?://|url\(["'"'"']?https?://'; then
+      bad "the deployed theme loads a third-party resource" \
+          "every visitor's IP and User-Agent leak to it, on every page including inside rooms — and the privacy policy states the opposite"
+    else
+      ok "the deployed theme loads nothing from a third party"
+    fi
+  else
+    skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
+  fi
+
+  # ── Backend default locale ───────────────────────────────────────────────
+  # This proves the BACKEND locale only. It does NOT prove the interface
+  # language: the SPA picks its own via i18next browser detection
+  # (order: localStorage, navigator — fallbackLng 'fr'), and LANGUAGE_CODE
+  # appears in none of the JS chunks it serves. Invitation e-mails follow the
+  # SENDER's Accept-Language through LocaleMiddleware, with this value as the
+  # last-resort fallback. Labelling this "interface language" would be a check
+  # reporting coverage it does not have.
+  local lc; lc="$(echo "$cfg" | sed -n 's/.*"LANGUAGE_CODE"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')"
+  case "$lc" in
+    fr-fr) ok "backend default locale is fr-fr (proves the container was recreated, not merely restarted)" ;;
+    "")    skip "LANGUAGE_CODE absent from /api/v1.0/config/" ;;
+    *)     bad "backend default locale is $lc, not fr-fr" "DJANGO_LANGUAGE_CODE unset, or the backend was restarted instead of recreated (restart does not reload env)" ;;
+  esac
+  skip "interface language cannot be asserted from the server" \
+       "the SPA resolves it client-side from the visitor's browser; check it in a browser with a French locale"
 
   # ── Guest path: the ONLY test that exercises ALLOW_UNREGISTERED_ROOMS ─────
   # It fires only on Http404 — a slug NOT in the database. A room created by a
