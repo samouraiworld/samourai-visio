@@ -247,17 +247,24 @@ jobs:
           set -euo pipefail
           W="$RUNNER_TEMP/visio"
           rm -f "$HOME/backups/LAST_OK"
-          chmod 500 "$W/bucket/pg"
+          # Point at a prefix inside a read-only parent, NOT at the working
+          # bucket: rclone would otherwise reuse the same-minute filename and
+          # overwrite the already-writable file from the previous step, which
+          # succeeds and proves nothing.
+          mkdir -p "$W/readonly"
+          chmod 500 "$W/readonly"
+          sed -i "s|^BACKUP_REMOTE_PATH=.*|BACKUP_REMOTE_PATH=visio:$W/readonly/pg|" \
+            "$W/env.d/backup"
           cd "$W"
           if VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" > /tmp/fail.out 2>&1; then
             cat /tmp/fail.out
             echo "::error::reported success with an unwritable remote"; exit 1
           fi
+          cat /tmp/fail.out
           grep -q '^FAIL' /tmp/fail.out ||
-            { cat /tmp/fail.out; echo "::error::no FAIL line"; exit 1; }
+            { echo "::error::no FAIL line"; exit 1; }
           [ ! -f "$HOME/backups/LAST_OK" ] ||
             { echo "::error::marker written despite failure"; exit 1; }
-          chmod 700 "$W/bucket/pg"
 
   preflight-selftest:
     name: Preflight self-test
