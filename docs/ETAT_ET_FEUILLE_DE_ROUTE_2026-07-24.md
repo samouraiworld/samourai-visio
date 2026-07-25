@@ -79,7 +79,7 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 | 1.3 | **Our own CGU** | Upstream's remain reachable by direct URL and describe a service for State administrations. Nothing links to them, but they exist on our host. |
 | 1.4 | **Caps** | Meet exposes none; enforce LiveKit-side (`max_participants`, `empty_timeout`, `departure_timeout`). |
 | 1.5 | **Backups** | `pg_dump` on cron, off-box, **restore-tested once**. An untested backup is not a backup. |
-| 1.6 | **Monitoring** | Uptime + bandwidth alert. Note the trap: `settings.py:69` documents `DJANGO_SENTRY_DSN` but `:448` declares `environ_name="SENTRY_DSN"` — the documented name does nothing. |
+| 1.6 | **Monitoring** | Uptime + bandwidth alert. ⚠️ **The trap as written here was INVERTED — corrected 2026-07-25.** Use **`DJANGO_SENTRY_DSN`**; the bare `SENTRY_DSN` is the one that does nothing. `environ_name` does not suppress the `DJANGO_` prefix (only `environ_prefix=None` does, which upstream omits here), verified empirically against `django-configurations==2.5.1`. See `deploy/env.d/common.example`; `preflight.sh config` now fails on the bare form. |
 | 1.7 | **Load measurement** | At 10 and 50 concurrent participants, then extrapolate. LiveKit's own benchmark puts 4–8 vCPU at roughly 40–75 participants; do not promise 200. |
 
 > **Progress — 2026-07-24, after this document was written.**

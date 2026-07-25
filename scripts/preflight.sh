@@ -192,6 +192,25 @@ phase_config() {
             "unsupported values fall back to English with no error" ;;
   esac
 
+  # ── Sentry DSN under the name that actually works ────────────────────────
+  # settings.py:448 declares environ_name="SENTRY_DSN" WITHOUT
+  # environ_prefix=None, so django-configurations still applies the DJANGO_
+  # prefix: only DJANGO_SENTRY_DSN populates the setting. Verified against
+  # upstream's pin (django-configurations==2.5.1): the bare name resolves to
+  # None. A bare SENTRY_DSN is therefore accepted, unused, and silent — no
+  # error reaches Sentry and nothing says so.
+  local bare_dsn pref_dsn
+  bare_dsn="$(grep -cE '^SENTRY_DSN=' env.d/common)"
+  pref_dsn="$(grep -cE '^DJANGO_SENTRY_DSN=' env.d/common)"
+  if [ "$bare_dsn" != "0" ]; then
+    bad "env.d/common sets the bare SENTRY_DSN, which django-configurations ignores" \
+        "rename it to DJANGO_SENTRY_DSN, or errors silently never reach Sentry"
+  elif [ "$pref_dsn" != "0" ]; then
+    ok "Sentry DSN set under DJANGO_SENTRY_DSN (the name that resolves)"
+  else
+    skip "no Sentry DSN configured" "backend errors are visible only in container logs (roadmap 1.6)"
+  fi
+
   # ── TURN config traps ────────────────────────────────────────────────────
   if grep -qE '^[[:space:]]*enabled:[[:space:]]*true' livekit-server.yaml 2>/dev/null; then
     if grep -qE '^[[:space:]]*tls_port:[[:space:]]*0' livekit-server.yaml; then
