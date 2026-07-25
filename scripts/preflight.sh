@@ -59,7 +59,12 @@ phase_config() {
 
   # ── Unfilled placeholders ────────────────────────────────────────────────
   # Catches <from Clerk dashboard>, <resend api key>, <openssl rand ...>.
-  local ph; ph="$(grep -nE '<[^>]+>' .env env.d/common env.d/postgresql env.d/backup livekit-server.yaml 2>/dev/null | grep -v '^\s*#' || true)"
+  # grep -n on multiple files prefixes each hit with "file:line:", so the
+  # comment filter must skip past that prefix before looking for '#' — a bare
+  # '^\s*#' never matches once the filename prefix is there, and every
+  # commented-out example (starting with the header's own "<placeholders>")
+  # false-positives.
+  local ph; ph="$(grep -nE '<[^>]+>' .env env.d/common env.d/postgresql env.d/backup livekit-server.yaml 2>/dev/null | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
   if [ -z "$ph" ]; then ok "no unfilled <placeholder> in any config file"
   else bad "unfilled placeholders remain" "$(echo "$ph" | cut -d: -f1,2 | tr '\n' ' ')"; fi
 
@@ -426,9 +431,19 @@ PY
   else bad "redis appendonly=${aof:-unknown} — every restart logs out every user mid-call"; fi
 
   # ── Migrations ───────────────────────────────────────────────────────────
-  local unap; unap="$(dc exec -T backend python manage.py showmigrations --plan 2>/dev/null | grep -c '^\[ \]' || echo 0)"
-  if [ "$unap" = "0" ]; then ok "no unapplied migrations"
-  else bad "$unap unapplied migration(s)" "run: docker compose run --rm backend python manage.py migrate"; fi
+  # grep -c exits 1 when it counts zero matches, even though it still prints
+  # "0" — the old `|| echo 0` fallback then fired on that exit code and
+  # appended a SECOND "0", leaving $unap="0\n0" so it never equalled "0" and
+  # a fully-migrated stack reported as failing. Read grep's own count; only
+  # fall back when the plan itself could not be read at all.
+  local plan; plan="$(dc exec -T backend python manage.py showmigrations --plan 2>/dev/null)"
+  if [ -z "$plan" ]; then
+    bad "could not read the migration plan" "docker compose logs backend"
+  else
+    local unap; unap="$(printf '%s\n' "$plan" | grep -c '^\[ \]')"
+    if [ "$unap" = "0" ]; then ok "no unapplied migrations"
+    else bad "$unap unapplied migration(s)" "run: docker compose run --rm backend python manage.py migrate"; fi
+  fi
 
   # ── Log retention, runtime half ──────────────────────────────────────────
   # The config phase proves the FILES; this proves the runtime picked them up.
@@ -654,8 +669,11 @@ phase_public() {
   # ── Guest path: the ONLY test that exercises ALLOW_UNREGISTERED_ROOMS ─────
   # It fires only on Http404 — a slug NOT in the database. A room created by a
   # logged-in user never reaches it.
+  # -L is required: Django's APPEND_SLASH 301s the sans-slash URL first, and
+  # without -L curl reads that redirect's HTML instead of the actual JSON,
+  # failing this check even when the guest path works correctly.
   local slug; slug="preflight-$(date +%s)-$$"
-  local body; body="$(curl -sS --max-time 20 "https://${MEET_HOST}/api/v1.0/rooms/${slug}?username=preflight" 2>/dev/null)"
+  local body; body="$(curl -sSL --max-time 20 "https://${MEET_HOST}/api/v1.0/rooms/${slug}?username=preflight" 2>/dev/null)"
   if echo "$body" | grep -q '"livekit"' && echo "$body" | grep -q '"slug"'; then
     ok "guest path works: an unknown slug materialises a room with a LiveKit token"
   else
