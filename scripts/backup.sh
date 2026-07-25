@@ -14,13 +14,19 @@
 #     and the marker must never say otherwise.
 #
 # The remote keeps BACKUP_KEEP_REMOTE_DAYS days of dumps — the number the
-# privacy policy publishes. Restore drill: RUNBOOK §8ter. An untested backup
-# is not a backup.
+# privacy policy publishes, so the prune is not housekeeping, it is the
+# enforcement of a published retention period and is asserted as an invariant
+# (oldest surviving object), never as "the delete command exited 0".
+# Restore drill: RUNBOOK §8ter. An untested backup is not a backup.
 #
 # Usage: run from ~/visio, or set VISIO_DIR. Needs docker compose, rclone,
 # and env.d/backup (template: deploy/env.d/backup.example).
 
 set -uo pipefail
+# The dump and the marker carry every user's email and room metadata. cron's
+# default umask is 022, which would leave them 0644 — world-readable PII for
+# as long as the local copies live.
+umask 077
 DIR="${VISIO_DIR:-$PWD}"
 cd "$DIR" || { echo "FAIL cannot cd to $DIR"; exit 1; }
 
@@ -55,6 +61,7 @@ DB_NAME="$(envval env.d/postgresql DB_NAME)"; DB_NAME="${DB_NAME:-meet}"
 
 OUTDIR="$HOME/backups"
 mkdir -p "$OUTDIR"
+chmod 700 "$OUTDIR"
 OUT="$OUTDIR/visio-$(date +%F-%H%M).sql.gz"
 
 docker compose exec -T postgresql pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$OUT" \
@@ -62,7 +69,15 @@ docker compose exec -T postgresql pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$OU
 
 # The dump must gunzip cleanly, start like a pg_dump, and have plausible mass.
 gunzip -t "$OUT" 2>/dev/null || fail "not a valid gzip: $OUT"
-gunzip -c "$OUT" 2>/dev/null | head -3 | grep -q "PostgreSQL database dump" \
+# Read the header into a variable FIRST. Piping gunzip into `head` closes the
+# pipe early, gunzip dies of SIGPIPE, and `set -o pipefail` surfaces 141 — so
+# the obvious `gunzip -c | head -3 | grep -q` form fails on every dump larger
+# than the ~64 KiB pipe buffer while passing on tiny fixtures. Verified:
+# 4 KB dump exit 0, 363 KB dump exit 141. A command substitution ignores the
+# producer's signal status, and this also honours the repo rule — assert on
+# output, never on a pipeline's exit code.
+hdr="$(gunzip -c "$OUT" 2>/dev/null | head -c 4096)"
+printf '%s' "$hdr" | grep -q "PostgreSQL database dump" \
   || fail "dump lacks the pg_dump header: $OUT"
 size="$(wc -c < "$OUT" | tr -d ' ')"
 [ "$size" -ge 10240 ] || fail "dump suspiciously small (${size} bytes): $OUT"
@@ -74,10 +89,25 @@ rclone copyto "$OUT" "$REMOTE/$(basename "$OUT")" \
 rsize="$(rclone lsl "$REMOTE/$(basename "$OUT")" 2>/dev/null | awk '{print $1}' | head -1)"
 [ "$rsize" = "$size" ] || fail "remote size mismatch (local $size, remote ${rsize:-absent})"
 
-# Prune, remote then local. A failed prune is a warning, not a failed backup.
+# Prune, remote then local.
 rclone delete --min-age "${KEEP_REMOTE}d" "$REMOTE" 2>/dev/null \
-  || echo "WARN remote prune failed (the backup itself is fine)"
+  || echo "WARN remote prune command failed — the invariant below decides"
 find "$OUTDIR" -name 'visio-*.sql.gz' -mtime +"$KEEP_LOCAL" -delete
+
+# Assert the INVARIANT, not the action: no surviving remote object may be
+# older than the retention the privacy policy publishes. A prune that exits 0
+# without deleting (wrong prefix, missing DELETE right, clock skew) would
+# otherwise leave the published 30 days unenforced and silent — the same
+# failure shape as the log-retention promise in 1.1. Two days of slack
+# absorbs timezone and run-time drift.
+oldest_days="$(rclone lsjson --max-age "$(( KEEP_REMOTE + 2 ))d" "$REMOTE" 2>/dev/null \
+  | grep -c '"Path"')"
+total="$(rclone lsjson "$REMOTE" 2>/dev/null | grep -c '"Path"')"
+if [ "$total" = "0" ]; then
+  fail "remote holds no objects after a verified upload — check BACKUP_REMOTE_PATH ($REMOTE)"
+elif [ "$oldest_days" != "$total" ]; then
+  fail "remote holds $(( total - oldest_days )) object(s) older than ${KEEP_REMOTE}+2 days — the published ${KEEP_REMOTE}-day backup retention is NOT enforced"
+fi
 
 date +%s > "$OUTDIR/LAST_OK"
 echo "OK $(basename "$OUT") (${size} bytes) verified at $REMOTE"

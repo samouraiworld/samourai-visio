@@ -143,12 +143,37 @@ phase_config() {
   # the redirects vanish with the mount check still green (checked in the
   # merge block below, by source path).
   if [ -s nginx/default.conf.template ]; then
-    local rdr; rdr="$(grep -c 'return 301 /accueil/' nginx/default.conf.template)"
-    if [ "$rdr" -ge 6 ]; then
-      ok "gateway template carries the legal-page redirects ($rdr locations)"
+    # Assert every ROUTE individually, never a total count: a count is
+    # satisfied by the wrong six lines, and adding unrelated redirects (the
+    # slash-completions) silently lifted it above its own threshold — which
+    # is how the selftest caught this check weakening on 2026-07-25.
+    local rmiss=""
+    for r in /mentions-legales /mentions-legales/ \
+             /conditions-utilisation /conditions-utilisation/ \
+             /accessibilite /accessibilite/; do
+      grep -qE "^[[:space:]]*location = ${r}[[:space:]]+\{[^}]*return 301 /accueil/" \
+        nginx/default.conf.template || rmiss="$rmiss $r"
+    done
+    if [ -z "$rmiss" ]; then
+      ok "gateway template 301s all six DINUM legal routes to our pages"
     else
-      bad "nginx/default.conf.template has $rdr redirect location(s), expected 6" \
-          "DINUM's hardcoded legal pages become reachable again on this host"
+      bad "gateway template is missing redirect(s) for:$rmiss" \
+          "those DINUM pages become reachable again on this host — they name the French State as publisher"
+    fi
+    # Slash-completion for our own pages. Without them the frontend container
+    # answers with its own absolute redirect to http://host:8080/… — a dead,
+    # firewalled, plaintext URL (verified live before the fix).
+    local smiss=""
+    for s in /accueil /accueil/mentions-legales /accueil/confidentialite \
+             /accueil/conditions-utilisation; do
+      grep -qE "^[[:space:]]*location = ${s}[[:space:]]+\{[^}]*return 301 ${s}/" \
+        nginx/default.conf.template || smiss="$smiss $s"
+    done
+    if [ -z "$smiss" ]; then
+      ok "gateway completes the trailing slash for our own pages"
+    else
+      bad "gateway lacks slash-completion for:$smiss" \
+          "the frontend container answers instead, redirecting to http://<host>:8080/… which times out"
     fi
   else
     bad "nginx/default.conf.template missing or empty" \
@@ -282,9 +307,12 @@ PY
     bad "backup cron not installed: $bc" \
         "deploy/host/visio-backup.cron — without it every dump is a manual act of memory"
   else
-    local bref; bref="$(grep -c 'backup\.sh' "$bc")"
-    if [ "$bref" -ge 1 ]; then ok "backup cron installed and points at backup.sh"
-    else bad "$bc does not reference backup.sh" "the cron runs something else, or nothing"; fi
+    # Count only ACTIVE lines: the shipped template names backup.sh three
+    # times in its own comments, so counting every match passed a cron whose
+    # job line was commented out (found 2026-07-25).
+    local bref; bref="$(grep -vE '^[[:space:]]*(#|$)' "$bc" | grep -c 'backup\.sh')"
+    if [ "$bref" -ge 1 ]; then ok "backup cron installed with an active line pointing at backup.sh"
+    else bad "$bc has no ACTIVE line running backup.sh" "the job line is missing or commented out — the cron file exists and does nothing"; fi
   fi
   local brp; brp="$(envval env.d/backup BACKUP_REMOTE_PATH)"
   case "$brp" in
@@ -360,8 +388,16 @@ phase_stack() {
   if [ -z "$down" ]; then ok "all five services running"
   else bad "services not running" "$down"; fi
 
-  if dc ps backend 2>/dev/null | grep -q "healthy"; then ok "backend reports healthy"
-  else bad "backend is not healthy" "docker compose logs backend — usual causes: an unfilled placeholder, or a wrapped secret"; fi
+  # EXACT match on the structured field. `docker compose ps` prints
+  # "Up 2 minutes (unhealthy)" when the healthcheck fails, and "unhealthy"
+  # CONTAINS "healthy" — so the obvious `grep -q healthy` reported OK in
+  # precisely the state this check exists to catch (found 2026-07-25).
+  local bh; bh="$(dc ps backend --format '{{.Health}}' 2>/dev/null | tr -d '\r' | head -1)"
+  case "$bh" in
+    healthy) ok "backend reports healthy" ;;
+    "")      bad "backend health is unknown (container absent, or no healthcheck)" "docker compose ps backend" ;;
+    *)       bad "backend health is '$bh'" "docker compose logs backend — usual causes: an unfilled placeholder, or a wrapped secret" ;;
+  esac
 
   # ── Interpolation actually resolved ──────────────────────────────────────
   # Undefined variables render as the EMPTY STRING with a warning, not as a

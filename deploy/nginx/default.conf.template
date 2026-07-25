@@ -64,6 +64,20 @@ server {
     # TLS-terminating proxy and would embed its own scheme.
     absolute_redirect off;
 
+    # Slash-completion for our own pages, answered HERE rather than by the
+    # frontend container. Verified live 2026-07-25: without these,
+    # GET /accueil returned `301 Location: http://visio.samourai.app:8080/`
+    # — the container's own redirect, built from its internal listen port and
+    # plaintext scheme, leaking through `proxy_redirect off` (upstream's
+    # verbatim block) to the public internet. The target is a firewalled port
+    # over http: it simply times out. Anyone who types or links the URL
+    # without the trailing slash lands on a dead page. `absolute_redirect off`
+    # above only governs redirects THIS server generates, not proxied ones.
+    location = /accueil { return 301 /accueil/; }
+    location = /accueil/mentions-legales      { return 301 /accueil/mentions-legales/; }
+    location = /accueil/confidentialite       { return 301 /accueil/confidentialite/; }
+    location = /accueil/conditions-utilisation { return 301 /accueil/conditions-utilisation/; }
+
     location = /mentions-legales  { return 301 /accueil/mentions-legales/; }
     location = /mentions-legales/ { return 301 /accueil/mentions-legales/; }
     location = /conditions-utilisation  { return 301 /accueil/conditions-utilisation/; }
