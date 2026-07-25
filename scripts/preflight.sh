@@ -681,12 +681,22 @@ phase_public() {
   fi
 
   # ── Clerk still matches what the config assumes ──────────────────────────
+  # The comparison needs the host's env.d/common, which rightly never leaves
+  # the host. Run off-host (no such file), this phase can still prove the
+  # discovery document is reachable — but a missing local file is not a
+  # mismatch, and reporting it as one cried wolf once (2026-07-25).
   local disc; disc="$(curl -sS --max-time 15 https://clerk.samourai.app/.well-known/openid-configuration 2>/dev/null)"
   local tok; tok="$(envval "$DIR/env.d/common" OIDC_OP_TOKEN_ENDPOINT)"
-  if [ -n "$disc" ] && [ -n "$tok" ] && echo "$disc" | grep -qF "$tok"; then
+  if [ -z "$disc" ]; then
+    bad "Clerk discovery document unreachable"
+  elif [ ! -f "$DIR/env.d/common" ]; then
+    skip "Clerk discovery reachable, but env.d/common is not readable here" \
+         "the endpoint comparison only runs on the host"
+  elif [ -n "$tok" ] && echo "$disc" | grep -qF "$tok"; then
     ok "Clerk discovery still advertises the configured token endpoint"
-  elif [ -z "$disc" ]; then bad "Clerk discovery document unreachable"
-  else bad "configured OIDC endpoint no longer matches Clerk discovery" "re-derive env.d/common from the live document"; fi
+  else
+    bad "configured OIDC endpoint no longer matches Clerk discovery" "re-derive env.d/common from the live document"
+  fi
 
   # ── Things this script structurally cannot prove ─────────────────────────
   skip "UDP reachability (7882, 443, relay range)" "'nc -zu' reports success against a DROPping firewall; and run from the host it tests loopback. Prove it with a real call and read LiveKit's selected ICE candidate pair."
