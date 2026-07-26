@@ -177,6 +177,95 @@ jobs:
           sys.exit(1 if fails else 0)
           PY
 
+  backup-smoke:
+    name: Backup end-to-end
+    runs-on: ubuntu-latest
+    # backup.sh guards the only rollback this deployment has, and until this
+    # job existed no CI step ever EXECUTED it — shellcheck parses, it does not
+    # run. The bug that motivated this job passed on a tiny fixture and failed
+    # on every real dump (SIGPIPE once the decompressed dump exceeded the pipe
+    # buffer), so the fixture here is deliberately multi-megabyte.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fake deploy dir with a real postgres and a local rclone remote
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq rclone
+          W="$RUNNER_TEMP/visio"
+          mkdir -p "$W/env.d" "$W/bucket"
+          # Minimal compose: backup.sh calls `docker compose exec -T postgresql`.
+          cat > "$W/compose.yaml" <<'YAML'
+          services:
+            postgresql:
+              image: postgres:16
+              environment:
+                POSTGRES_DB: meet
+                POSTGRES_USER: meet
+                POSTGRES_PASSWORD: smoke
+          YAML
+          cp deploy/env.d/postgresql.example "$W/env.d/postgresql"
+          # rclone's local backend needs no credentials: `:local:` + a path.
+          cat > "$W/env.d/backup" <<YAML
+          RCLONE_CONFIG_VISIO_TYPE=local
+          BACKUP_REMOTE_PATH=visio:$W/bucket/pg
+          BACKUP_KEEP_LOCAL_DAYS=7
+          BACKUP_KEEP_REMOTE_DAYS=30
+          YAML
+          chmod 600 "$W/env.d/backup"
+          cd "$W" && docker compose up -d
+          for _ in $(seq 1 30); do
+            docker compose exec -T postgresql pg_isready -U meet >/dev/null 2>&1 && break
+            sleep 2
+          done
+          # >10 MB of rows: large enough that the decompressed stream dwarfs
+          # the pipe buffer, which is the whole point of this fixture.
+          docker compose exec -T postgresql psql -q -U meet -d meet -c \
+            "CREATE TABLE bulk AS SELECT g, md5(g::text)||md5((g+1)::text) AS payload
+             FROM generate_series(1,200000) g"
+
+      - name: backup.sh succeeds and produces a verified off-box copy
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W" && VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/backup.out
+          grep -q '^OK ' /tmp/backup.out || { echo "::error::backup.sh did not report OK"; exit 1; }
+          [ -f "$HOME/backups/LAST_OK" ] || { echo "::error::LAST_OK marker missing"; exit 1; }
+          # The dump must really be in the bucket, and be big enough that the
+          # SIGPIPE class of bug could have tripped.
+          f="$(ls -1 "$W"/bucket/pg/visio-*.sql.gz)"
+          sz="$(wc -c < "$f")"
+          echo "remote object: $f ($sz bytes)"
+          [ "$sz" -gt 1000000 ] ||
+            { echo "::error::fixture too small for the pipe-buffer bug"; exit 1; }
+          # PII must not be world-readable (umask 077 + chmod 700).
+          m="$(stat -c '%a' "$(ls -1t "$HOME"/backups/visio-*.sql.gz | head -1)")"
+          [ "$m" = "600" ] || { echo "::error::local dump mode $m, expected 600"; exit 1; }
+
+      - name: And it FAILS loudly when the remote is unwritable
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          rm -f "$HOME/backups/LAST_OK"
+          # Point at a prefix inside a read-only parent, NOT at the working
+          # bucket: rclone would otherwise reuse the same-minute filename and
+          # overwrite the already-writable file from the previous step, which
+          # succeeds and proves nothing.
+          mkdir -p "$W/readonly"
+          chmod 500 "$W/readonly"
+          sed -i "s|^BACKUP_REMOTE_PATH=.*|BACKUP_REMOTE_PATH=visio:$W/readonly/pg|" \
+            "$W/env.d/backup"
+          cd "$W"
+          if VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" > /tmp/fail.out 2>&1; then
+            cat /tmp/fail.out
+            echo "::error::reported success with an unwritable remote"; exit 1
+          fi
+          cat /tmp/fail.out
+          grep -q '^FAIL' /tmp/fail.out ||
+            { echo "::error::no FAIL line"; exit 1; }
+          [ ! -f "$HOME/backups/LAST_OK" ] ||
+            { echo "::error::marker written despite failure"; exit 1; }
+
   preflight-selftest:
     name: Preflight self-test
     runs-on: ubuntu-latest
