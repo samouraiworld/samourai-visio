@@ -37,9 +37,33 @@ server {
 
     proxy_ssl_server_name on;
 
+    # SAMOURAI-BEGIN response headers
+    # Only Strict-Transport-Security reached browsers before this block, and it
+    # arrived TWICE: Django emits `max-age=60; includeSubDomains; preload` and
+    # nginx-proxy adds `max-age=31536000`. RFC 6797 §8.1 says the UA processes
+    # the FIRST header and ignores the rest, so the 60-second policy won —
+    # HSTS effectively expired a minute after the last API call, while
+    # advertising `preload`. Verified live 2026-07-25. Hide the upstream one in
+    # the proxy blocks below and emit exactly one policy here.
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    # frame-ancestors, not X-Frame-Options: it is the standard, and CSP wins
+    # where both are understood. TRADE-OFF: this blocks embedding in third-party
+    # pages, which disables upstream's /sdk/create-popup and /sdk/create-button
+    # embed routes. We do not use them; if that ever changes, relax this to a
+    # per-location policy rather than dropping it wholesale.
+    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    # Room slugs ARE the access secret, so a full-URL Referer must never leave
+    # this origin — a shared room link in a Referer header is a room invite.
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # SAMOURAI-END
+
     location @proxy_to_meet_backend {
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # SAMOURAI-BEGIN single HSTS
+        proxy_hide_header Strict-Transport-Security;
+        # SAMOURAI-END
 
         proxy_redirect off;
         proxy_pass http://meet_backend;
@@ -48,6 +72,9 @@ server {
     location @proxy_to_meet_frontend {
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        # SAMOURAI-BEGIN single HSTS
+        proxy_hide_header Strict-Transport-Security;
+        # SAMOURAI-END
 
         proxy_redirect off;
         proxy_pass http://meet_frontend;
@@ -88,6 +115,27 @@ server {
     # service.
     location = /accessibilite  { return 301 /accueil/; }
     location = /accessibilite/ { return 301 /accueil/; }
+    # SAMOURAI-END
+
+    # SAMOURAI-BEGIN admin not on the internet
+    # The Django admin reaches every account and every room, and a successful
+    # login can insert a ResourceAccess row granting roomAdmin on any room —
+    # i.e. moderation control of a private meeting, bypassing Clerk entirely.
+    # It ships no MFA and no brute-force protection (upstream carries neither
+    # django-axes nor django-ratelimit), so a password created by hand during
+    # a deploy is the weakest credential in the system while every real user
+    # authenticates through Clerk.
+    #
+    # 404, not 403: a 403 confirms the endpoint exists. The `^~` prefix beats
+    # any regex location, so nothing downstream can re-expose it by accident.
+    #
+    # Reach it from the host instead, over an SSH tunnel:
+    #   ssh -L 8000:localhost:8000 <host>
+    #   docker compose exec backend python manage.py runserver 0.0.0.0:8000
+    # or use `docker compose exec backend python manage.py shell` for one-offs.
+    # To publish it deliberately, replace this block with an allow-list
+    # (`allow <operator CIDR>; deny all;`) — never with nothing.
+    location ^~ /admin { return 404; }
     # SAMOURAI-END
 
     location / {

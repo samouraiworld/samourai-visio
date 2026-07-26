@@ -175,6 +175,28 @@ phase_config() {
       bad "gateway lacks slash-completion for:$smiss" \
           "the frontend container answers instead, redirecting to http://<host>:8080/… which times out"
     fi
+    # The admin must not be on the internet, and the header block must survive
+    # a re-derivation of this file at upgrade time (RUNBOOK §10) — both are
+    # single lines someone can drop while resolving a conflict.
+    if grep -qE '^[[:space:]]*location \^~ /admin[[:space:]]+\{[^}]*return 404' nginx/default.conf.template; then
+      ok "gateway keeps the Django admin off the internet (404)"
+    else
+      bad "gateway no longer 404s /admin" \
+          "Django admin has no MFA and no brute-force protection, and reaches every account and room"
+    fi
+    local hmiss=""
+    for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options Referrer-Policy; do
+      grep -qE "^[[:space:]]*add_header ${h} " nginx/default.conf.template || hmiss="$hmiss $h"
+    done
+    # Two upstream layers each emit HSTS; without both hides the 60-second one
+    # wins (RFC 6797 takes the FIRST header).
+    local hides; hides="$(grep -c 'proxy_hide_header Strict-Transport-Security' nginx/default.conf.template)"
+    if [ -z "$hmiss" ] && [ "$hides" -ge 2 ]; then
+      ok "gateway emits one HSTS policy plus CSP, nosniff and Referrer-Policy"
+    else
+      bad "response-header block incomplete (missing:${hmiss:- none}; proxy_hide_header count $hides, expected 2)" \
+          "a second HSTS header from Django wins over ours, and framing/sniffing protection disappears"
+    fi
   else
     bad "nginx/default.conf.template missing or empty" \
         "Docker would mount a directory in its place and the gateway would not start"
@@ -681,6 +703,39 @@ phase_public() {
     fi
   else
     skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
+  fi
+
+  # ── Django's own pages must actually render, and the admin must not ──────
+  # `collectstatic` runs at image build, so /data/static is baked into the
+  # image: a host mount over /data shadowed it, every /static/ URL 404'd and
+  # every Django-rendered page returned 500. The SPA never touches /static, so
+  # this was invisible for as long as nobody opened the admin.
+  local st; st="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 "https://${MEET_HOST}/static/admin/css/base.css" 2>/dev/null)"
+  case "$st" in
+    "200 text/css"*) ok "Django static files are served (/data/static is not shadowed by a mount)" ;;
+    *) bad "/static/admin/css/base.css returns '${st:-nothing}', expected 200 text/css" \
+           "a bind-mount over /data hides the image's baked STATIC_ROOT — everything Django renders itself then 500s" ;;
+  esac
+
+  local adm; adm="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://${MEET_HOST}/admin/" 2>/dev/null)"
+  case "$adm" in
+    404) ok "Django admin is not reachable from the internet (404)" ;;
+    *)   bad "https://${MEET_HOST}/admin/ answers HTTP $adm — it must be 404 from outside" \
+             "no MFA, no brute-force protection, and a login grants roomAdmin on any room; reach it over an SSH tunnel instead" ;;
+  esac
+
+  # ── Exactly one HSTS policy, and it must not be a 60-second one ──────────
+  # Django and nginx-proxy both emit one; the UA obeys the FIRST (RFC 6797),
+  # so two headers means the short policy silently wins.
+  local hs; hs="$(curl -sS -D- -o /dev/null --max-time 15 "https://${MEET_HOST}/api/v1.0/config/" 2>/dev/null | grep -ci '^strict-transport-security:')"
+  local hsmax; hsmax="$(curl -sS -D- -o /dev/null --max-time 15 "https://${MEET_HOST}/api/v1.0/config/" 2>/dev/null | grep -i '^strict-transport-security:' | head -1 | grep -oE 'max-age=[0-9]+' | cut -d= -f2)"
+  if [ "$hs" = "1" ] && [ "${hsmax:-0}" -ge 15552000 ]; then
+    ok "one HSTS policy, max-age=${hsmax}"
+  elif [ "$hs" != "1" ]; then
+    bad "$hs Strict-Transport-Security headers on /api/ (expected exactly 1)" \
+        "the browser obeys the first one — here max-age=${hsmax:-unknown}; add proxy_hide_header in the gateway"
+  else
+    bad "single HSTS header but max-age=${hsmax:-unknown} is under 180 days"
   fi
 
   # ── DINUM's hardcoded legal routes must redirect off this host ───────────

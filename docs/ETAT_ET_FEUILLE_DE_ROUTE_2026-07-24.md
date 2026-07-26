@@ -130,6 +130,22 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 > Restore drill in RUNBOOK §8ter — the doc's own rule, "an untested backup
 > is not a backup", is now an install step LOurs checks off, not a wish.
 
+> **Progress — 2026-07-26.** A cross-perspective audit (seven expert lenses,
+> adversarially verified; findings kept **internally**, not in this repo) fixed
+> four defects in PR #19 — including a blocker where `backup.sh` could never
+> complete on a real database (SIGPIPE under `pipefail`), a health check that
+> reported OK for an unhealthy backend, and our own pages 301-ing to a dead
+> `http://…:8080` URL — and corrected the **inverted** `SENTRY_DSN` note above
+> (use `DJANGO_SENTRY_DSN`; the bare name does nothing, proven empirically).
+> A second PR fixes three production defects the audit found live: Django's
+> baked `STATIC_ROOT` was shadowed by the `/data` mount so every
+> Django-rendered page returned **500**, `/admin` was publicly reachable, and
+> two HSTS headers were emitted where the 60-second one won.
+> **Still open, needing a decision:** anonymous LiveKit token minting is
+> unthrottled (the fix needs the host's real proxy CIDR — see the internal
+> audit), and only the database leaves the box (secrets, configs and ACME
+> certs have no off-box copy).
+
 ### Phase 2 — engineering debt from the 2026-07-24 review
 
 Ranked. All verified, none blocking.
