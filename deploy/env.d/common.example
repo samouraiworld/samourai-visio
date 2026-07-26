@@ -235,10 +235,23 @@ FRONTEND_CUSTOM_CSS_URL=/custom/style.css
 FRONTEND_EXTERNAL_HOME_URL="https://${MEET_HOST}/accueil/"
 
 # ── Monitoring ──
-# The trap: settings.py:69 documents this as DJANGO_SENTRY_DSN, but :448
-# declares environ_name="SENTRY_DSN" with no prefix. The documented name is
-# the one that does nothing.
-#SENTRY_DSN=<from sentry.samourai.pro>
+# The name to use is DJANGO_SENTRY_DSN. The bare SENTRY_DSN does NOTHING.
+#
+# This corrects the inverted note this file carried until 2026-07-25 (and the
+# matching roadmap line). settings.py:448 declares
+#   SENTRY_DSN = values.Value(None, environ_name="SENTRY_DSN")
+# and `environ_name` does NOT suppress the DJANGO_ prefix — only
+# `environ_prefix=None` does, which upstream passes elsewhere (settings.py:82,
+# 92, 103) but not here. Tested against upstream's own pin,
+# django-configurations==2.5.1:
+#   DJANGO_SENTRY_DSN=x                      -> 'x'   (works)
+#   SENTRY_DSN=x                             -> None  (ignored silently)
+#   SENTRY_DSN=x with environ_prefix=None    -> 'x'   (control)
+# So settings.py:69's docstring is right and upstream's own kubernetes.md
+# documents the dead bare name. Getting this backwards means a DSN that is
+# accepted, never used, and never warns — no errors reach Sentry and nothing
+# says so. preflight.sh fails on the bare form for that reason.
+#DJANGO_SENTRY_DSN=<from sentry.samourai.pro>
 
 # ── File-based secrets (recommended) ──
 # SECRET_KEY, OIDC_RP_CLIENT_SECRET, EMAIL_HOST_PASSWORD, DB_PASSWORD and the

@@ -143,12 +143,37 @@ phase_config() {
   # the redirects vanish with the mount check still green (checked in the
   # merge block below, by source path).
   if [ -s nginx/default.conf.template ]; then
-    local rdr; rdr="$(grep -c 'return 301 /accueil/' nginx/default.conf.template)"
-    if [ "$rdr" -ge 6 ]; then
-      ok "gateway template carries the legal-page redirects ($rdr locations)"
+    # Assert every ROUTE individually, never a total count: a count is
+    # satisfied by the wrong six lines, and adding unrelated redirects (the
+    # slash-completions) silently lifted it above its own threshold — which
+    # is how the selftest caught this check weakening on 2026-07-25.
+    local rmiss=""
+    for r in /mentions-legales /mentions-legales/ \
+             /conditions-utilisation /conditions-utilisation/ \
+             /accessibilite /accessibilite/; do
+      grep -qE "^[[:space:]]*location = ${r}[[:space:]]+\{[^}]*return 301 /accueil/" \
+        nginx/default.conf.template || rmiss="$rmiss $r"
+    done
+    if [ -z "$rmiss" ]; then
+      ok "gateway template 301s all six DINUM legal routes to our pages"
     else
-      bad "nginx/default.conf.template has $rdr redirect location(s), expected 6" \
-          "DINUM's hardcoded legal pages become reachable again on this host"
+      bad "gateway template is missing redirect(s) for:$rmiss" \
+          "those DINUM pages become reachable again on this host — they name the French State as publisher"
+    fi
+    # Slash-completion for our own pages. Without them the frontend container
+    # answers with its own absolute redirect to http://host:8080/… — a dead,
+    # firewalled, plaintext URL (verified live before the fix).
+    local smiss=""
+    for s in /accueil /accueil/mentions-legales /accueil/confidentialite \
+             /accueil/conditions-utilisation; do
+      grep -qE "^[[:space:]]*location = ${s}[[:space:]]+\{[^}]*return 301 ${s}/" \
+        nginx/default.conf.template || smiss="$smiss $s"
+    done
+    if [ -z "$smiss" ]; then
+      ok "gateway completes the trailing slash for our own pages"
+    else
+      bad "gateway lacks slash-completion for:$smiss" \
+          "the frontend container answers instead, redirecting to http://<host>:8080/… which times out"
     fi
   else
     bad "nginx/default.conf.template missing or empty" \
@@ -166,6 +191,25 @@ phase_config() {
     *)  bad "DJANGO_LANGUAGE_CODE=$lang is not one of en-us, fr-fr, nl-nl, de-de" \
             "unsupported values fall back to English with no error" ;;
   esac
+
+  # ── Sentry DSN under the name that actually works ────────────────────────
+  # settings.py:448 declares environ_name="SENTRY_DSN" WITHOUT
+  # environ_prefix=None, so django-configurations still applies the DJANGO_
+  # prefix: only DJANGO_SENTRY_DSN populates the setting. Verified against
+  # upstream's pin (django-configurations==2.5.1): the bare name resolves to
+  # None. A bare SENTRY_DSN is therefore accepted, unused, and silent — no
+  # error reaches Sentry and nothing says so.
+  local bare_dsn pref_dsn
+  bare_dsn="$(grep -cE '^SENTRY_DSN=' env.d/common)"
+  pref_dsn="$(grep -cE '^DJANGO_SENTRY_DSN=' env.d/common)"
+  if [ "$bare_dsn" != "0" ]; then
+    bad "env.d/common sets the bare SENTRY_DSN, which django-configurations ignores" \
+        "rename it to DJANGO_SENTRY_DSN, or errors silently never reach Sentry"
+  elif [ "$pref_dsn" != "0" ]; then
+    ok "Sentry DSN set under DJANGO_SENTRY_DSN (the name that resolves)"
+  else
+    skip "no Sentry DSN configured" "backend errors are visible only in container logs (roadmap 1.6)"
+  fi
 
   # ── TURN config traps ────────────────────────────────────────────────────
   if grep -qE '^[[:space:]]*enabled:[[:space:]]*true' livekit-server.yaml 2>/dev/null; then
@@ -282,9 +326,12 @@ PY
     bad "backup cron not installed: $bc" \
         "deploy/host/visio-backup.cron — without it every dump is a manual act of memory"
   else
-    local bref; bref="$(grep -c 'backup\.sh' "$bc")"
-    if [ "$bref" -ge 1 ]; then ok "backup cron installed and points at backup.sh"
-    else bad "$bc does not reference backup.sh" "the cron runs something else, or nothing"; fi
+    # Count only ACTIVE lines: the shipped template names backup.sh three
+    # times in its own comments, so counting every match passed a cron whose
+    # job line was commented out (found 2026-07-25).
+    local bref; bref="$(grep -vE '^[[:space:]]*(#|$)' "$bc" | grep -c 'backup\.sh')"
+    if [ "$bref" -ge 1 ]; then ok "backup cron installed with an active line pointing at backup.sh"
+    else bad "$bc has no ACTIVE line running backup.sh" "the job line is missing or commented out — the cron file exists and does nothing"; fi
   fi
   local brp; brp="$(envval env.d/backup BACKUP_REMOTE_PATH)"
   case "$brp" in
@@ -360,8 +407,16 @@ phase_stack() {
   if [ -z "$down" ]; then ok "all five services running"
   else bad "services not running" "$down"; fi
 
-  if dc ps backend 2>/dev/null | grep -q "healthy"; then ok "backend reports healthy"
-  else bad "backend is not healthy" "docker compose logs backend — usual causes: an unfilled placeholder, or a wrapped secret"; fi
+  # EXACT match on the structured field. `docker compose ps` prints
+  # "Up 2 minutes (unhealthy)" when the healthcheck fails, and "unhealthy"
+  # CONTAINS "healthy" — so the obvious `grep -q healthy` reported OK in
+  # precisely the state this check exists to catch (found 2026-07-25).
+  local bh; bh="$(dc ps backend --format '{{.Health}}' 2>/dev/null | tr -d '\r' | head -1)"
+  case "$bh" in
+    healthy) ok "backend reports healthy" ;;
+    "")      bad "backend health is unknown (container absent, or no healthcheck)" "docker compose ps backend" ;;
+    *)       bad "backend health is '$bh'" "docker compose logs backend — usual causes: an unfilled placeholder, or a wrapped secret" ;;
+  esac
 
   # ── Interpolation actually resolved ──────────────────────────────────────
   # Undefined variables render as the EMPTY STRING with a warning, not as a

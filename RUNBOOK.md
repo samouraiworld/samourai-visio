@@ -500,7 +500,7 @@ it leaked every visitor's IP and User-Agent on every page, rooms included.
       docker compose run --rm backend python manage.py shell -c \
         "from django.conf import settings; print(settings.OIDC_USERINFO_FULLNAME_FIELDS, settings.OIDC_REDIRECT_ALLOWED_HOSTS)"
       ```
-      Expected `['given_name', 'family_name'] ['visio.samourai.app']`. Anything with a bracket in it is trap 2.
+      Expected `['preferred_username'] ['visio.samourai.app']` — it must match whatever §4 sets `OIDC_USERINFO_FULLNAME_FIELDS` to (`preferred_username` by the 2026-07-22 decision, because first/last name are disabled on this Clerk instance). The outer brackets are normal Python list repr; a bracket or quote **inside an item** is trap 2.
 - [ ] `X-Forwarded-Proto` cannot be spoofed — `curl -H "X-Forwarded-Proto: https" http://visio.samourai.app/` must redirect to `https://`, not serve a 200 over plaintext
 - [ ] "Log in" → Clerk → back to Meet, **name and email correct** (validates traps 3 and 4). Test with a **freshly created** account: a pre-existing Clerk user may simply have no name stored
 - [ ] Anonymous first visit does not bounce — silent login (`prompt=none`) succeeds or fails gracefully
