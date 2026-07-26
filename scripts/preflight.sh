@@ -178,7 +178,7 @@ phase_config() {
     # The admin must not be on the internet, and the header block must survive
     # a re-derivation of this file at upgrade time (RUNBOOK §10) — both are
     # single lines someone can drop while resolving a conflict.
-    if grep -qE '^[[:space:]]*location \^~ /admin[[:space:]]+\{[^}]*return 404' nginx/default.conf.template; then
+    if grep -qE '^[[:space:]]*location ~ \^/admin[[:space:]]+\{[^}]*return 404' nginx/default.conf.template; then
       ok "gateway keeps the Django admin off the internet (404)"
     else
       bad "gateway no longer 404s /admin" \

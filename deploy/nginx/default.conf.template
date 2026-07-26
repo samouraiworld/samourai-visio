@@ -126,8 +126,15 @@ server {
     # a deploy is the weakest credential in the system while every real user
     # authenticates through Clerk.
     #
-    # 404, not 403: a 403 confirms the endpoint exists. The `^~` prefix beats
-    # any regex location, so nothing downstream can re-expose it by accident.
+    # 404, not 403: a 403 confirms the endpoint exists.
+    #
+    # A REGEX location, deliberately. `location ^~ /admin` looks stronger but
+    # is the same location KEY as upstream's `location /admin` further down
+    # (the modifier is not part of the name), so nginx refuses to start with
+    # "duplicate location" — caught by the nginx -t CI gate, which is the kind
+    # of total outage that gate exists for. A regex is a distinct key and,
+    # since upstream's is a plain prefix, the regex is matched first and wins.
+    # `=` locations (our legal routes above) still take precedence over both.
     #
     # Reach it from the host instead, over an SSH tunnel:
     #   ssh -L 8000:localhost:8000 <host>
@@ -135,7 +142,7 @@ server {
     # or use `docker compose exec backend python manage.py shell` for one-offs.
     # To publish it deliberately, replace this block with an allow-list
     # (`allow <operator CIDR>; deny all;`) — never with nothing.
-    location ^~ /admin { return 404; }
+    location ~ ^/admin { return 404; }
     # SAMOURAI-END
 
     location / {
