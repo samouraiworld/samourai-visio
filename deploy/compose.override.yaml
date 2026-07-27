@@ -57,12 +57,25 @@ services:
     image: lasuite/meet-backend:v1.24.0
     restart: unless-stopped
     volumes:
+      # MEDIA_ROOT ONLY — never the whole /data.
+      #
       # DATA_DIR=/data, MEDIA_ROOT=/data/media, STATIC_ROOT=/data/static
-      # (settings.py:85,126,128). Upstream mounts nothing here, so anything
-      # written lives in the container's writable layer and is destroyed on
-      # the next image change. Harmless for the v1 feature set; silent data
-      # loss the moment any upload feature is enabled.
-      - ./data/backend:/data
+      # (settings.py:85,126,128). `collectstatic` runs at image build, so
+      # /data/static is BAKED INTO THE IMAGE. Mounting a host directory over
+      # /data therefore shadowed it with an empty tree: every /static/ URL
+      # 404'd and every page Django renders itself (the admin, the DRF
+      # browsable API) returned HTTP 500. Verified in production 2026-07-25 —
+      # it had been broken since the deploy and nothing reported it, because
+      # the SPA serves its own Vite assets from /usr/share/nginx/html/assets
+      # and never touches /static.
+      #
+      # Mounting only the media subpath keeps uploads persistent (they would
+      # otherwise die with the container on the next image change) while
+      # leaving the image's static tree visible. Docker creates the source
+      # directory as root:root if absent; nothing writes there while uploads
+      # are disabled (config: background_image.upload_is_enabled=false), but
+      # chown it to the container's uid before enabling any upload feature.
+      - ./data/backend/media:/data/media
     logging: *logging
 
   frontend:

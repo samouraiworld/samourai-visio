@@ -151,13 +151,23 @@ docker compose ps --format '{{.Service}}\t{{.Ports}}'
 
 ```bash
 mkdir -p ~/visio/env.d && cd ~/visio
-curl -o compose.yaml https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/docs/examples/compose/compose.yaml
-curl -o .env https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/env.d/production.dist/hosts
-curl -o env.d/common https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/env.d/production.dist/common
-curl -o env.d/postgresql https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/env.d/production.dist/postgresql
-curl -o livekit-server.yaml https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/docs/examples/livekit/server.yaml
-curl -o default.conf.template https://raw.githubusercontent.com/suitenumerique/meet/refs/heads/main/docker/files/production/default.conf.template
+# Pinned to the SAME tag as the images in compose.override.yaml. Fetching from
+# `refs/heads/main` — which this section used to do — left the compose topology
+# unpinned while the images were pinned: port publications, bind-mount targets
+# and the nginx template could change under a deploy that believed itself
+# reproducible. `main` is for the drift gate to look at, never for a host.
+REF=v1.24.0
+base="https://raw.githubusercontent.com/suitenumerique/meet/refs/tags/${REF}"
+curl -fsSo compose.yaml          "$base/docs/examples/compose/compose.yaml"
+curl -fsSo .env                  "$base/env.d/production.dist/hosts"
+curl -fsSo env.d/common          "$base/env.d/production.dist/common"
+curl -fsSo env.d/postgresql      "$base/env.d/production.dist/postgresql"
+curl -fsSo livekit-server.yaml   "$base/docs/examples/livekit/server.yaml"
+curl -fsSo default.conf.template "$base/docker/files/production/default.conf.template"
 ```
+
+`-f` matters: without it a 404 writes GitHub's error page into the file and the
+next step fails somewhere far away.
 
 Generate three secrets:
 
@@ -381,10 +391,28 @@ Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 ```bash
 docker compose up -d
 docker compose run --rm backend python manage.py migrate
-docker compose run --rm backend python manage.py createsuperuser --email <admin@samourai.app>
 ```
 
-Admin at `https://visio.samourai.app/admin`.
+**No superuser is created, and `/admin` is deliberately unreachable from the
+internet** (the gateway 404s it — see §7bis). Django's admin has no MFA and no
+brute-force protection, it reaches every account and room, and a login there can
+grant `roomAdmin` on any room — a second, weaker credential path beside Clerk,
+which is what every real user authenticates against. Nothing in normal operation
+needs it.
+
+For the rare one-off, work on the host:
+
+```bash
+docker compose exec backend python manage.py shell
+```
+
+If you ever do need the admin UI, create the superuser then, tunnel to it, and
+remove the account afterwards:
+
+```bash
+ssh -L 8000:localhost:8000 <host>
+docker compose exec backend python manage.py runserver 0.0.0.0:8000
+```
 
 ---
 
@@ -476,6 +504,9 @@ files-without-a-URL case it is designed to catch.
 > anything under `landing/` links to them, and the gateway override
 > ([`deploy/nginx/default.conf.template`](deploy/nginx/default.conf.template))
 > answers all three routes with a **301 to our pages** before the SPA can —
+> (the same file also carries three other marked blocks: the trailing-slash
+> completions for our own pages, the `/admin` 404, and the response-header
+> set — one HSTS policy, CSP `frame-ancestors`, `nosniff`, `Referrer-Policy`)
 > `preflight.sh public` asserts the redirects, and
 > `check-upstream-contract.sh` pins the template against upstream so gateway
 > drift cannot ship silently on a version bump (§10).
@@ -519,7 +550,7 @@ it leaked every visitor's IP and User-Agent on every page, rooms included.
 - [ ] **"Démarrer une réunion" works** — the button lands you in a joinable room. This also re-exercises `ALLOW_UNREGISTERED_ROOMS`
 - [ ] **Backend default locale is `fr-fr`** — `/api/v1.0/config/` reports it. This needs the container **recreated** (`up -d`), not merely restarted.
       ⚠️ It does **not** set the interface language: the SPA resolves that client-side via i18next browser detection (`localStorage`, then `navigator`; `fallbackLng: 'fr'`), and `LANGUAGE_CODE` appears in none of its JS chunks. Invitation e-mails follow the **sender's** `Accept-Language`. Check the UI language in a browser set to French — there is no server-side switch for it
-- [ ] `/admin` reachable, non-admins rejected
+- [ ] `/admin` returns **404 from the internet** (`curl -sS -o /dev/null -w '%{http_code}' https://visio.samourai.app/admin/`), and `/static/admin/css/base.css` returns `200 text/css` — the second proves the backend's baked `STATIC_ROOT` is not shadowed by a bind-mount, which made every Django-rendered page 500 until 2026-07-26
 - [ ] Reboot the host. All five services plus nginx-proxy return unattended, TLS still serves, a room still joins
 - [ ] `docker compose restart redis` → still logged in *(proves the AOF volume took)*
 

@@ -175,6 +175,36 @@ phase_config() {
       bad "gateway lacks slash-completion for:$smiss" \
           "the frontend container answers instead, redirecting to http://<host>:8080/… which times out"
     fi
+    # The admin must not be on the internet, and the header block must survive
+    # a re-derivation of this file at upgrade time (RUNBOOK §10) — both are
+    # single lines someone can drop while resolving a conflict.
+    # shellcheck disable=SC2016  # a literal nginx variable name, not shell
+    if grep -qE '\$cookie_meet_sessionid' nginx/default.conf.template &&
+       grep -qE 'return 302 /accueil/' nginx/default.conf.template; then
+      ok "gateway sends cookieless visitors from / to /accueil/ (so crawlers reach our share card)"
+    else
+      bad "gateway lost the 'location = /' share-card redirect" \
+          "link crawlers get upstream's SPA shell and every share unfurls as 'LaSuite Meet'"
+    fi
+    if grep -qE '^[[:space:]]*location ~ \^/admin[[:space:]]+\{[^}]*return 404' nginx/default.conf.template; then
+      ok "gateway keeps the Django admin off the internet (404)"
+    else
+      bad "gateway no longer 404s /admin" \
+          "Django admin has no MFA and no brute-force protection, and reaches every account and room"
+    fi
+    local hmiss=""
+    for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options Referrer-Policy; do
+      grep -qE "^[[:space:]]*add_header ${h} " nginx/default.conf.template || hmiss="$hmiss $h"
+    done
+    # Two upstream layers each emit HSTS; without both hides the 60-second one
+    # wins (RFC 6797 takes the FIRST header).
+    local hides; hides="$(grep -c 'proxy_hide_header Strict-Transport-Security' nginx/default.conf.template)"
+    if [ -z "$hmiss" ] && [ "$hides" -ge 2 ]; then
+      ok "gateway emits one HSTS policy plus CSP, nosniff and Referrer-Policy"
+    else
+      bad "response-header block incomplete (missing:${hmiss:- none}; proxy_hide_header count $hides, expected 2)" \
+          "a second HSTS header from Django wins over ours, and framing/sniffing protection disappears"
+    fi
   else
     bad "nginx/default.conf.template missing or empty" \
         "Docker would mount a directory in its place and the gateway would not start"
@@ -681,6 +711,65 @@ phase_public() {
     fi
   else
     skip "no external_home_url advertised" "anonymous visitors get upstream's home page, not ours"
+  fi
+
+  # ── Django's own pages must actually render, and the admin must not ──────
+  # `collectstatic` runs at image build, so /data/static is baked into the
+  # image: a host mount over /data shadowed it, every /static/ URL 404'd and
+  # every Django-rendered page returned 500. The SPA never touches /static, so
+  # this was invisible for as long as nobody opened the admin.
+  local st; st="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 "https://${MEET_HOST}/static/admin/css/base.css" 2>/dev/null)"
+  case "$st" in
+    "200 text/css"*) ok "Django static files are served (/data/static is not shadowed by a mount)" ;;
+    *) bad "/static/admin/css/base.css returns '${st:-nothing}', expected 200 text/css" \
+           "a bind-mount over /data hides the image's baked STATIC_ROOT — everything Django renders itself then 500s" ;;
+  esac
+
+  local adm; adm="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://${MEET_HOST}/admin/" 2>/dev/null)"
+  case "$adm" in
+    404) ok "Django admin is not reachable from the internet (404)" ;;
+    *)   bad "https://${MEET_HOST}/admin/ answers HTTP $adm — it must be 404 from outside" \
+             "no MFA, no brute-force protection, and a login grants roomAdmin on any room; reach it over an SSH tunnel instead" ;;
+  esac
+
+  # ── Exactly one HSTS policy, and it must not be a 60-second one ──────────
+  # Django and nginx-proxy both emit one; the UA obeys the FIRST (RFC 6797),
+  # so two headers means the short policy silently wins.
+  local hs; hs="$(curl -sS -D- -o /dev/null --max-time 15 "https://${MEET_HOST}/api/v1.0/config/" 2>/dev/null | grep -ci '^strict-transport-security:')"
+  local hsmax; hsmax="$(curl -sS -D- -o /dev/null --max-time 15 "https://${MEET_HOST}/api/v1.0/config/" 2>/dev/null | grep -i '^strict-transport-security:' | head -1 | grep -oE 'max-age=[0-9]+' | cut -d= -f2)"
+  if [ "$hs" = "1" ] && [ "${hsmax:-0}" -ge 15552000 ]; then
+    ok "one HSTS policy, max-age=${hsmax}"
+  elif [ "$hs" != "1" ]; then
+    bad "$hs Strict-Transport-Security headers on /api/ (expected exactly 1)" \
+        "the browser obeys the first one — here max-age=${hsmax:-unknown}; add proxy_hide_header in the gateway"
+  else
+    bad "single HSTS header but max-age=${hsmax:-unknown} is under 180 days"
+  fi
+
+  # ── Share cards: what a link crawler actually gets ───────────────────────
+  # A crawler does not run the SPA's JS redirect, so without a server-side hop
+  # every share of the bare domain unfurls as upstream's "LaSuite Meet". Follow
+  # the redirect chain exactly as Discord, Slack and X do, then assert the card
+  # image really exists at the far end (a 404 there silently degrades to the
+  # site icon, which is upstream's).
+  local rootloc; rootloc="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "https://${MEET_HOST}/" 2>/dev/null)"
+  case "$rootloc" in
+    30*accueil*) ok "a cookieless visit to / is redirected to /accueil/ (crawlers follow it)" ;;
+    200*) bad "/ serves upstream's SPA shell to cookieless clients (HTTP 200, no redirect)" \
+              "shares of the bare domain unfurl as 'LaSuite Meet' with DINUM's icon — add the gateway's location = / block" ;;
+    *) bad "/ answered '${rootloc:-nothing}' for a cookieless client" ;;
+  esac
+  local ogimg; ogimg="$(curl -sSL --max-time 15 "https://${MEET_HOST}/" 2>/dev/null | sed -n 's/.*property="og:image" content="\([^"]*\)".*/\1/p' | head -1)"
+  if [ -z "$ogimg" ]; then
+    bad "no og:image reachable by following / as a crawler would" \
+        "every platform falls back to the site icon, which is upstream's"
+  else
+    local ogct; ogct="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 "$ogimg" 2>/dev/null)"
+    case "$ogct" in
+      "200 image/png"*) ok "share card served at $ogimg" ;;
+      *) bad "og:image $ogimg answers '${ogct:-nothing}', expected 200 image/png" \
+             "the SPA fallback returns 200 text/html for a missing file, so assert the type" ;;
+    esac
   fi
 
   # ── DINUM's hardcoded legal routes must redirect off this host ───────────
