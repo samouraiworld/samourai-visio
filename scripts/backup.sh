@@ -80,7 +80,12 @@ hdr="$(gunzip -c "$OUT" 2>/dev/null | head -c 4096)"
 printf '%s' "$hdr" | grep -q "PostgreSQL database dump" \
   || fail "dump lacks the pg_dump header: $OUT"
 size="$(wc -c < "$OUT" | tr -d ' ')"
-[ "$size" -ge 10240 ] || fail "dump suspiciously small (${size} bytes): $OUT"
+# 4096, not 10240: on a young instance a real dump (schema + a handful of
+# users/rooms) compresses to ~8 KB. Verified against a live dump containing
+# 3 real users and 8 real rooms (8121 bytes) — 10240 was rejecting genuine
+# backups outright, silently skipping the remote copy and the retention
+# enforcement below. Revisit upward as real usage grows.
+[ "$size" -ge 4096 ] || fail "dump suspiciously small (${size} bytes): $OUT"
 
 rclone copyto "$OUT" "$REMOTE/$(basename "$OUT")" \
   || fail "rclone copy to $REMOTE failed"
