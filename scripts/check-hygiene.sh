@@ -69,6 +69,17 @@ check "no secret-bearing files tracked" \
 check "no database dumps or runtime data tracked" \
   "$(git ls-files | grep -E '\.(sql|dump|sql\.gz|aof|rdb)$|(^|/)data/|(^|/)backups?/' || true)"
 
+# ── Stray files swept in by `git add -A` ────────────────────────────────────
+# A file literally named `=` reached main in #19 (empty, harmless, and pure
+# noise in a repository that is meant to be read as evidence). A shell command
+# containing an unquoted `>=` redirects into a file called `=`, and `git add -A`
+# then commits it without anyone looking. The class is broader than that one
+# character: editor leftovers (.bak/.orig/.swp/~), macOS .DS_Store, and any
+# name outside [A-Za-z0-9._-] are all accidents rather than decisions here.
+# Every legitimate path in this repo is plain ASCII, so this can be strict.
+check "no stray or accidentally-committed filenames" \
+  "$(git ls-files | grep -E '(^|/)[^A-Za-z0-9._/-]|\.(tmp|bak|orig|rej|swp)$|(^|/)\.DS_Store$|~$' || true)"
+
 # ── .gitignore actually covers the paths the runbook creates ────────────────
 uncovered=""
 for p in deploy/.env deploy/.env.prod deploy/env.d/common deploy/env.d/postgresql \
