@@ -75,7 +75,7 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 | # | Item | Note |
 |---|---|---|
 | 1.1 | **Enforce the retention the privacy policy already promises** | The published page states access logs 7 days, accountless rooms purged monthly, accounts deleted after 12 months idle. **None is implemented.** nginx-proxy's json-file logs are unbounded. A published retention period nothing enforces is a written commitment to a control that does not exist. Implement, or amend the page. |
-| 1.2 | **Missing legal fields** | LCEN wants a telephone number for the publisher; add a VAT number if Samouraï Coop is VAT-registered. Both absent from `mentions-legales/`. |
+| 1.2 | ~~**Missing legal fields**~~ **CLOSED 2026-07-27** | VAT `FR 54 830 485 108`, SIRET `830 485 108 00021` and `RCS Paris 830 485 108` are published. **No telephone number, by decision** — LCEN art. 6-III-1 does list one, so this is an accepted formal gap, not an oversight; contact and abuse both run through `support@samourai.coop`. Do not reopen this as a pending task. |
 | 1.3 | **Our own CGU** | Upstream's remain reachable by direct URL and describe a service for State administrations. Nothing links to them, but they exist on our host. |
 | 1.4 | **Caps** | Meet exposes none; enforce LiveKit-side (`max_participants`, `empty_timeout`, `departure_timeout`). |
 | 1.5 | **Backups** | `pg_dump` on cron, off-box, **restore-tested once**. An untested backup is not a backup. |
@@ -129,6 +129,22 @@ Nothing in #11 is live yet. On the host, in `~/visio`:
 > present/600/placeholder-free (config), `LAST_OK` fresher than 26 h (stack).
 > Restore drill in RUNBOOK §8ter — the doc's own rule, "an untested backup
 > is not a backup", is now an install step LOurs checks off, not a wish.
+
+> **Progress — 2026-07-26.** A cross-perspective audit (seven expert lenses,
+> adversarially verified; findings kept **internally**, not in this repo) fixed
+> four defects in PR #19 — including a blocker where `backup.sh` could never
+> complete on a real database (SIGPIPE under `pipefail`), a health check that
+> reported OK for an unhealthy backend, and our own pages 301-ing to a dead
+> `http://…:8080` URL — and corrected the **inverted** `SENTRY_DSN` note above
+> (use `DJANGO_SENTRY_DSN`; the bare name does nothing, proven empirically).
+> A second PR fixes three production defects the audit found live: Django's
+> baked `STATIC_ROOT` was shadowed by the `/data` mount so every
+> Django-rendered page returned **500**, `/admin` was publicly reachable, and
+> two HSTS headers were emitted where the 60-second one won.
+> **Still open, needing a decision:** anonymous LiveKit token minting is
+> unthrottled (the fix needs the host's real proxy CIDR — see the internal
+> audit), and only the database leaves the box (secrets, configs and ACME
+> certs have no off-box copy).
 
 ### Phase 2 — engineering debt from the 2026-07-24 review
 

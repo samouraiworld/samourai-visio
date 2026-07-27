@@ -104,9 +104,14 @@ for f in theme/custom.css $(git ls-files 'landing/*.html' 'landing/*.css'); do
   [ -f "$f" ] || continue
   # strip comments so documentation about the rule cannot trip the rule
   stripped=$(sed -e 's|/\*.*\*/||g' -e '/\/\*/,/\*\//d' -e 's|<!--.*-->||g' -e '/<!--/,/-->/d' "$f")
+  # Absolute URLs on OUR OWN origin are first-party by definition and fetch
+  # nothing off-host. They are also unavoidable: og:image and rel=canonical
+  # must be absolute, because every social platform resolves them against its
+  # own origin rather than the page's. Dropped AFTER matching, so the pattern
+  # stays blunt and any other host still fails.
   hits=$(printf '%s\n' "$stripped" | grep -nEo \
     '@import[^;]*https?://[^;]*|<(script|iframe)[^>]+src="https?://[^"]+|<link[^>]+href="https?://[^"]+|url\(["'"'"']?https?://[^)]+' \
-    || true)
+    | grep -v 'https://visio\.samourai\.app' || true)
   [ -n "$hits" ] && ext="$ext$f: $hits"$'\n'
 done
 check "no third-party resource is loaded by the theme or the landing pages" "${ext%$'\n'}"
@@ -122,6 +127,30 @@ for f in landing/mentions-legales/index.html landing/confidentialite/index.html 
          landing/conditions-utilisation/index.html; do
   [ -s "$f" ] || legal="$legal$f is missing or empty"$'\n'
 done
+
+# ── Share card: the asset every social platform crops to ────────────────────
+# A share of this service must not unfurl as DINUM's product. Two halves, each
+# useless alone: the 1200x630 file has to exist (below ~600px wide, platforms
+# fall back to the site icon — which is upstream's), and the page has to point
+# at it absolutely, because every platform resolves og:image against its own
+# origin rather than the page's.
+card=""
+if [ -s landing/og-card.png ]; then
+  dim="$(python3 -c 'from PIL import Image;im=Image.open("landing/og-card.png");print("%dx%d"%im.size)' 2>/dev/null \
+        || python3 -c 'import struct;d=open("landing/og-card.png","rb").read(24);print("%dx%d"%struct.unpack(">II",d[16:24]))')"
+  [ "$dim" = "1200x630" ] || card="${card}landing/og-card.png is $dim, expected 1200x630"$'\n'
+else
+  card="${card}landing/og-card.png is missing — shares fall back to upstream's icon"$'\n'
+fi
+grep -q 'property="og:image" content="https://visio.samourai.app/accueil/og-card.png"' landing/index.html ||
+  card="${card}landing/index.html does not point og:image at the absolute og-card.png URL"$'\n'
+grep -q 'name="twitter:card" content="summary_large_image"' landing/index.html ||
+  card="${card}landing/index.html is not requesting a large twitter card"$'\n'
+# og:url must name the page that describes THIS service. Pointing it at the
+# site root sends crawlers to upstream's SPA shell, titled "LaSuite Meet".
+grep -q 'property="og:url" content="https://visio.samourai.app/accueil/"' landing/index.html ||
+  card="${card}og:url does not point at /accueil/ — a crawler re-fetching it lands on upstream's shell"$'\n'
+check "share card is ours, present at 1200x630, and referenced absolutely" "${card%$'\n'}"
 [ -s landing/mentions-legales/index.html ] &&
   grep -q "830 485 108" landing/mentions-legales/index.html ||
   legal="${legal}landing/mentions-legales/index.html does not carry Samouraï Coop's SIREN"$'\n'
