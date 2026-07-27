@@ -89,3 +89,41 @@ footer{border-top:1px solid var(--border);padding-block:28px;margin-top:56px;
   font-size:.84rem;color:var(--ink-3)}
 footer .inner{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between}
 footer .links{display:flex;flex-wrap:wrap;gap:16px}
+
+/* ── Print / save-as-PDF ─────────────────────────────────────────────────────
+   These are the pages people actually print or keep: a privacy policy, a
+   publisher notice, terms. On paper the screen theme rendered near-white text
+   on white — legible only by accident, and blank on a printer that drops
+   backgrounds. Restate the palette for paper rather than inventing a second
+   design: same structure, ink on white.
+
+   Link URLs are expanded because a printed page cannot be clicked, and legal
+   notices are exactly where the target of a link is part of the content.
+   Chrome and Safari are set explicitly since neither prints backgrounds by
+   default while both honour these colour overrides. */
+@media print {
+  :root{
+    --bg:#fff; --bg-card:#fff; --bg-elev:#fff;
+    --ink:#000; --ink-2:#1a1a1a; --ink-3:#333; --ink-4:#444;
+    --border:#bbb; --border-lt:#ccc;
+    --coral:#000; --coral-line:#999; --coral-soft:#666; --lav:#000;
+  }
+  body{background:#fff;color:#000;font-size:11pt}
+  .skip,header.top,footer .links,.back{display:none}
+  main{padding:0}
+  .wrap{max-width:none;padding:0}
+  h1{font-size:20pt}
+  h2{font-size:13pt}
+  h3{font-size:11.5pt}
+  .eyebrow{color:#000}
+  /* The URL matters on paper; the mailto scheme prefix does not. */
+  a{color:#000;text-decoration:underline}
+  a[href^="http"]::after{content:" (" attr(href) ")";font-size:9pt;color:#333;
+    word-break:break-all}
+  /* Keep a table row, an identity block or a callout from splitting mid-fact. */
+  .ident,.note,tr,dl{break-inside:avoid;page-break-inside:avoid}
+  h1,h2,h3{break-after:avoid;page-break-after:avoid}
+  .tw{overflow:visible}
+  table{font-size:10pt}
+  .note{border:1px solid #999;border-left:3px solid #000}
+}
