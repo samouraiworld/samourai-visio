@@ -655,18 +655,20 @@ sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
 Run once now, and after any PostgreSQL major-version bump:
 
 ```bash
-L="$(ls -1t ~/backups/visio-*.sql.gz | head -1)"
-docker run -d --name restore-drill -e POSTGRES_PASSWORD=drill postgres:16
-sleep 5
-# The dump carries ALTER ... OWNER TO meet — the role must exist first.
-docker exec restore-drill psql -U postgres -c "CREATE ROLE meet LOGIN"
-docker exec restore-drill psql -U postgres -c "CREATE DATABASE drill OWNER meet"
-gunzip -c "$L" | docker exec -i restore-drill psql -q -v ON_ERROR_STOP=1 -U postgres -d drill
-docker exec restore-drill psql -U postgres -d drill -tc "SELECT count(*) FROM django_migrations"
-# Expect a non-zero count — django_migrations exists in every Meet dump, so
-# zero rows or an error means the restore did NOT work. Then clean up:
-docker rm -f restore-drill
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh            # restores the most recent LOCAL dump
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh --remote   # restores the most recent dump from the bucket
 ```
+
+Spins up a disposable `postgres:16` container (the role must pre-exist
+because the dump carries `ALTER ... OWNER TO meet`), restores into it, and
+hard-fails if `django_migrations` comes back empty or errors — that table
+exists in every Meet dump regardless of real usage, so its absence means
+the restore did not work. The container is always removed on exit, success
+or failure. `meet_user`/`meet_room` counts are reported for information but
+never fail the drill on their own — a zero count only means the instance
+was young when the dump was taken. Only run `--remote` after the install
+block's step 2 (`backup.sh` run by hand, above) has printed `OK` at least
+once — otherwise the bucket holds no dump yet and it fails immediately.
 
 ---
 
