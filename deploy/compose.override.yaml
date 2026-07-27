@@ -85,6 +85,17 @@ services:
       - VIRTUAL_HOST=${MEET_HOST}
       - VIRTUAL_PORT=8083
       - LETSENCRYPT_HOST=${MEET_HOST}
+      # nginx-proxy adds its own "Strict-Transport-Security: max-age=31536000"
+      # to any vhost it holds a certificate for, regardless of what the
+      # backend returns — independent of, and in addition to, the single
+      # policy our own gateway template emits (nginx/default.conf.template).
+      # RFC 6797 §8.1 has the UA honour only the FIRST header, so two sources
+      # is not cosmetic: whichever nginx-proxy or ours arrives first silently
+      # wins over the other, and it goes undetected because both bodies
+      # advertise max-age=31536000, so a curl skim looks like one header.
+      # Verified live 2026-07-27: preflight.sh public genuinely counted two.
+      # This env var is nginx-proxy's own per-vhost switch to stand down.
+      - HSTS=off
     volumes:
       # Serves FRONTEND_CUSTOM_CSS_URL=/custom/style.css and
       # DJANGO_EMAIL_LOGO_IMG=.../custom/logo.png. Without this both return
@@ -126,6 +137,10 @@ services:
       - VIRTUAL_HOST=${LIVEKIT_HOST}
       - VIRTUAL_PORT=7880
       - LETSENCRYPT_HOST=${LIVEKIT_HOST}
+      # Same nginx-proxy auto-HSTS behaviour as the frontend vhost above —
+      # LiveKit emits no HSTS policy of its own, so this only prevents
+      # nginx-proxy from being the sole, undocumented source of one.
+      - HSTS=off
     ports:
       # TURN over UDP/443. nginx-proxy binds 443/TCP only, so 443/UDP is free
       # — no second IP required. Needs the turn: block in livekit-server.yaml.
