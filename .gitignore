@@ -57,3 +57,6 @@ nohup.out
 *.swp
 .idea/
 .vscode/
+
+# ── Subagent-driven-development scratch workspaces ─────────────────────────
+.superpowers/
