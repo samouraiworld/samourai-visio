@@ -42,7 +42,32 @@ if [ "$MODE" = "local" ]; then
   [ -n "$DUMP" ] || fail "no local dump found in $HOME/backups"
   SOURCE_DESC="local $DUMP"
 else
-  fail "remote mode not implemented yet"
+  [ -f env.d/backup ] || fail "env.d/backup missing (template: deploy/env.d/backup.example)"
+  command -v rclone >/dev/null 2>&1 || fail "rclone not installed (apt-get install rclone)"
+
+  # shellcheck disable=SC2163  # dynamic export; the key is validated by grep + case
+  while IFS='=' read -r k v; do
+    case "$k" in
+      RCLONE_CONFIG_VISIO_*) export "$k=$v" ;;
+    esac
+  done < <(grep -E '^RCLONE_CONFIG_VISIO_[A-Z0-9_]+=' env.d/backup)
+
+  REMOTE="$(envval env.d/backup BACKUP_REMOTE_PATH)"
+  [ -n "$REMOTE" ] || fail "BACKUP_REMOTE_PATH unset in env.d/backup"
+
+  latest="$(rclone lsjson "$REMOTE" 2>/dev/null \
+    | grep -o '"Path":"[^"]*visio-[^"]*\.sql\.gz"' \
+    | sed 's/.*:"//; s/"$//' \
+    | sort \
+    | tail -1)"
+  [ -n "$latest" ] || fail "remote holds no visio-*.sql.gz objects ($REMOTE)"
+
+  restore_tmpdir="$(mktemp -d)"
+  chmod 700 "$restore_tmpdir"
+  TMPFILE="$restore_tmpdir/$latest"
+  rclone copyto "$REMOTE/$latest" "$TMPFILE" || fail "rclone copy of $latest from $REMOTE failed"
+  DUMP="$TMPFILE"
+  SOURCE_DESC="remote $REMOTE/$latest"
 fi
 
 [ -s "$DUMP" ] || fail "dump is empty: $DUMP"
