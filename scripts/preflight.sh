@@ -178,6 +178,14 @@ phase_config() {
     # The admin must not be on the internet, and the header block must survive
     # a re-derivation of this file at upgrade time (RUNBOOK §10) — both are
     # single lines someone can drop while resolving a conflict.
+    # shellcheck disable=SC2016  # a literal nginx variable name, not shell
+    if grep -qE '\$cookie_meet_sessionid' nginx/default.conf.template &&
+       grep -qE 'return 302 /accueil/' nginx/default.conf.template; then
+      ok "gateway sends cookieless visitors from / to /accueil/ (so crawlers reach our share card)"
+    else
+      bad "gateway lost the 'location = /' share-card redirect" \
+          "link crawlers get upstream's SPA shell and every share unfurls as 'LaSuite Meet'"
+    fi
     if grep -qE '^[[:space:]]*location ~ \^/admin[[:space:]]+\{[^}]*return 404' nginx/default.conf.template; then
       ok "gateway keeps the Django admin off the internet (404)"
     else
@@ -736,6 +744,32 @@ phase_public() {
         "the browser obeys the first one — here max-age=${hsmax:-unknown}; add proxy_hide_header in the gateway"
   else
     bad "single HSTS header but max-age=${hsmax:-unknown} is under 180 days"
+  fi
+
+  # ── Share cards: what a link crawler actually gets ───────────────────────
+  # A crawler does not run the SPA's JS redirect, so without a server-side hop
+  # every share of the bare domain unfurls as upstream's "LaSuite Meet". Follow
+  # the redirect chain exactly as Discord, Slack and X do, then assert the card
+  # image really exists at the far end (a 404 there silently degrades to the
+  # site icon, which is upstream's).
+  local rootloc; rootloc="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --max-time 15 "https://${MEET_HOST}/" 2>/dev/null)"
+  case "$rootloc" in
+    30*accueil*) ok "a cookieless visit to / is redirected to /accueil/ (crawlers follow it)" ;;
+    200*) bad "/ serves upstream's SPA shell to cookieless clients (HTTP 200, no redirect)" \
+              "shares of the bare domain unfurl as 'LaSuite Meet' with DINUM's icon — add the gateway's location = / block" ;;
+    *) bad "/ answered '${rootloc:-nothing}' for a cookieless client" ;;
+  esac
+  local ogimg; ogimg="$(curl -sSL --max-time 15 "https://${MEET_HOST}/" 2>/dev/null | sed -n 's/.*property="og:image" content="\([^"]*\)".*/\1/p' | head -1)"
+  if [ -z "$ogimg" ]; then
+    bad "no og:image reachable by following / as a crawler would" \
+        "every platform falls back to the site icon, which is upstream's"
+  else
+    local ogct; ogct="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 "$ogimg" 2>/dev/null)"
+    case "$ogct" in
+      "200 image/png"*) ok "share card served at $ogimg" ;;
+      *) bad "og:image $ogimg answers '${ogct:-nothing}', expected 200 image/png" \
+             "the SPA fallback returns 200 text/html for a missing file, so assert the type" ;;
+    esac
   fi
 
   # ── DINUM's hardcoded legal routes must redirect off this host ───────────

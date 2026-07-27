@@ -97,6 +97,8 @@ mutate 's|^    location = /mentions-legales  .*|    location = /mentions-legales
 mutate 's|^    location = /accessibilite/ .*||' nginx/default.conf.template "one DINUM route variant deleted outright"
 mutate 's|^    location = /accueil {.*||' nginx/default.conf.template "slash-completion for /accueil removed (dead http://host:8080 redirect returns)"
 mutate 's|^    location ~ \^/admin .*||' nginx/default.conf.template "admin 404 dropped from the gateway"
+# shellcheck disable=SC2016  # literal nginx variable names inside a sed script
+mutate 's|\$cookie_meet_sessionid|$cookie_sessionid|' nginx/default.conf.template "share-card redirect keyed on the wrong session cookie name"
 mutate 's|^    add_header Content-Security-Policy .*||' nginx/default.conf.template "CSP frame-ancestors header dropped"
 mutate 's|^        proxy_hide_header Strict-Transport-Security;||' nginx/default.conf.template "HSTS no longer hidden from upstream (the 60s policy would win)"
 mutate '\|nginx/default.conf.template|d' compose.override.yaml "gateway mount dropped (upstream's template would silently mount instead)"

@@ -145,6 +145,34 @@ server {
     location ~ ^/admin { return 404; }
     # SAMOURAI-END
 
+    # SAMOURAI-BEGIN share cards: send crawlers to a page that describes US
+    # `/` is upstream's SPA shell: <title>LaSuite Meet</title> and not one og
+    # tag (verified live 2026-07-27). Anonymous humans never see it — the SPA
+    # redirects them to /accueil/ via FRONTEND_EXTERNAL_HOME_URL — but a link
+    # crawler does not run JavaScript, so every share of the bare domain was
+    # unfurling as DINUM's product, with DINUM's icon.
+    #
+    # Crawlers DO follow redirects, so one server-side hop fixes it for every
+    # platform at once, with no user-agent sniffing and no fork: the crawler
+    # lands on /accueil/ and reads our og tags there.
+    #
+    # Gated on the session cookie so signed-in users keep Meet's own home — the
+    # settled behaviour. Upstream names it meet_sessionid (settings.py:1198),
+    # NOT Django's default `sessionid`; the wrong name here would send every
+    # signed-in user to the landing page instead.
+    #
+    # Degrades safely: a stale cookie still reaches the SPA, which falls back
+    # to its own JS redirect. no-store so a browser cannot cache the redirect
+    # and keep bouncing a user who has since signed in.
+    location = / {
+        if ($cookie_meet_sessionid = "") {
+            add_header Cache-Control "no-store" always;
+            return 302 /accueil/;
+        }
+        try_files $uri @proxy_to_meet_frontend;
+    }
+    # SAMOURAI-END
+
     location / {
         try_files $uri @proxy_to_meet_frontend;
     }
