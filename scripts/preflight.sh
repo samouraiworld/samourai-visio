@@ -265,11 +265,14 @@ phase_config() {
   # CreateRoom — every room is auto-created when the first token-holder
   # connects, so LiveKit's server-level room config binds every room. The
   # LiveKit default for max_participants is 0: UNLIMITED.
+  # Extract the NUMBER, not the rest of the line: a trailing space or an inline
+  # `# comment` used to land in the value and trip the not-a-number branch,
+  # reporting "not set" for a cap that was set — a check that cries wolf.
   local mp et
-  mp="$(sed -n 's/^[[:space:]]*max_participants:[[:space:]]*//p' livekit-server.yaml | head -1 | tr -d '"')"
-  et="$(sed -n 's/^[[:space:]]*empty_timeout:[[:space:]]*//p' livekit-server.yaml | head -1 | tr -d '"')"
+  mp="$(grep -oE '^[[:space:]]*max_participants:[[:space:]]*[0-9]+' livekit-server.yaml | grep -oE '[0-9]+$' | head -1)"
+  et="$(grep -oE '^[[:space:]]*empty_timeout:[[:space:]]*[0-9]+' livekit-server.yaml | grep -oE '[0-9]+$' | head -1)"
   case "$mp" in
-    ''|*[!0-9]*) bad "room.max_participants is not set in livekit-server.yaml" \
+    ''|*[!0-9]*) bad "room.max_participants is not set to a number in livekit-server.yaml" \
                      "the LiveKit default is unlimited — one room can absorb the whole host" ;;
     0) bad "room.max_participants is 0 — that means unlimited, not disabled" ;;
     *) ok "room cap present: max_participants=$mp" ;;
@@ -406,12 +409,25 @@ PY
 
     local lr="$ETC/logrotate.d/rsyslog"
     if [ -f "$lr" ]; then
-      local slow; slow="$(grep -nE 'weekly|rotate 4' "$lr" || true)"
-      if [ -z "$slow" ]; then
-        ok "rsyslog file copies rotate daily and keep 7 (auth.log, kern.log)"
+      # Assert POSITIVELY. The previous form blacklisted the literal distro
+      # default (`weekly`, `rotate 4`) and therefore passed `monthly`,
+      # `rotate 30`, or a file with no directive at all — everything except
+      # the one case it named. What the privacy policy promises is an upper
+      # bound in DAYS, so require the two directives that produce one.
+      local rot keep bad_rot=""
+      rot="$(grep -oE '^[[:space:]]*(daily|weekly|monthly|yearly)' "$lr" | tr -d ' \t' | head -1)"
+      keep="$(grep -oE '^[[:space:]]*rotate[[:space:]]+[0-9]+' "$lr" | grep -oE '[0-9]+' | head -1)"
+      [ "$rot" = "daily" ] || bad_rot="rotation is '${rot:-absent}', expected daily"
+      if [ -z "$keep" ]; then
+        bad_rot="${bad_rot:+$bad_rot; }no 'rotate N' directive"
+      elif [ "$keep" -gt 7 ]; then
+        bad_rot="${bad_rot:+$bad_rot; }keeps $keep copies, expected at most 7"
+      fi
+      if [ -z "$bad_rot" ]; then
+        ok "rsyslog file copies rotate daily and keep ${keep} (auth.log, kern.log)"
       else
-        bad "rsyslog logrotate keeps file copies beyond 7 days" \
-            "$(echo "$slow" | tr '\n' ' ') — tighten per RUNBOOK §8bis"
+        bad "rsyslog logrotate does not bound file copies to 7 days" \
+            "$bad_rot — tighten per RUNBOOK §8bis"
       fi
     else
       skip "no $lr" "no rsyslog file copies to rotate; journald retention covers the journal itself"
@@ -745,6 +761,37 @@ phase_public() {
   else
     bad "single HSTS header but max-age=${hsmax:-unknown} is under 180 days"
   fi
+
+  # ── The claim that a guest never contacts Clerk ───────────────────────────
+  # The privacy policy states plainly that a visitor without an account never
+  # reaches our authentication provider. That is only true while silent login
+  # is off: upstream defaults it ON, which sends every anonymous visitor to
+  # Clerk with prompt=none before they click anything. Nothing asserted it, so
+  # an upstream default change or a hand-edit on the host would have quietly
+  # falsified a published GDPR statement.
+  local sl; sl="$(echo "$cfg" | sed -n 's/.*"is_silent_login_enabled"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/p' | head -1)"
+  case "$sl" in
+    false) ok "silent login is off — a guest's browser never contacts Clerk, as the privacy policy states" ;;
+    true)  bad "silent login is ENABLED — every anonymous visitor is sent to Clerk before clicking anything" \
+               "the privacy policy states the opposite; set FRONTEND_IS_SILENT_LOGIN_ENABLED=false and recreate the backend" ;;
+    *)     skip "is_silent_login_enabled absent from /api/v1.0/config/" "cannot prove the guest path avoids Clerk" ;;
+  esac
+
+  # ── Certificate expiry, with margin ──────────────────────────────────────
+  # Renewal failing is invisible until the outage: Let's Encrypt no longer
+  # sends expiry mail, so acme-companion breaking is silent. 21 days leaves
+  # room for the 30-day renewal window to retry before anyone must act.
+  for h in "$MEET_HOST" "$LIVEKIT_HOST"; do
+    local exp; exp="$(echo | openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)"
+    if [ -z "$exp" ]; then
+      skip "could not read the certificate for $h" "openssl unavailable, or the host did not complete a TLS handshake"
+    elif echo | openssl s_client -connect "$h:443" -servername "$h" 2>/dev/null | openssl x509 -noout -checkend $((21*86400)) >/dev/null 2>&1; then
+      ok "certificate for $h is valid for more than 21 days (until $exp)"
+    else
+      bad "certificate for $h expires within 21 days ($exp)" \
+          "renewal is not working: docker compose logs acme-companion — nobody will be warned by e-mail"
+    fi
+  done
 
   # ── Share cards: what a link crawler actually gets ───────────────────────
   # A crawler does not run the SPA's JS redirect, so without a server-side hop
