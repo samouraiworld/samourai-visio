@@ -655,8 +655,8 @@ sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
 Run once now, and after any PostgreSQL major-version bump:
 
 ```bash
-scripts/restore-drill.sh            # restores the most recent LOCAL dump
-scripts/restore-drill.sh --remote   # restores the most recent dump from the bucket
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh            # restores the most recent LOCAL dump
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh --remote   # restores the most recent dump from the bucket
 ```
 
 Spins up a disposable `postgres:16` container (the role must pre-exist
@@ -666,7 +666,9 @@ exists in every Meet dump regardless of real usage, so its absence means
 the restore did not work. The container is always removed on exit, success
 or failure. `meet_user`/`meet_room` counts are reported for information but
 never fail the drill on their own — a zero count only means the instance
-was young when the dump was taken.
+was young when the dump was taken. Only run `--remote` after the install
+block's step 2 (`backup.sh` run by hand, above) has printed `OK` at least
+once — otherwise the bucket holds no dump yet and it fails immediately.
 
 ---
 

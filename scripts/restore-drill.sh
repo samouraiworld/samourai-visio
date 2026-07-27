@@ -31,13 +31,15 @@ esac
 
 CONTAINER="restore-drill"
 TMPFILE=""
+RESTORE_TMPDIR=""
 cleanup() {
   docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-  [ -n "$TMPFILE" ] && rm -f "$TMPFILE"
+  [ -n "$RESTORE_TMPDIR" ] && rm -rf "$RESTORE_TMPDIR"
 }
 trap cleanup EXIT
 
 if [ "$MODE" = "local" ]; then
+  # shellcheck disable=SC2012  # names are backup.sh's own visio-%F-%H%M.sql.gz output, never arbitrary/attacker-controlled
   DUMP="$(ls -1t "$HOME/backups"/visio-*.sql.gz 2>/dev/null | head -1)"
   [ -n "$DUMP" ] || fail "no local dump found in $HOME/backups"
   SOURCE_DESC="local $DUMP"
@@ -54,17 +56,24 @@ else
 
   REMOTE="$(envval env.d/backup BACKUP_REMOTE_PATH)"
   [ -n "$REMOTE" ] || fail "BACKUP_REMOTE_PATH unset in env.d/backup"
+  case "$REMOTE" in
+    *"<"*) fail "env.d/backup still carries a <placeholder>" ;;
+    *:*) : ;;
+    *) fail "BACKUP_REMOTE_PATH is not remote:bucket/prefix ($REMOTE)" ;;
+  esac
 
-  latest="$(rclone lsjson "$REMOTE" 2>/dev/null \
-    | grep -o '"Path":"[^"]*visio-[^"]*\.sql\.gz"' \
-    | sed 's/.*:"//; s/"$//' \
-    | sort \
-    | tail -1)"
-  [ -n "$latest" ] || fail "remote holds no visio-*.sql.gz objects ($REMOTE)"
+  rclone_err_file="$(mktemp)"
+  latest="$(rclone lsf "$REMOTE" 2>"$rclone_err_file" | grep -E 'visio-.*\.sql\.gz$' | sort | tail -1)"
+  if [ -z "$latest" ]; then
+    err="$(cat "$rclone_err_file" 2>/dev/null)"
+    rm -f "$rclone_err_file"
+    fail "remote holds no visio-*.sql.gz objects ($REMOTE)${err:+ — rclone: $err}"
+  fi
+  rm -f "$rclone_err_file"
 
-  restore_tmpdir="$(mktemp -d)"
-  chmod 700 "$restore_tmpdir"
-  TMPFILE="$restore_tmpdir/$latest"
+  RESTORE_TMPDIR="$(mktemp -d)"
+  chmod 700 "$RESTORE_TMPDIR"
+  TMPFILE="$RESTORE_TMPDIR/$latest"
   rclone copyto "$REMOTE/$latest" "$TMPFILE" || fail "rclone copy of $latest from $REMOTE failed"
   DUMP="$TMPFILE"
   SOURCE_DESC="remote $REMOTE/$latest"
