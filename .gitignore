@@ -57,3 +57,13 @@ nohup.out
 *.swp
 .idea/
 .vscode/
+
+# ── Accidents ───────────────────────────────────────────────────────────────
+# Prevention for what check-hygiene.sh's stray-filename gate detects. An empty
+# file named `=` reached main once: an unquoted `>=` in a shell command
+# redirects into it, and `git add -A` commits it unnoticed.
+/=
+*.orig
+*.rej
+*.bak
+*.tmp
