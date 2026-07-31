@@ -370,6 +370,9 @@ Watch `docker compose logs -f acme-companion` until both certificates issue agai
 
 Back up the nginx-proxy `certs` and `acme` volumes. They live in a *different* compose project, so a `down -v` there destroys the ACME account key and every certificate.
 
+> [!NOTE]
+> **nginx-proxy adds its own HSTS header per vhost, on top of whatever the backend sends.** By default it emits `Strict-Transport-Security: max-age=31536000` for any host it holds a certificate for — a second, undocumented source alongside the single policy our own gateway template already emits (§7bis). The UA honours only the *first* header it receives (RFC 6797 §8.1), so two sources is not cosmetic, and a `curl` skim can miss it since both happen to advertise the same `max-age`. `deploy/compose.override.yaml` sets `HSTS=off` on `frontend` and `livekit` to stand this down — do not remove it, it is not redundant with the gateway's own header. Verified live 2026-07-27; `preflight.sh public` counts the headers on `/api/` and fails if there are not exactly one.
+
 Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 
 ---
