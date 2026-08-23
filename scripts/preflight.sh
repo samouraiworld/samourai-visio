@@ -104,10 +104,17 @@ phase_config() {
 
   # ── Branding assets exist ────────────────────────────────────────────────
   # Docker silently creates a DIRECTORY when a bind-mount source is missing.
-  local ba=""
+  local ba="" f
   [ -s custom/style.css ] || ba="$ba custom/style.css"
   [ -s custom/logo.png ]  || ba="$ba custom/logo.png"
-  if [ -z "$ba" ]; then ok "branding assets present and non-empty"
+  # The icon set is bind-mounted per file over the image's own icons (RUNBOOK
+  # §7): every source must exist, or Docker mounts a directory in its place.
+  for f in favicon.ico favicon-16x16.png favicon-32x32.png apple-touch-icon.png \
+           android-chrome-192x192.png android-chrome-512x512.png \
+           android-chrome-512x512-maskable.png site.webmanifest logo.svg; do
+    [ -s "custom/icons/$f" ] || ba="$ba custom/icons/$f"
+  done
+  if [ -z "$ba" ]; then ok "branding assets present and non-empty (theme, e-mail logo, the nine icon files)"
   else bad "missing branding assets (Docker will mount a directory in their place)" "$ba"; fi
 
   # ── Landing page: the setting and the files must agree ───────────────────
@@ -650,6 +657,20 @@ phase_public() {
   # ── Theme actually served ────────────────────────────────────────────────
   # The SPA fallback (`error_page 404 =200 /index.html`) means a MISSING file
   # returns 200 text/html, never 404. Asserting on status can never catch it.
+  # ── Icons: ours, served as images (the SPA fallback would say text/html) ─
+  local ict; ict="$(curl -sS -o /dev/null -w '%{content_type}' --max-time 15 "https://${MEET_HOST}/favicon-32x32.png" 2>/dev/null)"
+  case "$ict" in
+    image/png*) ok "/favicon-32x32.png served as image/png (icon bind-mounts live)" ;;
+    text/html*) bad "/favicon-32x32.png returns text/html — the icon bind-mounts are MISSING" "copy theme/icons/ to custom/icons/ and recreate the frontend (RUNBOOK §7)" ;;
+    *) bad "/favicon-32x32.png unexpected content-type: ${ict:-none}" ;;
+  esac
+  local man; man="$(curl -sS --max-time 15 "https://${MEET_HOST}/site.webmanifest" 2>/dev/null | grep -c 'Samouraï Visio')"
+  if [ "${man:-0}" -ge 1 ]; then ok "/site.webmanifest names Samouraï Visio (not upstream's empty manifest)"
+  else bad "/site.webmanifest does not name Samouraï Visio" "upstream's manifest has empty name fields; the mount is missing or stale"; fi
+  local hdr; hdr="$(curl -sS --max-time 15 "https://${MEET_HOST}/assets/logo.svg" 2>/dev/null | grep -c 'Samouraï Visio')"
+  if [ "${hdr:-0}" -ge 1 ]; then ok "/assets/logo.svg is the Samouraï Visio glyph (in-room header logo)"
+  else bad "/assets/logo.svg is not ours" "the per-file mount over Vite's output is missing; note the 30-day cache"; fi
+
   local ct; ct="$(curl -sS -o /dev/null -w '%{content_type}' --max-time 15 "https://${MEET_HOST}/custom/style.css" 2>/dev/null)"
   case "$ct" in
     text/css*) ok "/custom/style.css served as text/css" ;;

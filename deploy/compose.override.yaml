@@ -95,6 +95,22 @@ services:
       # replaces Vite's build output (index-*.js, index-*.css, the MediaPipe
       # wasm) and the app will not boot. Asset overrides must be per-file.
       - ./custom:/usr/share/nginx/html/custom:ro
+      # Samouraï Visio icons, PER FILE over the image's own web-root icons
+      # (theme/icons/ -> host custom/icons/, RUNBOOK §7). The app's in-room
+      # header logo is /assets/logo.svg (Header.tsx) — a single file inside
+      # Vite's output dir, so this is the one mount allowed under /assets.
+      # nginx caches /assets/* for 30 days: returning visitors may keep the
+      # old header logo for up to a month. preflight asserts the content-type
+      # of each (a missing source makes Docker mount a DIRECTORY: 403/500).
+      - ./custom/icons/favicon.ico:/usr/share/nginx/html/favicon.ico:ro
+      - ./custom/icons/favicon-16x16.png:/usr/share/nginx/html/favicon-16x16.png:ro
+      - ./custom/icons/favicon-32x32.png:/usr/share/nginx/html/favicon-32x32.png:ro
+      - ./custom/icons/apple-touch-icon.png:/usr/share/nginx/html/apple-touch-icon.png:ro
+      - ./custom/icons/android-chrome-192x192.png:/usr/share/nginx/html/android-chrome-192x192.png:ro
+      - ./custom/icons/android-chrome-512x512.png:/usr/share/nginx/html/android-chrome-512x512.png:ro
+      - ./custom/icons/android-chrome-512x512-maskable.png:/usr/share/nginx/html/android-chrome-512x512-maskable.png:ro
+      - ./custom/icons/site.webmanifest:/usr/share/nginx/html/site.webmanifest:ro
+      - ./custom/icons/logo.svg:/usr/share/nginx/html/assets/logo.svg:ro
       # Public landing page, served same-origin at https://<MEET_HOST>/accueil/
       # so the URL never leaves visio.samourai.app. Meet sends anonymous
       # visitors here from `/` via FRONTEND_EXTERNAL_HOME_URL; signed-in users
