@@ -62,8 +62,8 @@ scripts/build-greffon.py   # re-reads theme/custom.css, re-emits metadata.json
    `https://visio.samourai.app`, and that exact `{{ instance_url }}/api/v1.0/callback/`
    is registered in the Clerk OAuth app. **Confirm Greffon supports pinning a
    custom domain per instance.** Without it, OIDC login cannot work.
-2. **Clerk `username` enabled.** `preferred_username` is empty otherwise — see
-   [../../docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](../../docs/CLERK_INSTANCE_AUDIT_2026-07-22.md).
+2. **Clerk `username` enabled.** `preferred_username` is empty otherwise — the
+   instance has first/last name disabled (re-check with `scripts/audit-clerk-instance.sh`).
 3. **Backend without object storage.** Recording is dropped, so no S3 vars are
    set. Verify the backend boots and `migrate` runs without them; if it insists
    on storage config, add a minimal MinIO like the demo.
