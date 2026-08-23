@@ -42,6 +42,8 @@ sed -E "s/<[^>]*>/$FAKE/g" deploy/env.d/backup.example      > "$WORK/env.d/backu
 sed -E "s/<[^>]*>/$FAKE/"  deploy/livekit-server.yaml.example > "$WORK/livekit-server.yaml"
 printf 'body\n' > "$WORK/custom/style.css"
 printf 'png\n'  > "$WORK/custom/logo.png"
+# The icon set the frontend mounts per file (copied from the repo, as §7 says).
+mkdir -p "$WORK/custom/icons" && cp theme/icons/* "$WORK/custom/icons/"
 printf '<html></html>\n' > "$WORK/landing/index.html"
 chmod 600 "$WORK/.env" "$WORK/env.d/common" "$WORK/env.d/postgresql" "$WORK/env.d/backup"
 
@@ -108,6 +110,7 @@ mutate '\|nginx/default.conf.template|d' compose.override.yaml "gateway mount dr
 mutate 's/^MaxRetentionSec=7day/MaxRetentionSec=1month/' etc/systemd/journald.conf.d/visio-retention.conf "journal retention loosened beyond the published 7 days"
 mutate 's/"log-driver": "journald"/"log-driver": "json-file"/' etc/docker/daemon.json "docker default log driver reverted to json-file"
 mutate 's/driver: journald/driver: json-file/' compose.override.yaml "compose logging driver reverted to json-file"
+mutate '/./d' custom/icons/site.webmanifest "one icon file empty (Docker would mount a directory; the manifest would be upstream's)"
 mutate 's/daily/weekly/' etc/logrotate.d/rsyslog "rsyslog logrotate back at the distro default"
 mutate 's/^BACKUP_REMOTE_PATH=.*/BACKUP_REMOTE_PATH=<bucket name>/' env.d/backup "backup bucket left as a placeholder"
 mutate 's|backup\.sh|something-else.sh|' etc/cron.d/visio-backup "backup cron pointing at nothing"
