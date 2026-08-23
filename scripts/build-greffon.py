@@ -136,7 +136,7 @@ def user_input(title, key, container, env_key, description, secret_field=False):
 metadata = {
     "name": "Samouraï Visio",
     "min_greffer_version": "0.3.3",
-    "logo": "https://raw.githubusercontent.com/suitenumerique/meet/v1.24.0/src/frontend/public/android-chrome-512x512.png",
+    "logo": "https://raw.githubusercontent.com/samouraiworld/samourai-visio/main/theme/icons/android-chrome-512x512.png",
     "description": (
         "Free video conferencing by Samouraï Coop — La Suite Meet (DINUM), "
         "themed and authenticated against the Samouraï Clerk SSO. Guests join by "
