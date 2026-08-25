@@ -86,7 +86,7 @@ frontchannel_logout     false                   ← no logout endpoint (see §4 
 > [!WARNING]
 > **The `profile` scope is necessary but not sufficient, and on this instance it is currently not enough.**
 > Audited 2026-07-22: `first_name` and `last_name` are **disabled** on `clerk.samourai.app`, so the sign-up form collects no name, `userinfo` carries no `given_name`/`family_name`, and `full_name` is `NULL` for every user — regardless of scopes or env vars.
-> Re-check with `scripts/audit-clerk-instance.sh`. Options, tradeoffs and a recommendation: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md).
+> Re-check with `scripts/audit-clerk-instance.sh` (it prints the live sign-up mode, the enabled identifiers and the abuse controls).
 > Enabling those attributes changes the sign-up form for **Memba and Zentai** as well — this instance is shared.
 3. Redirect URI — exactly:
    ```
@@ -300,7 +300,7 @@ What it actually does (`core/api/viewsets.py:257-277`): it fires **only** when `
 `values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) and never reads JSON. `["given_name","family_name"]` becomes `['["given_name"', '"family_name"]']`, so `user_info.get(...)` returns `None` and **every display name is empty**. There is no error. Upstream's own template gets this wrong at `env.d/production.dist/common:44`. Affects `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
 
 **3. `OIDC_USERINFO_FULLNAME_FIELDS` — override the default, and match it to what the instance actually collects.**
-Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md)), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
+Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified with `scripts/audit-clerk-instance.sh`, 2026-07-22), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
 
 **4. `OIDC_RP_SCOPES` — the default is too narrow.**
 Default is `"openid email"` (`settings.py:533`). Without `profile` you get no profile claims — including `preferred_username` — and names render empty regardless of trap 3. The scope is necessary but **not sufficient**: Clerk emits `preferred_username` only if the instance has **`username` enabled**, a setting shared with every other `*.samourai.app` product.

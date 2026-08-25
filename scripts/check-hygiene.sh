@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Repo hygiene gate. Every check here corresponds to a defect that actually
-# reached this repository once — see docs/CTO_REVIEW_2026-07-22.md.
+# reached this repository once (July 2026); each check's comment names its defect.
 #
 # docs/ is excluded from the forbidden-string checks: the analysis documents
 # legitimately quote the wrong names while explaining why they are wrong.

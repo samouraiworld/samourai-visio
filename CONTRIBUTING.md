@@ -15,9 +15,10 @@ In every one of those cases you get a healthy stack, a green `docker compose
 ps`, and the wrong behaviour. So the standard here is not "does it run" but
 **"what would have failed if this were wrong, and did I run that?"**
 
-Four defects of exactly this shape shipped into this repo before CI existed.
-They are documented in [docs/CTO_REVIEW_2026-07-22.md](docs/CTO_REVIEW_2026-07-22.md);
-the gates in `scripts/` exist so they cannot come back.
+Four defects of exactly this shape shipped into this repo before CI existed
+(a JSON-shaped list value, a wrong env var name, a missing bind-mount that the SPA
+fallback hid, a LiveKit secret that differed between two files); the gates in
+`scripts/` exist so they cannot come back, and each check's comment names its defect.
 
 ## Before you push
 

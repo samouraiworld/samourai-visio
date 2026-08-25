@@ -15,7 +15,7 @@ Upstream is MIT-licensed and built by [DINUM](https://www.numerique.gouv.fr/). T
 | `clerk.` / `accounts.` | **Clerk auth — shared by everything** | — | live ⚠️ do not touch |
 | `memba.` | Memba | `samouraiworld/memba` | live |
 | `zentai.` | Zentai | `Code/Zentai` | deployed (Scaleway) |
-| `visio.` | **La Suite Meet** | **this repo** | **live, not yet promoted** — see [docs/ETAT_ET_FEUILLE_DE_ROUTE_2026-07-24.md](docs/ETAT_ET_FEUILLE_DE_ROUTE_2026-07-24.md) |
+| `visio.` | **La Suite Meet** | **this repo** | **live** (free public instance) |
 
 Related but separate:
 
@@ -30,7 +30,7 @@ Related but separate:
 DEPLOY.md           Operator quickstart — the linear path. Start here to deploy.
 RUNBOOK.md          The detail behind each deploy step.
 scripts/preflight.sh  Gates that prove each deploy stage is correct, not just up.
-docs/               Strategy, drift verification, plan, expert review, Clerk audit
+docs/               See docs/README.md — assessments are kept internal
 deploy/             compose overrides + env templates (.example only — no secrets)
 scripts/            CI gates + preflight, runnable locally
 theme/custom.css    Runtime branding via FRONTEND_CUSTOM_CSS_URL
@@ -48,8 +48,7 @@ supply, then walks the runbook with a preflight gate at each stage.
 
 ## Before you touch anything
 
-Read [docs/DRIFT_REPORT_2026-07-22.md](docs/DRIFT_REPORT_2026-07-22.md) and
-[docs/CTO_REVIEW_2026-07-22.md](docs/CTO_REVIEW_2026-07-22.md). Several settings in this
+Read the traps section of [RUNBOOK.md](RUNBOOK.md). Several settings in this
 stack fail **silently** when misconfigured — a wrong env var name, a JSON list where a
 comma-separated one is expected, or a missing bind-mount all yield a perfectly healthy
 stack that does the wrong thing. The gates in `scripts/` encode those lessons; run them
