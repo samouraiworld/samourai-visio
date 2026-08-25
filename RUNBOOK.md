@@ -675,18 +675,35 @@ sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
 Run once now, and after any PostgreSQL major-version bump:
 
 ```bash
-L="$(ls -1t ~/backups/visio-*.sql.gz | head -1)"
-docker run -d --name restore-drill -e POSTGRES_PASSWORD=drill postgres:16
-sleep 5
-# The dump carries ALTER ... OWNER TO meet — the role must exist first.
-docker exec restore-drill psql -U postgres -c "CREATE ROLE meet LOGIN"
-docker exec restore-drill psql -U postgres -c "CREATE DATABASE drill OWNER meet"
-gunzip -c "$L" | docker exec -i restore-drill psql -q -v ON_ERROR_STOP=1 -U postgres -d drill
-docker exec restore-drill psql -U postgres -d drill -tc "SELECT count(*) FROM django_migrations"
-# Expect a non-zero count — django_migrations exists in every Meet dump, so
-# zero rows or an error means the restore did NOT work. Then clean up:
-docker rm -f restore-drill
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh            # restores the most recent LOCAL dump
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh --remote   # restores the most recent dump from the bucket
 ```
+
+Spins up a disposable Postgres container (the role must pre-exist because
+the dump carries `ALTER ... OWNER TO <role>`), restores into it, and
+hard-fails if `django_migrations` comes back empty or errors — that table
+exists in every Meet dump regardless of real usage, so its absence means
+the restore did not work. The container is always removed on exit, success
+or failure.
+
+Nothing about the app is hardcoded, so the same drill will serve Docs
+without a fork. Three knobs, all with working defaults:
+
+| Variable | Default | Why it is not hardcoded |
+|---|---|---|
+| `DRILL_PG_IMAGE` | the image the stack itself runs, read from `docker compose config --images` | restoring into a different major version is how a drill passes while the real restore fails; it also stops the drill from needing a Docker Hub pull on a rate-limited host that already has the image |
+| `DRILL_DB_USER` | `DB_USER` from `env.d/postgresql` | the dump's `OWNER TO` role; `meet` for Visio, different for Docs |
+| `DRILL_TABLES` | `meet_user meet_room` | the tables counted as proof that *data* came back, not just schema |
+
+Row counts are reported, and a **zero** count never fails the drill on its
+own — it only means the instance was young when the dump was taken. A table
+named in `DRILL_TABLES` that is **absent** from the restore does fail, because
+printing `0` for a table that is not there is how a drill vouches for an
+empty restore.
+
+Only run `--remote` after the install block's step 2 (`backup.sh` run by
+hand, above) has printed `OK` at least once — otherwise the bucket holds no
+dump yet and it fails immediately.
 
 ---
 
