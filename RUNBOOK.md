@@ -436,6 +436,16 @@ Every brand pairing must clear WCAG AA. The raw Kodera values do not — `#FD626
 
 Bind-mount branding assets **per file**. Never mount a *directory* over `/usr/share/nginx/html/assets` — that replaces Vite's build output and the app will not boot. Favicons and PWA icons live at the web **root**, not under `/assets`.
 
+**The Visio icon set** lives in [`theme/icons/`](theme/icons/) (the *Deux voix* glyph: two participants overlapping, the lens filled coral — first logo of the samourai.app app family). Copy it next to the theme and recreate the frontend so the per-file mounts in `compose.override.yaml` take effect:
+
+```bash
+mkdir -p ~/visio/custom/icons && cp ~/repo/theme/icons/* ~/visio/custom/icons/
+docker compose up -d frontend
+scripts/preflight.sh config && scripts/preflight.sh public
+```
+
+What each file replaces: `favicon.ico`, `favicon-16x16.png`, `favicon-32x32.png`, `apple-touch-icon.png`, `android-chrome-192x192.png`, `android-chrome-512x512.png` and `site.webmanifest` are the image's own web-root icons; `android-chrome-512x512-maskable.png` is new (referenced by our manifest); `logo.svg` is mounted over `/assets/logo.svg`, the in-room header logo (`Header.tsx`) — the single file under `/assets` that may be overridden. nginx serves `/assets/*` with a 30-day cache, so returning visitors can keep DINUM's header logo for up to a month. A missing source file makes Docker mount a **directory** in its place (403/500 for that URL); `preflight.sh config` checks all nine sources and `public` checks the served content-types.
+
 The browser-tab title needs a rebuilt frontend image (`VITE_APP_TITLE`), which contradicts the no-fork position; **accept the upstream title for v1.** Note it appears in on-screen copy too, not only the tab.
 
 **Credit upstream visibly.** MIT requires the notice — see [`NOTICE.md`](NOTICE.md) — and good faith requires the link. There is no footer element to hang it on (`use_french_gov_footer` defaults false and `Footer.tsx:125` returns `null`), so the theme injects it via `.Header-beforeLogo::after`. CSS `content` cannot carry a clickable link, so the landing page (§7bis) carries the clickable one.
