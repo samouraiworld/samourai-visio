@@ -371,7 +371,14 @@ Watch `docker compose logs -f acme-companion` until both certificates issue agai
 Back up the nginx-proxy `certs` and `acme` volumes. They live in a *different* compose project, so a `down -v` there destroys the ACME account key and every certificate.
 
 > [!NOTE]
-> **nginx-proxy adds its own HSTS header per vhost, on top of whatever the backend sends.** By default it emits `Strict-Transport-Security: max-age=31536000` for any host it holds a certificate for — a second, undocumented source alongside the single policy our own gateway template already emits (§7bis). The UA honours only the *first* header it receives (RFC 6797 §8.1), so two sources is not cosmetic, and a `curl` skim can miss it since both happen to advertise the same `max-age`. `deploy/compose.override.yaml` sets `HSTS=off` on `frontend` and `livekit` to stand this down — do not remove it, it is not redundant with the gateway's own header. Verified live 2026-07-27; `preflight.sh public` counts the headers on `/api/` and fails if there are not exactly one.
+> **nginx-proxy adds its own HSTS header per vhost, on top of whatever the backend sends.** By default it emits `Strict-Transport-Security: max-age=31536000` for any host it holds a certificate for (`nginx.tmpl:824` reads `Env.HSTS` per vhost; `:1087-1092` emit it, and only the literal `off` suppresses the block). The UA honours only the *first* header it receives (RFC 6797 §8.1), so a second source is not cosmetic, and a `curl` skim can miss it since both advertise the same `max-age`.
+>
+> **The two vhosts need opposite settings, and `deploy/compose.override.yaml` sets both:**
+>
+> - `frontend` — `HSTS=off`. Our gateway template already emits the single policy (§7bis), so nginx-proxy must stand down or the browser gets two headers.
+> - `livekit` — `HSTS=max-age=31536000; includeSubDomains`, **not** `off`. There is no gateway template in front of LiveKit and it emits no policy of its own, so nginx-proxy is the *only* source: `off` there would leave `livekit.<domain>` with **no HSTS at all**. `visio.<domain>`'s `includeSubDomains` does not cover it — the two hosts are siblings, not parent and child. Measured 2026-08-25: that vhost returned exactly one header, nginx-proxy's bare `max-age=31536000`.
+>
+> Do not “simplify” these to the same value. `preflight.sh config` asserts both directions and `preflight-selftest.sh` mutates each one; `preflight.sh public` additionally counts the headers on `/api/` and fails if there is not exactly one.
 
 Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 
