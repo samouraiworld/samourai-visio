@@ -85,6 +85,17 @@ services:
       - VIRTUAL_HOST=${MEET_HOST}
       - VIRTUAL_PORT=8083
       - LETSENCRYPT_HOST=${MEET_HOST}
+      # nginx-proxy adds its own "Strict-Transport-Security: max-age=31536000"
+      # to any vhost it holds a certificate for, regardless of what the
+      # backend returns — independent of, and in addition to, the single
+      # policy our own gateway template emits (nginx/default.conf.template).
+      # RFC 6797 §8.1 has the UA honour only the FIRST header, so two sources
+      # is not cosmetic: whichever nginx-proxy or ours arrives first silently
+      # wins over the other, and it goes undetected because both bodies
+      # advertise max-age=31536000, so a curl skim looks like one header.
+      # Verified live 2026-07-27: preflight.sh public genuinely counted two.
+      # This env var is nginx-proxy's own per-vhost switch to stand down.
+      - HSTS=off
     volumes:
       # Serves FRONTEND_CUSTOM_CSS_URL=/custom/style.css and
       # DJANGO_EMAIL_LOGO_IMG=.../custom/logo.png. Without this both return
@@ -142,6 +153,20 @@ services:
       - VIRTUAL_HOST=${LIVEKIT_HOST}
       - VIRTUAL_PORT=7880
       - LETSENCRYPT_HOST=${LIVEKIT_HOST}
+      # Same nginx-proxy auto-HSTS behaviour as the frontend vhost above, but
+      # the opposite treatment, because the two vhosts are not symmetric.
+      # LiveKit emits no HSTS of its own and has no gateway template in front
+      # of it, so nginx-proxy is the ONLY source here: `HSTS=off` would leave
+      # livekit.<domain> with no HSTS at all. Measured 2026-08-25 — that vhost
+      # returned exactly one header, nginx-proxy's bare `max-age=31536000`.
+      # `visio.<domain>`'s includeSubDomains does not cover it: the two hosts
+      # are siblings, not parent and child.
+      #
+      # nginx.tmpl:824 reads Env.HSTS per vhost and :1087-1092 emits whatever
+      # value it holds (only the literal "off" removes the block), so pinning
+      # the full policy here makes nginx-proxy a single, documented source
+      # that matches the gateway's own policy exactly.
+      - "HSTS=max-age=31536000; includeSubDomains"
     ports:
       # TURN over UDP/443. nginx-proxy binds 443/TCP only, so 443/UDP is free
       # — no second IP required. Needs the turn: block in livekit-server.yaml.

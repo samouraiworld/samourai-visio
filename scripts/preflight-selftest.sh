@@ -81,6 +81,20 @@ mutate() {
   mv "$WORK/$file.orig" "$WORK/$file"; rm -f "$WORK/$file.bak"
 }
 
+# ── mutate_re: same, but assert the FAIL *text* matches ─────────────────────
+# `mutate` credits any FAIL, so an unrelated breakage can vouch for a check
+# that never fired. These two target one service key each in a file the other
+# checks also read, so they assert on the message their own check emits.
+mutate_re() {
+  local expr="$1" file="$2" re="$3" label="$4"
+  cp "$WORK/$file" "$WORK/$file.orig"
+  sed -i.bak "$expr" "$WORK/$file"
+  local hit
+  hit="$(bash scripts/preflight.sh config 2>/dev/null | grep 'FAIL' | grep -c "$re")"
+  if [ "$hit" -ge 1 ]; then ok "detected: $label"; else err "NOT detected: $label"; fi
+  mv "$WORK/$file.orig" "$WORK/$file"; rm -f "$WORK/$file.bak"
+}
+
 echo "mutations: each must be caught"
 mutate 's/^OIDC_USERINFO_FULLNAME_FIELDS=.*/OIDC_USERINFO_FULLNAME_FIELDS=["a","b"]/' env.d/common "JSON-shaped list value"
 mutate 's/^LIVEKIT_API_SECRET=.*/LIVEKIT_API_SECRET=mismatch_000000000000000000000000000000/' env.d/common "LiveKit secret mismatch"
@@ -98,6 +112,16 @@ mutate 's|^FRONTEND_EXTERNAL_HOME_URL="\(.*\)/"|FRONTEND_EXTERNAL_HOME_URL="\1"|
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/DJANGO_LANGUAGE_CODE=fr/' env.d/common "unsupported language code"
 mutate 's/^DJANGO_LANGUAGE_CODE=.*/#DJANGO_LANGUAGE_CODE=fr-fr/' env.d/common "language left at the English default"
 mutate '\|/usr/share/nginx/html/accueil|d' compose.override.yaml "landing bind-mount dropped from the override"
+# nginx-proxy's per-vhost HSTS. The two vhosts are asymmetric, so each
+# direction is mutated separately: turning livekit's policy off is the
+# regression this check exists to stop, and leaving the frontend's on
+# restores the duplicate header the gateway template was written to end.
+mutate_re 's|^      - "HSTS=max-age=31536000; includeSubDomains"|      - HSTS=off|' \
+  compose.override.yaml 'livekit sets HSTS' \
+  "livekit HSTS disabled (nginx-proxy is its only source — that vhost would ship no policy)"
+mutate_re 's|^      - HSTS=off|      - "HSTS=max-age=31536000"|' \
+  compose.override.yaml 'frontend does not set HSTS=off' \
+  "frontend HSTS left on (a second header on top of the gateway's; the browser obeys the first)"
 mutate 's|^    location = /mentions-legales  .*|    location = /mentions-legales { return 404; }|' nginx/default.conf.template "a single DINUM legal route left unredirected"
 mutate 's|^    location = /accessibilite/ .*||' nginx/default.conf.template "one DINUM route variant deleted outright"
 mutate 's|^    location = /accueil {.*||' nginx/default.conf.template "slash-completion for /accueil removed (dead http://host:8080 redirect returns)"
