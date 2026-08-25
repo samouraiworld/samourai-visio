@@ -67,3 +67,6 @@ nohup.out
 *.rej
 *.bak
 *.tmp
+
+# ── Subagent-driven-development scratch workspaces ─────────────────────────
+.superpowers/

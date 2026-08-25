@@ -223,6 +223,17 @@ jobs:
           docker compose exec -T postgresql psql -q -U meet -d meet -c \
             "CREATE TABLE bulk AS SELECT g, md5(g::text)||md5((g+1)::text) AS payload
              FROM generate_series(1,200000) g"
+          # The tables restore-drill.sh asserts on. django_migrations exists in
+          # every Django dump regardless of usage, which is why the drill treats
+          # its absence as proof the restore failed.
+          docker compose exec -T postgresql psql -q -U meet -d meet -c \
+            "CREATE TABLE django_migrations (id serial PRIMARY KEY, app text, name text);
+             INSERT INTO django_migrations (app, name)
+               VALUES ('core','0001_initial'), ('core','0002_room');
+             CREATE TABLE meet_user (id serial PRIMARY KEY, email text);
+             INSERT INTO meet_user (email) VALUES ('a@example.org'), ('b@example.org');
+             CREATE TABLE meet_room (id serial PRIMARY KEY, slug text);
+             INSERT INTO meet_room (slug) VALUES ('alpha')"
 
       - name: backup.sh succeeds and produces a verified off-box copy
         run: |
@@ -241,6 +252,45 @@ jobs:
           # PII must not be world-readable (umask 077 + chmod 700).
           m="$(stat -c '%a' "$(ls -1t "$HOME"/backups/visio-*.sql.gz | head -1)")"
           [ "$m" = "600" ] || { echo "::error::local dump mode $m, expected 600"; exit 1; }
+
+      - name: restore-drill.sh restores that dump, locally and from the bucket
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          run_drill() { VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/restore-drill.sh" "$@"; }
+
+          # Local mode. The drill must resolve the image from the fixture's own
+          # compose file rather than reaching for a Docker Hub tag of its own.
+          run_drill | tee /tmp/drill.out
+          grep -q '^OK restored from local ' /tmp/drill.out ||
+            { echo "::error::local drill did not report OK"; exit 1; }
+          grep -q 'postgres:16' /tmp/drill.out ||
+            { echo "::error::drill did not resolve the image from compose"; exit 1; }
+          grep -q 'meet_user=2' /tmp/drill.out ||
+            { echo "::error::row counts not asserted (expected meet_user=2)"; exit 1; }
+
+          # Remote mode: the copy that would survive losing the host.
+          run_drill --remote | tee /tmp/drill-remote.out
+          grep -q '^OK restored from remote ' /tmp/drill-remote.out ||
+            { echo "::error::remote drill did not report OK"; exit 1; }
+
+      - name: And the drill FAILS when a table it asserts on is missing
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          # A drill that prints 0 for a table that is not in the dump vouches
+          # for an empty restore. Naming a table the dump cannot contain must
+          # fail, not report zero.
+          if DRILL_TABLES="meet_user table_that_cannot_exist" VISIO_DIR="$W" \
+             "$GITHUB_WORKSPACE/scripts/restore-drill.sh" > /tmp/drill-fail.out 2>&1; then
+            cat /tmp/drill-fail.out
+            echo "::error::drill reported success with a missing table"; exit 1
+          fi
+          cat /tmp/drill-fail.out
+          grep -q '^FAIL .*table_that_cannot_exist is absent' /tmp/drill-fail.out ||
+            { echo "::error::no FAIL line naming the absent table"; exit 1; }
 
       - name: And it FAILS loudly when the remote is unwritable
         run: |
