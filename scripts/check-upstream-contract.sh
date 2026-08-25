@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Assert that every upstream behaviour this repo's configuration depends on is
-# still true. Each assertion corresponds to a finding in
-# docs/DRIFT_REPORT_2026-07-22.md — if one fails, upstream moved and the
-# affected config must be re-derived BEFORE deploying.
+# still true. Each assertion corresponds to a verified upstream behaviour the
+# config relies on (the July 2026 drift review) — if one fails, upstream moved
+# and the affected config must be re-derived BEFORE deploying.
 #
 # Usage:  scripts/check-upstream-contract.sh [ref]
 #         ref defaults to $UPSTREAM_REF, then to the pinned version.

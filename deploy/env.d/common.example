@@ -121,7 +121,8 @@ OIDC_RP_SCOPES="openid email profile"
 # pre-filled; the browser remembers what the user types.
 #
 # Re-check with: scripts/audit-clerk-instance.sh
-# Rationale: docs/CLERK_INSTANCE_AUDIT_2026-07-22.md
+# Rationale: first/last name are disabled on the Clerk instance; the username
+# handle is the only name claim that actually arrives.
 OIDC_USERINFO_FULLNAME_FIELDS=preferred_username
 OIDC_USERINFO_SHORTNAME_FIELD=preferred_username
 # Default is empty, which requires only `sub` — so a Clerk identity with no

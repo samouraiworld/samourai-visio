@@ -36,7 +36,7 @@ Nothing past step 2 works without these. Get them first.
 | 0.1 | **Clerk: shared org or dedicated instance?** | **Decide first — it sets the OIDC endpoints and can't be changed after step 3 without invalidating accounts.** Default so far: the shared `clerk.samourai.app` org. |
 | 0.2 | **Server IP + SSH access** | The host to deploy on. |
 | 0.3 | **Clerk OAuth app** → `OIDC_RP_CLIENT_ID` + secret | Register redirect URI **exactly** `https://visio.samourai.app/api/v1.0/callback/`. Scopes `openid email profile`. Secret is shown once. |
-| 0.4 | **Clerk: enable `username`** | Without it, every display name is empty — see [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md). Owner action in the Clerk dashboard. |
+| 0.4 | **Clerk: enable `username`** | Without it, every display name is empty — the instance has first/last name disabled, so `preferred_username` is the only name claim that arrives (re-check with `scripts/audit-clerk-instance.sh`). Owner action in the Clerk dashboard. |
 | 0.5 | **Scaleway TEM** — a verified sending domain + an API key | Invitation emails, via Scaleway Transactional Email (French/EU). Verify the domain in TEM (SPF + DKIM + DMARC on the shared apex — coordinate it); username is the Project ID, password the API secret key. |
 | 0.6 | **Brand assets** | `logo.png` for emails; favicons. The CSS theme is already in the repo (`theme/custom.css`). |
 
@@ -141,8 +141,8 @@ unproven, not fine** — read each one.
 ## If something's wrong
 
 `preflight.sh` names the exact failure and the reason. Don't proceed past a red
-gate — every check maps to a real, already-seen failure mode documented in
-[docs/CTO_REVIEW_2026-07-22.md](docs/CTO_REVIEW_2026-07-22.md). The usual first
+gate — every check maps to a real, already-seen failure mode, named in the
+check's own comment and in the RUNBOOK traps. The usual first
 suspects: a surviving `<placeholder>`, a wrapped secret, or the Scaleway
 security group.
 
