@@ -541,6 +541,29 @@ pointing off-origin in `theme/custom.css` or `landing/`, and
 have edited on the host. A font `@import` in the theme did exactly this once —
 it leaked every visitor's IP and User-Agent on every page, rooms included.
 
+**The same claim has a second, less obvious face: the SPA ships an analytics
+client.** Upstream bundles `posthog-js` and keeps adding capture calls to it
+(v1.26.0 added `console.error` capture; v1.28.0 bumped the library to
+1.404.1). Nothing of ours removes it. What keeps it inert is that
+`FRONTEND_ANALYTICS` is unset — upstream's `settings.py` defaults it to `{}`,
+so the SPA is handed no key and the client never initialises. That is a
+default we inherit, not a decision we enforced, which is exactly the shape of
+hole the silent-login gate exists to close: one upstream default change, or
+one hand-edit on the host, and a published GDPR statement becomes false with
+nothing raising a hand.
+
+So it is gated on both sides now:
+
+| Where | What it asserts |
+|---|---|
+| `preflight.sh config` | `env.d/common` sets none of `FRONTEND_ANALYTICS`, `ANALYTICS_BACKEND`, `ANALYTICS_BACKEND_SETTINGS`, and does not turn on `SIGNUP_NEW_USER_TO_MARKETING_EMAIL` (which would ship every new user's address to `MARKETING_SERVICE_CLASS` — upstream's default is Brevo) |
+| `preflight.sh public` | the **served** `/api/v1.0/config/` carries `"analytics": {}` — a container started before the file changed still serves the old value, so the file alone does not prove it |
+
+`preflight-selftest.sh` mutates both variables and proves the config-side
+check fails on each. Re-read this after every upgrade: the risk is not that
+someone enables analytics on purpose, it is that upstream changes the default
+under us.
+
 ---
 
 ## 8. Smoke tests
@@ -754,6 +777,36 @@ docker compose run --rm backend python manage.py migrate
 ```
 
 **Rollback:** revert the tags in `compose.override.yaml`, `docker compose up -d`, then restore the dump if the migration was not reversible. Re-fetch upstream `compose.yaml` at the old tag if it changed.
+
+### Where we stand (read 2026-08-25)
+
+Pinned: **v1.24.0** (21 July). Upstream head: **v1.28.0** (24 August). Four
+minors and two hotfix tags behind, and the gap grows by roughly one minor
+every nine days.
+
+What the batch to v1.28.0 actually involves, checked against upstream rather
+than assumed:
+
+- **`UPGRADE.md` has no entry after v1.23.0** — no manual step for any release
+  in this range.
+- **One migration**, additive: `0022_user_default_room_access_level_and_more`.
+- 194 commits over 300 files, overwhelmingly frontend.
+
+That last point is the reason this is not just hygiene. v1.26.0–v1.28.0 are
+mostly **join-path device handling**: camera-in-use failures explained on the
+join screen, Chrome/Windows 10 device-in-use errors, Firefox `AbortError` on
+device start, "Timeout starting source", permission prompts when toggling a
+denied device, a silent-microphone watcher, and a sound tester. Those are the
+exact failures a 40–100 person community call with mixed hardware hits, and
+they are fixed upstream and not here. Batch the upgrade **before** an event,
+not after, with the 24 h canary.
+
+`scripts/check-upstream-contract.sh v1.28.0` was run on 2026-08-25 and **all
+fifteen assumptions still hold** — the OIDC traps, the CSS variable names, the
+synthetic-room claim, the gateway template, and the LiveKit room-cap keys. So
+the remaining risk in this batch is runtime behaviour, not contract drift: what
+the canary is for. Re-run the gate against the tag you actually pick, since
+head moves.
 
 ### Rotating a secret
 
