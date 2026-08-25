@@ -669,16 +669,31 @@ cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh            # res
 cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/restore-drill.sh --remote   # restores the most recent dump from the bucket
 ```
 
-Spins up a disposable `postgres:16` container (the role must pre-exist
-because the dump carries `ALTER ... OWNER TO meet`), restores into it, and
+Spins up a disposable Postgres container (the role must pre-exist because
+the dump carries `ALTER ... OWNER TO <role>`), restores into it, and
 hard-fails if `django_migrations` comes back empty or errors — that table
 exists in every Meet dump regardless of real usage, so its absence means
 the restore did not work. The container is always removed on exit, success
-or failure. `meet_user`/`meet_room` counts are reported for information but
-never fail the drill on their own — a zero count only means the instance
-was young when the dump was taken. Only run `--remote` after the install
-block's step 2 (`backup.sh` run by hand, above) has printed `OK` at least
-once — otherwise the bucket holds no dump yet and it fails immediately.
+or failure.
+
+Nothing about the app is hardcoded, so the same drill will serve Docs
+without a fork. Three knobs, all with working defaults:
+
+| Variable | Default | Why it is not hardcoded |
+|---|---|---|
+| `DRILL_PG_IMAGE` | the image the stack itself runs, read from `docker compose config --images` | restoring into a different major version is how a drill passes while the real restore fails; it also stops the drill from needing a Docker Hub pull on a rate-limited host that already has the image |
+| `DRILL_DB_USER` | `DB_USER` from `env.d/postgresql` | the dump's `OWNER TO` role; `meet` for Visio, different for Docs |
+| `DRILL_TABLES` | `meet_user meet_room` | the tables counted as proof that *data* came back, not just schema |
+
+Row counts are reported, and a **zero** count never fails the drill on its
+own — it only means the instance was young when the dump was taken. A table
+named in `DRILL_TABLES` that is **absent** from the restore does fail, because
+printing `0` for a table that is not there is how a drill vouches for an
+empty restore.
+
+Only run `--remote` after the install block's step 2 (`backup.sh` run by
+hand, above) has printed `OK` at least once — otherwise the bucket holds no
+dump yet and it fails immediately.
 
 ---
 

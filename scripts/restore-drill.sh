@@ -13,6 +13,21 @@
 #
 # Run from ~/visio, or set VISIO_DIR. Needs docker; --remote also needs
 # rclone and env.d/backup (template: deploy/env.d/backup.example).
+#
+# Nothing about the app is hardcoded, so the same drill serves the next app
+# (Docs) without a fork. Overridable by environment:
+#   DRILL_PG_IMAGE  Postgres image to restore INTO. Defaults to the image the
+#                   stack itself runs, read from the merged compose config —
+#                   restoring a dump into a different major version is the
+#                   classic way a drill passes while the real restore fails.
+#                   Falling back to a Docker Hub tag also makes the drill fail
+#                   on a rate-limited host that has the image locally already.
+#   DRILL_DB_USER   Role the dump expects to own its objects. Defaults to
+#                   DB_USER from env.d/postgresql.
+#   DRILL_TABLES    Space-separated tables to count as the proof that data,
+#                   not just schema, came back. Defaults to the Meet tables;
+#                   set it for another app. A table that is absent is reported
+#                   as such rather than silently counted as zero.
 
 set -uo pipefail
 DIR="${VISIO_DIR:-$PWD}"
@@ -28,6 +43,32 @@ case "${1:-}" in
   "") : ;;
   *) fail "unknown argument: $1 (usage: restore-drill.sh [--remote])" ;;
 esac
+
+# ── Resolve what to restore into, and what to assert on ─────────────────────
+# A SQL identifier reaches psql -c unquoted, so both are constrained to the
+# identifier grammar rather than trusted because they came from a local file.
+ident_ok() { case "$1" in ''|*[!A-Za-z0-9_]*) return 1 ;; *) return 0 ;; esac; }
+
+DB_USER_DEFAULT="$(envval env.d/postgresql DB_USER)"
+DRILL_DB_USER="${DRILL_DB_USER:-${DB_USER_DEFAULT:-meet}}"
+ident_ok "$DRILL_DB_USER" || fail "DRILL_DB_USER='$DRILL_DB_USER' is not a bare SQL identifier"
+
+DRILL_TABLES="${DRILL_TABLES:-meet_user meet_room}"
+for t in $DRILL_TABLES; do
+  ident_ok "$t" || fail "DRILL_TABLES entry '$t' is not a bare SQL identifier"
+done
+
+# The image the stack actually runs, so the drill restores into the same major
+# version the dump came from. `--images` prints one image per service and needs
+# no secret resolution; the grep keeps it to the postgres one.
+if [ -z "${DRILL_PG_IMAGE:-}" ]; then
+  # No --env-file: compose already auto-loads .env from the project directory
+  # when there is one, and demanding it would break the drill on a dir that
+  # keeps its variables elsewhere.
+  DRILL_PG_IMAGE="$(docker compose config --images 2>/dev/null \
+                    | grep -m1 -E '(^|/)postgres:' || true)"
+  DRILL_PG_IMAGE="${DRILL_PG_IMAGE:-postgres:16}"
+fi
 
 CONTAINER="restore-drill"
 TMPFILE=""
@@ -82,8 +123,8 @@ fi
 [ -s "$DUMP" ] || fail "dump is empty: $DUMP"
 
 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
-docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=drill postgres:16 >/dev/null \
-  || fail "docker run postgres:16 failed"
+docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=drill "$DRILL_PG_IMAGE" >/dev/null \
+  || fail "docker run $DRILL_PG_IMAGE failed"
 
 ready=0
 for _ in $(seq 1 30); do
@@ -95,9 +136,9 @@ for _ in $(seq 1 30); do
 done
 [ "$ready" -eq 1 ] || fail "postgres in $CONTAINER did not become ready within 30s"
 
-docker exec "$CONTAINER" psql -U postgres -c "CREATE ROLE meet LOGIN" >/dev/null 2>&1 \
-  || fail "CREATE ROLE meet failed"
-docker exec "$CONTAINER" psql -U postgres -c "CREATE DATABASE drill OWNER meet" >/dev/null 2>&1 \
+docker exec "$CONTAINER" psql -U postgres -c "CREATE ROLE $DRILL_DB_USER LOGIN" >/dev/null 2>&1 \
+  || fail "CREATE ROLE $DRILL_DB_USER failed"
+docker exec "$CONTAINER" psql -U postgres -c "CREATE DATABASE drill OWNER $DRILL_DB_USER" >/dev/null 2>&1 \
   || fail "CREATE DATABASE drill failed"
 
 gunzip -c "$DUMP" | docker exec -i "$CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres -d drill \
@@ -109,7 +150,16 @@ case "$migrations" in
 esac
 [ "$migrations" -gt 0 ] || fail "django_migrations is empty after restore — schema did not restore correctly ($SOURCE_DESC)"
 
-users="$(docker exec "$CONTAINER" psql -U postgres -d drill -tqc "SELECT count(*) FROM meet_user" 2>/dev/null | tr -d ' ')"
-rooms="$(docker exec "$CONTAINER" psql -U postgres -d drill -tqc "SELECT count(*) FROM meet_room" 2>/dev/null | tr -d ' ')"
+# Row counts are the proof that DATA came back, not just the schema. A table
+# named in DRILL_TABLES that the dump does not contain is a finding, not a
+# zero: silently printing "0" is how a drill vouches for an empty restore.
+counts=""
+for t in $DRILL_TABLES; do
+  n="$(docker exec "$CONTAINER" psql -U postgres -d drill -tqc "SELECT count(*) FROM $t" 2>/dev/null | tr -d ' ')"
+  case "$n" in
+    ''|*[!0-9]*) fail "table $t is absent from the restore of $SOURCE_DESC (DRILL_TABLES expects it)" ;;
+  esac
+  counts="$counts $t=$n"
+done
 
-echo "OK restored from $SOURCE_DESC: $migrations migrations, ${users:-?} users, ${rooms:-?} rooms"
+echo "OK restored from $SOURCE_DESC into $DRILL_PG_IMAGE: $migrations migrations,${counts:- no tables asserted}"
