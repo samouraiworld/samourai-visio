@@ -70,7 +70,7 @@ mkdir -p ~/visio && cd ~/visio
    - `deploy/hosts.example` → `.env`
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
-3. Branding: copy `theme/custom.css` → `custom/style.css`, and `logo.png` → `custom/logo.png`.
+3. Branding: copy `theme/custom.css` → `custom/style.css`, `logo.png` → `custom/logo.png`, and the icon set `theme/icons/*` → `custom/icons/` (nine files, bind-mounted per file — RUNBOOK §7).
    Then copy this repo's `landing/` directory → `~/visio/landing/` — that's the
    public home page anonymous visitors get instead of Meet's (RUNBOOK §7bis).
    It is served same-origin, so the URL stays on `visio.samourai.app`.
