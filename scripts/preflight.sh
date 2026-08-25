@@ -292,6 +292,35 @@ phase_config() {
     skip "no Sentry DSN configured" "backend errors are visible only in container logs (roadmap 1.6)"
   fi
 
+  # ── The published "no audience measurement" claim ────────────────────────
+  # landing/confidentialite/ states, in print: "Aucune mesure d'audience,
+  # aucun traceur, aucun pixel" and "Aucune ressource chargée depuis un
+  # tiers". Upstream ships posthog-js in the SPA and keeps adding capture
+  # calls to it (v1.26 added console.error capture; v1.28 bumped posthog-js
+  # to 1.404.1). What keeps it inert is that FRONTEND_ANALYTICS is unset —
+  # settings.py:391 defaults it to {} — so the SPA gets no key. Nothing
+  # asserted that, which is the same shape of hole the silent-login gate
+  # exists to close: an upstream default change or one hand-edit on the host
+  # would quietly falsify a published GDPR statement.
+  #
+  # SIGNUP_NEW_USER_TO_MARKETING_EMAIL is in the same family: it defaults to
+  # False, and turning it on ships every new user's address to
+  # MARKETING_SERVICE_CLASS (upstream's default is Brevo).
+  local anlyt=""
+  for v in FRONTEND_ANALYTICS ANALYTICS_BACKEND ANALYTICS_BACKEND_SETTINGS; do
+    grep -qE "^${v}=." env.d/common 2>/dev/null && anlyt="$anlyt $v"
+  done
+  local mkt; mkt="$(envval env.d/common SIGNUP_NEW_USER_TO_MARKETING_EMAIL)"
+  case "$(printf '%s' "${mkt:-false}" | tr '[:upper:]' '[:lower:]')" in
+    true|1|yes) anlyt="$anlyt SIGNUP_NEW_USER_TO_MARKETING_EMAIL" ;;
+  esac
+  if [ -z "$anlyt" ]; then
+    ok "no third-party analytics or marketing wired — the published 'aucune mesure d'audience' claim holds"
+  else
+    bad "third-party data collection is enabled:${anlyt}" \
+        "the privacy policy states in print that there is no audience measurement, tracker or pixel, and that no resource is loaded from a third party"
+  fi
+
   # ── TURN config traps ────────────────────────────────────────────────────
   if grep -qE '^[[:space:]]*enabled:[[:space:]]*true' livekit-server.yaml 2>/dev/null; then
     if grep -qE '^[[:space:]]*tls_port:[[:space:]]*0' livekit-server.yaml; then
@@ -840,6 +869,18 @@ phase_public() {
     true)  bad "silent login is ENABLED — every anonymous visitor is sent to Clerk before clicking anything" \
                "the privacy policy states the opposite; set FRONTEND_IS_SILENT_LOGIN_ENABLED=false and recreate the backend" ;;
     *)     skip "is_silent_login_enabled absent from /api/v1.0/config/" "cannot prove the guest path avoids Clerk" ;;
+  esac
+
+  # ── And the same claim, proven against what the SPA is actually served ────
+  # The config-phase check reads env.d/common; this reads what the running
+  # backend hands the browser. They can disagree — a container started before
+  # the file changed still serves the old value.
+  local anl; anl="$(echo "$cfg" | sed -n 's/.*"analytics"[[:space:]]*:[[:space:]]*\({[^}]*}\).*/\1/p' | head -1)"
+  case "$anl" in
+    "{}") ok "the served config carries an empty analytics block — no key reaches posthog-js" ;;
+    "")   skip "analytics absent from /api/v1.0/config/" "cannot prove the SPA gets no analytics key" ;;
+    *)    bad "the served config carries a non-empty analytics block: $anl" \
+              "the privacy policy states there is no audience measurement or tracker; posthog-js ships in the SPA and this is the key that wakes it" ;;
   esac
 
   # ── Certificate expiry, with margin ──────────────────────────────────────

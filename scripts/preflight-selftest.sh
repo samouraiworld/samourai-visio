@@ -122,6 +122,17 @@ mutate_re 's|^      - "HSTS=max-age=31536000; includeSubDomains"|      - HSTS=of
 mutate_re 's|^      - HSTS=off|      - "HSTS=max-age=31536000"|' \
   compose.override.yaml 'frontend does not set HSTS=off' \
   "frontend HSTS left on (a second header on top of the gateway's; the browser obeys the first)"
+
+# The published "no audience measurement" claim. posthog-js ships in the SPA
+# and only stays inert while these stay unset, so each one is mutated on.
+mutate_re 's|^FRONTEND_CUSTOM_CSS_URL=/custom/style.css|FRONTEND_CUSTOM_CSS_URL=/custom/style.css\
+FRONTEND_ANALYTICS={"posthog":{"key":"phc_selftest"}}|' \
+  env.d/common 'third-party data collection is enabled' \
+  "analytics key wired into the SPA (the privacy policy says there is none)"
+mutate_re 's|^FRONTEND_CUSTOM_CSS_URL=/custom/style.css|FRONTEND_CUSTOM_CSS_URL=/custom/style.css\
+SIGNUP_NEW_USER_TO_MARKETING_EMAIL=true|' \
+  env.d/common 'third-party data collection is enabled' \
+  "new users auto-enrolled into the marketing list (ships addresses to Brevo)"
 mutate 's|^    location = /mentions-legales  .*|    location = /mentions-legales { return 404; }|' nginx/default.conf.template "a single DINUM legal route left unredirected"
 mutate 's|^    location = /accessibilite/ .*||' nginx/default.conf.template "one DINUM route variant deleted outright"
 mutate 's|^    location = /accueil {.*||' nginx/default.conf.template "slash-completion for /accueil removed (dead http://host:8080 redirect returns)"
