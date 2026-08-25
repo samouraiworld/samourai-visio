@@ -86,7 +86,7 @@ frontchannel_logout     false                   ← no logout endpoint (see §4 
 > [!WARNING]
 > **The `profile` scope is necessary but not sufficient, and on this instance it is currently not enough.**
 > Audited 2026-07-22: `first_name` and `last_name` are **disabled** on `clerk.samourai.app`, so the sign-up form collects no name, `userinfo` carries no `given_name`/`family_name`, and `full_name` is `NULL` for every user — regardless of scopes or env vars.
-> Re-check with `scripts/audit-clerk-instance.sh`. Options, tradeoffs and a recommendation: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md).
+> Re-check with `scripts/audit-clerk-instance.sh` (it prints the live sign-up mode, the enabled identifiers and the abuse controls).
 > Enabling those attributes changes the sign-up form for **Memba and Zentai** as well — this instance is shared.
 3. Redirect URI — exactly:
    ```
@@ -300,7 +300,7 @@ What it actually does (`core/api/viewsets.py:257-277`): it fires **only** when `
 `values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) and never reads JSON. `["given_name","family_name"]` becomes `['["given_name"', '"family_name"]']`, so `user_info.get(...)` returns `None` and **every display name is empty**. There is no error. Upstream's own template gets this wrong at `env.d/production.dist/common:44`. Affects `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
 
 **3. `OIDC_USERINFO_FULLNAME_FIELDS` — override the default, and match it to what the instance actually collects.**
-Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified: [docs/CLERK_INSTANCE_AUDIT_2026-07-22.md](docs/CLERK_INSTANCE_AUDIT_2026-07-22.md)), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
+Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified with `scripts/audit-clerk-instance.sh`, 2026-07-22), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
 
 **4. `OIDC_RP_SCOPES` — the default is too narrow.**
 Default is `"openid email"` (`settings.py:533`). Without `profile` you get no profile claims — including `preferred_username` — and names render empty regardless of trap 3. The scope is necessary but **not sufficient**: Clerk emits `preferred_username` only if the instance has **`username` enabled**, a setting shared with every other `*.samourai.app` product.
@@ -369,6 +369,16 @@ Watch `docker compose logs -f acme-companion` until both certificates issue agai
 > **If issuance fails:** check for stray `AAAA` records (Let's Encrypt will validate over IPv6 and fail) and `CAA` records that do not name `letsencrypt.org`, confirm port 80 is reachable from the public internet, and read the acme-companion log. Do not loop `up -d` — you will burn the rate limit.
 
 Back up the nginx-proxy `certs` and `acme` volumes. They live in a *different* compose project, so a `down -v` there destroys the ACME account key and every certificate.
+
+> [!NOTE]
+> **nginx-proxy adds its own HSTS header per vhost, on top of whatever the backend sends.** By default it emits `Strict-Transport-Security: max-age=31536000` for any host it holds a certificate for (`nginx.tmpl:824` reads `Env.HSTS` per vhost; `:1087-1092` emit it, and only the literal `off` suppresses the block). The UA honours only the *first* header it receives (RFC 6797 §8.1), so a second source is not cosmetic, and a `curl` skim can miss it since both advertise the same `max-age`.
+>
+> **The two vhosts need opposite settings, and `deploy/compose.override.yaml` sets both:**
+>
+> - `frontend` — `HSTS=off`. Our gateway template already emits the single policy (§7bis), so nginx-proxy must stand down or the browser gets two headers.
+> - `livekit` — `HSTS=max-age=31536000; includeSubDomains`, **not** `off`. There is no gateway template in front of LiveKit and it emits no policy of its own, so nginx-proxy is the *only* source: `off` there would leave `livekit.<domain>` with **no HSTS at all**. `visio.<domain>`'s `includeSubDomains` does not cover it — the two hosts are siblings, not parent and child. Measured 2026-08-25: that vhost returned exactly one header, nginx-proxy's bare `max-age=31536000`.
+>
+> Do not “simplify” these to the same value. `preflight.sh config` asserts both directions and `preflight-selftest.sh` mutates each one; `preflight.sh public` additionally counts the headers on `/api/` and fails if there is not exactly one.
 
 Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 

@@ -39,6 +39,21 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
 
+# Read one `- KEY=value` entry from a named service's environment: block in a
+# compose file. Services sit at two-space indent, so any other two-space key
+# closes the block. Strips the optional quoting compose needs for values that
+# contain a semicolon.
+svc_env() {
+  awk -v svc="$1" -v key="$2" '
+    $0 ~ "^  " svc ":[[:space:]]*$" { in_svc = 1; next }
+    /^  [A-Za-z]/                   { in_svc = 0 }
+    in_svc && $0 ~ "^[[:space:]]*- \"?" key "=" {
+      sub(/^[[:space:]]*- "?/, ""); sub(/"$/, ""); sub("^" key "=", "")
+      print; exit
+    }
+  ' "${3:-compose.override.yaml}" 2>/dev/null
+}
+
 dc() { docker compose "$@"; }
 
 MEET_HOST="$(envval "$DIR/.env" MEET_HOST)"; MEET_HOST="${MEET_HOST:-$MEET_HOST_DEFAULT}"
@@ -215,6 +230,35 @@ phase_config() {
   else
     bad "nginx/default.conf.template missing or empty" \
         "Docker would mount a directory in its place and the gateway would not start"
+  fi
+
+  # ── nginx-proxy's own per-vhost HSTS, which is NOT symmetric ─────────────
+  # nginx-proxy adds an HSTS header to every vhost it holds a certificate for
+  # (nginx.tmpl:824 reads Env.HSTS per vhost; :1087-1092 emit it, and only the
+  # literal "off" suppresses the block). The two vhosts need OPPOSITE settings:
+  #   frontend — our gateway template already emits the single policy, so
+  #     nginx-proxy must stand down; otherwise the browser receives two
+  #     headers and obeys whichever arrives first (RFC 6797 §8.1). Both
+  #     advertise the same max-age, so a curl skim does not reveal it.
+  #   livekit  — no gateway template in front of it and LiveKit emits no
+  #     policy of its own, so nginx-proxy is the ONLY source: "off" there
+  #     leaves that host with no HSTS at all. visio.<domain>'s
+  #     includeSubDomains does not cover it — the two hosts are siblings.
+  local fe_hsts lk_hsts lk_max
+  fe_hsts="$(svc_env frontend HSTS)"
+  lk_hsts="$(svc_env livekit HSTS)"
+  lk_max="$(printf '%s' "$lk_hsts" | grep -oE 'max-age=[0-9]+' | cut -d= -f2)"
+  if [ "$fe_hsts" != "off" ]; then
+    bad "frontend does not set HSTS=off for nginx-proxy (got '${fe_hsts:-unset}')" \
+        "nginx-proxy then adds a second HSTS header on top of the gateway's, and the browser obeys the first one it receives"
+  elif [ -z "$lk_hsts" ] || [ "$lk_hsts" = "off" ]; then
+    bad "livekit sets HSTS='${lk_hsts:-unset}' — that vhost would ship no HSTS policy at all" \
+        "nginx-proxy is its only source (no gateway, none from LiveKit); pin the full policy there rather than disabling it"
+  elif [ "${lk_max:-0}" -lt 15552000 ]; then
+    bad "livekit HSTS max-age=${lk_max:-unknown} is under 180 days" \
+        "a short policy on the media host is close to no policy at all"
+  else
+    ok "nginx-proxy HSTS pinned per vhost: frontend off (the gateway owns it), livekit max-age=${lk_max}"
   fi
 
   # ── Interface language ───────────────────────────────────────────────────
