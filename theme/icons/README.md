@@ -13,9 +13,9 @@ exactly one cobalt node per app. The company keeps its circular badge.
 | `android-chrome-192x192.png`, `android-chrome-512x512.png` | PWA icons |
 | `android-chrome-512x512-maskable.png` | PWA maskable icon (glyph inside the central 80 %) |
 | `site.webmanifest` | names the app "Samouraï Visio" / "Visio" (upstream's manifest has empty names) |
-| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`); also `landing/logo-visio.svg` |
+| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`). This file is the v0.1 Visio glyph; `landing/logo-visio.svg` still carries the retired mark and is rebranded in its own change. |
 
-Deploy: copy the directory to `custom/icons/` on the host and recreate the frontend (RUNBOOK §7). `compose.override.yaml` mounts each file individually — never a directory over `/assets`. `logo.svg` carries the accessible name "Samouraï Visio" in a `<title>`, which `preflight.sh public` greps for on the served file.
+Deploy: copy the directory to `custom/icons/` on the host and recreate the frontend (RUNBOOK §7). `compose.override.yaml` mounts each file individually — never a directory over `/assets`. `logo.svg` carries the accessible name "Samouraï Visio" in a `<title>`, which `preflight.sh public` greps for on the served file. nginx serves `/assets/*` with a 30-day cache, so returning visitors keep the previous in-room logo for up to a month after a deploy.
 
 ## Provenance
 
