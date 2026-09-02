@@ -51,7 +51,7 @@ Recorded here, not discarded. A ledger that contains only successes is a marketi
 
 **30 participants per room**, on the current deployment.
 
-That is `room.max_participants: 30` in `livekit-server.yaml`, asserted by `preflight.sh config`. It is **not a measured number**: it is a deliberately conservative placeholder chosen because LiveKit's default of `0` means unlimited, and unlimited is not a capacity decision. It sits well below what the published benchmark for a comparable machine suggests, on purpose, because no measurement has been made on this deployment.
+That is `room.max_participants: 30` in `livekit-server.yaml`, asserted by `preflight.sh config`. It is **not a measured number**: it is a deliberately conservative placeholder chosen because LiveKit's default of `0` means unlimited, and unlimited is not a capacity decision. It sits well below what LiveKit's own published benchmark suggests a single node can carry — LiveKit documentation, [*Benchmarking*](https://docs.livekit.io/home/self-hosting/benchmark/) — and that is on purpose: those results are another operator's machine, version pair and workload, so under the publication rule above they may not be quoted here and may not raise this number. Only a run and a row can.
 
 Until a ledger row exists for the deployed instance type and version pair:
 
@@ -94,6 +94,12 @@ A capacity claim has to name what it is about:
 - **"N participants across the whole host"** — not enforceable, not measured by these scenarios, and not to be claimed.
 - **Concurrent meetings** — a separate measurement that these scenarios do not make. LT-1 to LT-7 all run a single room; a multi-room measurement is a future addition to the specification and, until it exists, no statement about concurrent meetings is supportable.
 
+### 3.4 Sizing assumptions
+
+Turning a headcount into a peak concurrent load takes an assumption — what share of the people counted are in a meeting at the same moment. That is an assumption and not a measurement, and **this repository carries none.** Nothing here converts a headcount into concurrency, and nothing here may be read as implying a conversion: the ledger measures one room on one instance type and version pair, and §3.3 has already said which claims that supports.
+
+The peak-concurrency assumption used when sizing a deployment lives in the private deployment sizing specification, with its band and its reasoning. Its figures are not reproduced here, and they cannot be inferred from a published cap. If such an assumption is ever carried in this repository, it is written as an assumption, with its band and its reasoning, and never as a ledger row or a measured number.
+
 ---
 
 ## 4. When a row expires
@@ -112,3 +118,4 @@ A row is a property of a version pair, not of the hardware.
 | Rev | Change |
 |---|---|
 | 1 | Initial ledger: empty table skeleton keyed on instance type, version pair and scenario, with headroom and real-browser corroboration columns; the currently permitted value recorded as an unmeasured conservative placeholder; per-room versus node-level cap explanation and the claims each one supports; row expiry rules. |
+| 2 | Cap rule restated in the same words as the load-test specification: measured max less headroom, with the knee excluded from it. Ledger given a diagnostic knee column and its LT-3, LT-4 and LT-5 rows marked as carrying no cap, so the columns match the rule. Benchmark comparison behind the permitted value cited by name and source. Sizing assumptions recorded as absent from this repository, with a pointer to where a peak-concurrency assumption lives instead. |

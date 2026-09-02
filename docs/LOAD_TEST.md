@@ -42,7 +42,7 @@ Recorded for every run, on the target:
 
 ### 2.2 Generators
 
-**Two generator VMs**, each of a class whose published bandwidth is at least that of the target (a 4 vCPU / 16 GB class at 800 Mbps is the working baseline). Two, not one, for three reasons: a single generator saturates its own NIC before the target's, one generator process cannot both publish and subscribe convincingly at scale, and a source spread across two addresses is closer to reality than a single address.
+**Two generator VMs**, each of a class whose published bandwidth is at least that of the target (the working baseline is a 4 vCPU / 16 GB class published at 800 Mbps). Every class bandwidth figure in this specification — this one, and the target's cap that §4 measures against — is the provider's published specification for the instance type, from Scaleway's *Instances internet and Block Storage bandwidth overview*; it is a class specification, not a measurement made here. Two generators, not one, for three reasons: a single generator saturates its own NIC before the target's, one generator process cannot both publish and subscribe convincingly at scale, and a source spread across two addresses is closer to reality than a single address.
 
 On each generator:
 
@@ -176,7 +176,7 @@ Evaluated over the sustained portion of a run, ignoring ramp-up and ramp-down.
 | Backend p95 request latency | < **500 ms** |
 | Errors in `livekit` or backend logs | none attributable to load |
 
-The 50 % thresholds are deliberate: they are not the point of failure, they are the point beyond which there is no room for the thing we did not test.
+The 50 % thresholds are deliberate: they are not the point of failure, they are the point beyond which there is no room for the thing we did not test. Both of them — container CPU and host egress — are set deliberately stricter than the production alert thresholds defined in the control-plane SLO specification, and that is the intent: a load test whose bar sits where production would already be paging discovers nothing before the page.
 
 **Headroom, stated once.** On top of those thresholds, every published cap keeps **20 % headroom below the measured max**, unless the row carries a written reason for another value. The margin exists for what the rig cannot reproduce: real browsers' layer selection against synthetic subscribers, relayed sessions, impaired paths, and the drift between the version pair a row was measured on and the pair running on the day the cap is relied on. It is a margin below the measured max, never below the knee — §6 is the only place the cap is computed.
 
@@ -275,3 +275,4 @@ Then, and only then, add or update a row in [`CAPACITY.md`](CAPACITY.md):
 | Rev | Change |
 |---|---|
 | 1 | Initial specification: rig and generator rules, load-tester codec caveat and the real-browser corroboration rule it forces, seven scenarios LT-1 to LT-7 including the TURN/TLS-only run, pass thresholds and verdict rules, per-instance-type test matrix, result recording into the capacity ledger, and the rule that only measured numbers may be published. |
+| 2 | One anchor for the cap: it is derived from the measured max less headroom, and the knee becomes a diagnostic that never enters it, so a class with no knee run still has a cap. LT-3 and LT-5 marked diagnostic, with no pass threshold, no measured max and no cap, and the verdict rules extended to say so. Headroom stated once with its reasoning, together with the intent that the container-CPU and host-egress bars sit stricter than the production alert thresholds. LT-4's knee steps and LT-7's storm size restated as multiples of each class's target count, consistently in §3 and §5. Source named for published class bandwidth figures. |
