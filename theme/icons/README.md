@@ -1,44 +1,45 @@
 # Samouraï Visio icons
 
-The v0.1 Visio glyph from the design of record: two overlapping participant
-rings with a single cobalt `#2B4BDB` node at their meeting point, drawn on the
-app-glyph grid — 24 units, a 1.8-unit white stroke, on a slate-900 `#2F3A45`
-rounded-square tile at 25 % radius. One construction rule for the whole family,
-exactly one cobalt node per app. The company keeps its circular badge.
+**Status:** Accepted · **Owner:** zôÖma
 
-| File | Replaces / used by |
+The mark is two overlapping rings — two participants — with the cobalt node where they meet. Slate `#2F3A45` tile, white rings, cobalt `#2B4BDB` node, drawn on a 24-unit grid with a 6-unit corner radius. It comes from the design system v0.1 direction "Cobalt × Kodera — givre"; the vector source is `design/v0.1/brand/glyphs/visio.svg` in the internal pack.
+
+There is no coral in this set. The earlier *Deux voix* glyph and its coral accent are retired along with the rest of the coral palette.
+
+## Two marks, and why
+
+| Size | Mark |
+|---|---|
+| 16, 32 | **One ring** around the node |
+| 48 and up | **Two rings**, the full mark |
+
+Below 48 the two rings cannot survive. They sit 5 units apart with radius 4.5, so they already overlap by more than half their width; at 16px one grid unit is 0.67 device pixels and the counter between them closes into a grey blur. A heavier stroke makes it worse, not better — that is the move the retired glyph used, and it worked there only because its rings were further apart.
+
+16 and 32 are the same tab icon at two pixel densities. Splitting the mark between them would change the icon's identity between a standard and a retina display, so both carry the single ring: the same two elements, one participant fewer.
+
+## Files
+
+| File | Used by |
 |---|---|
 | `favicon.ico` (16 + 32 + 48), `favicon-16x16.png`, `favicon-32x32.png` | the image's web-root favicons |
-| `apple-touch-icon.png` (180) | iOS home-screen icon |
+| `apple-touch-icon.png` (180) | iOS home screen |
 | `android-chrome-192x192.png`, `android-chrome-512x512.png` | PWA icons |
-| `android-chrome-512x512-maskable.png` | PWA maskable icon (glyph inside the central 80 %) |
-| `site.webmanifest` | names the app "Samouraï Visio" / "Visio" (upstream's manifest has empty names) |
-| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`). This file is the v0.1 Visio glyph; `landing/logo-visio.svg` still carries the retired mark and is rebranded in its own change. |
+| `android-chrome-512x512-maskable.png` | PWA maskable icon; the mark sits inside the central 80 % safe zone |
+| `site.webmanifest` | names the app "Samouraï Visio" / "Visio"; upstream's manifest has empty names |
+| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`); also `landing/logo-visio.svg` |
 
-Deploy: copy the directory to `custom/icons/` on the host and recreate the frontend (RUNBOOK §7). `compose.override.yaml` mounts each file individually — never a directory over `/assets`. `logo.svg` carries the accessible name "Samouraï Visio" in a `<title>`, which `preflight.sh public` greps for on the served file. nginx serves `/assets/*` with a 30-day cache, so returning visitors keep the previous in-room logo for up to a month after a deploy.
-
-## Provenance
-
-Every file here is generated from `design/v0.1/brand/glyphs/visio.svg` in the
-design of record — the single source for the glyph's geometry and colour. No
-colour is chosen here: the tile is slate-900, the node cobalt-500, and the
-manifest's `theme_color` / `background_color` are the design's slate-900 and
-frost-100 page surface.
-
-Regenerate all sizes together whenever the glyph changes, and never edit a
-raster by hand:
+## Regenerating
 
 ```
-# render the glyph square and transparent at N pixels, then Lanczos-downsample
-chrome --headless=new --default-background-color=00000000 \
-       --force-device-scale-factor=1 --window-size=N,N --screenshot=out.png page.html
+python3 scripts/generate-icons.py theme/icons
 ```
 
-Each PNG is rendered at 16× the target size (8× at 512) and downsampled with a
-Lanczos filter. The maskable 512 puts the glyph in the central 80 % on the
-tile's own slate-900 field bled to the edges, because the platform mask crops
-whatever falls outside the safe zone. `favicon.ico` packs the 16, 32 and 48
-frames as PNG payloads.
+Every raster comes from that script and nothing is drawn by hand, so the set is reproducible rather than archaeological. It needs only Pillow: the mark is four primitives — a rounded tile, the rings, the node — so it is drawn directly at 16× and downsampled with Lanczos rather than rasterised from SVG, and no SVG toolchain has to be installed to change an icon.
 
-Rasters carry no ancillary PNG chunks — only `IHDR`, `IDAT` and `IEND`. Icons
-are published assets: they must not ship text, provenance or EXIF metadata.
+One trap the script documents in place: Pillow draws `ellipse(outline=…, width=…)` **inward** from the bounding box, while an SVG stroke straddles its path. Passing the path radius as the bounding box puts the ring a half-stroke too far in, which closes the counter between the two rings and fills the lens white. The bounding box has to be the outer edge, `r + w/2`.
+
+Regenerate every size together if the geometry changes; the sizes are not independent.
+
+## Deploying
+
+Copy the directory to `custom/icons/` on the host and recreate the frontend (RUNBOOK §7). `compose.override.yaml` mounts each file individually — never a directory over `/assets`.
