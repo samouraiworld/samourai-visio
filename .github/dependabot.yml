@@ -1,0 +1,32 @@
+version: 2
+
+# Workflow actions only. The images in deploy/greffon/visio/1.0/docker-compose.yml
+# belong to the mirror-and-pin pipeline described in SUPPLY_CHAIN_POLICY sections
+# 1 to 3, which resolves them by digest with a scan step of its own; a docker
+# ecosystem here would give two sources for the same number. There is no npm or
+# pip entry because this repository ships no application manifest.
+updates:
+  # Every `uses:` in this repository is pinned to a full commit SHA with the
+  # readable version in a trailing comment, per SUPPLY_CHAIN_POLICY sections 6
+  # and 8: a workflow is the one dependency that runs with repository
+  # credentials, and a tag can be moved under it. That format is the
+  # configuration -- dependabot has no "prefer SHA" switch, it follows whatever
+  # the workflow already carries, and it rewrites the SHA and the trailing
+  # comment together when it bumps. Reverting a `uses:` to a bare tag silently
+  # opts that action out of pinning, so a pull request that does it is a
+  # reject, not a nit.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    # One PR rather than one per action: ungrouped, these arrive as a handful of
+    # single-line bumps a week, get rubber-stamped, and the one that matters is
+    # lost in the pile.
+    groups:
+      actions:
+        patterns:
+          - "*"
