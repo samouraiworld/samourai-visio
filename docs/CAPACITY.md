@@ -12,24 +12,28 @@ The measured capacity of this deployment shape, one row per instance type and ve
 
 Empty until measured. The date column is filled in when a row is produced, and stays empty for a row that has not been measured; a row without a date has not been measured and cannot be quoted.
 
-| Instance type | LiveKit version | Meet version | Scenario | Measured max participants | Headroom | Published cap | Real browsers (LT-6) | Date measured |
-|---|---|---|---|---|---|---|---|---|
-| POP2-2C-8G | | | LT-1 | | 20 % | | | |
-| POP2-2C-8G | | | LT-2 | | 20 % | | | |
-| POP2-4C-16G | | | LT-1 | | 20 % | | | |
-| POP2-4C-16G | | | LT-2 | | 20 % | | | |
-| POP2-4C-16G | | | LT-3 | | 20 % | | | |
-| POP2-4C-16G | | | LT-4 | | 20 % | | | |
-| POP2-8C-32G | | | LT-1 | | 20 % | | | |
-| POP2-8C-32G | | | LT-2 | | 20 % | | | |
-| POP2-8C-32G | | | LT-3 | | 20 % | | | |
-| POP2-8C-32G | | | LT-4 | | 20 % | | | |
-| POP2-8C-32G | | | LT-5 | | — | | | |
-| POP2-16C-64G | | | LT-1 | | 20 % | | | |
-| POP2-16C-64G | | | LT-2 | | 20 % | | | |
-| POP2-16C-64G | | | LT-4 | | 20 % | | | |
+| Instance type | LiveKit version | Meet version | Scenario | Measured max participants | Headroom | Published cap | Knee (diagnostic) | Real browsers (LT-6) | Date measured |
+|---|---|---|---|---|---|---|---|---|---|
+| POP2-2C-8G | | | LT-1 | | 20 % | | n/a | | |
+| POP2-2C-8G | | | LT-2 | | 20 % | | n/a | | |
+| POP2-4C-16G | | | LT-1 | | 20 % | | n/a | | |
+| POP2-4C-16G | | | LT-2 | | 20 % | | n/a | | |
+| POP2-4C-16G | | | LT-3 | — | — | diagnostic — no cap | n/a | | |
+| POP2-4C-16G | | | LT-4 | — | — | diagnostic — no cap | | | |
+| POP2-8C-32G | | | LT-1 | | 20 % | | n/a | | |
+| POP2-8C-32G | | | LT-2 | | 20 % | | n/a | | |
+| POP2-8C-32G | | | LT-3 | — | — | diagnostic — no cap | n/a | | |
+| POP2-8C-32G | | | LT-4 | — | — | diagnostic — no cap | | | |
+| POP2-8C-32G | | | LT-5 | — | — | diagnostic — no cap | n/a | | |
+| POP2-16C-64G | | | LT-1 | | 20 % | | n/a | | |
+| POP2-16C-64G | | | LT-2 | | 20 % | | n/a | | |
+| POP2-16C-64G | | | LT-4 | — | — | diagnostic — no cap | | | |
 
-**Published cap** = measured max − headroom, rounded down. It is the value written into `room.max_participants` in `livekit-server.yaml` and asserted by `scripts/preflight.sh config`. The two must agree; preflight is what proves they do.
+**The published cap is the measured max reduced by the headroom percentage, rounded down. The measured max is the highest participant count at which a scenario passed every pass threshold that applies to it. The knee is never an input to the cap.** The pass thresholds are in [`LOAD_TEST.md`](LOAD_TEST.md) §4 and the headroom is 20 % unless a row carries a written reason for another value, stated once with its reasoning in the same section. The published cap is the value written into `room.max_participants` in `livekit-server.yaml` and asserted by `scripts/preflight.sh config`. The two must agree; preflight is what proves they do.
+
+**Which scenarios produce a cap**: LT-1 and LT-2 only, and only on a class where LT-6 and LT-7 also passed ([`LOAD_TEST.md`](LOAD_TEST.md) §4). LT-3, LT-4 and LT-5 carry no cap: LT-3 and LT-5 have no pass threshold, and LT-4 exists to locate the knee. They inform the cap and the configuration; none of them sets one.
+
+**Knee (diagnostic)**: filled on an LT-4 row where LT-4 ran, and `n/a` on every other row. It records the count at which degradation began, and it is a diagnostic only — a knee sitting close to that class's measured max is a reason to widen the headroom on the LT-1 and LT-2 rows, with the reason written into those rows. A class with no LT-4 row — the 2 vCPU class runs none ([`LOAD_TEST.md`](LOAD_TEST.md) §5) — still has a measured max and therefore a cap.
 
 **Real browsers (LT-6)**: `pass` / `fail` / blank. A row whose LT-6 result is blank or `fail` **cannot become a published cap**, whatever the synthetic numbers say — the load tester publishes H.264 and VP8 while the client publishes VP9, so a synthetic-only row is an unverified row ([`LOAD_TEST.md`](LOAD_TEST.md) §2.3).
 
@@ -80,7 +84,7 @@ What actually binds a node, in the order the ceiling is usually reached:
 | **Track count** | LiveKit's `limit.num_tracks` | configuration, if set |
 | **CPU** | Packet forwarding work, which scales with subscriptions rather than with participants | nothing; it degrades rather than rejecting |
 
-The `limit:` block is therefore the closest thing to a node-level cap that exists, and it rejects or throttles rather than counting participants. Its values belong in the ledger too, once measured, because a limit set below the measured knee is what turns a saturation event into a rejection instead of a degradation for everybody.
+The `limit:` block is therefore the closest thing to a node-level cap that exists, and it rejects or throttles rather than counting participants. Its values belong in the ledger too, once measured, because a limit set below the measured knee — the diagnostic recorded in §1, not a cap input — is what turns a saturation event into a rejection instead of a degradation for everybody.
 
 ### 3.3 The consequence for capacity claims
 
