@@ -35,11 +35,20 @@ text, provenance or EXIF metadata, which is how another party's attribution
 travels into a repository unnoticed.
 
 That is no longer only a statement here. The generator reads back every PNG it
-writes, walks its chunks, and refuses to finish if a forbidden type is present
-— and it prints the census, so the invariant is visible on every run rather
-than asserted once in prose. It also checks that `favicon.ico` came out with
-its three frames, because Pillow drops a requested size larger than the image
-it is saving from and says nothing.
+writes, walks its chunks, and refuses to finish unless the set is **exactly**
+`IHDR`, `IDAT`, `IEND` — an allowlist, matching the sentence above, rather than
+a list of the metadata types someone thought of. A denylist let `pHYs` through,
+which a single `dpi=` argument is enough to write, and `tIME` and `iCCP` would
+have passed the same way.
+
+It also checks that `favicon.ico` came out with its three frames, because
+Pillow drops a requested size larger than the image it is saving from and says
+nothing; and that the boundary size renders the full mark and not the small
+one, because that comparison shipped inverted once and nothing noticed.
+
+Each of the three is mutation-tested: reverting the boundary, adding a `dpi=`,
+or saving the icon from its smallest frame each makes the generator exit
+non-zero with the reason.
 
 ## Regenerating
 
