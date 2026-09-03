@@ -323,14 +323,27 @@ jobs:
           # First, structurally: inside the init window the two probes must
           # DISAGREE. That disagreement is the whole reason the drill probes
           # TCP, so assert it directly rather than inferring it from a clock.
-          # It also keeps this test honest — if upstream ever stops starting
-          # the temporary server socket-only, this goes red rather than
-          # quietly becoming a test that can no longer tell the two apart.
+          # Not timing-derived, with a wide margin — the block below still has
+          # to finish inside the hold, so it measures how much of the hold it
+          # spent and says which of the two failures it hit rather than
+          # blaming upstream for a slow runner.
+          #
+          # One definition, used for BOTH directions. A typo in these flags
+          # reads exactly like "not ready", so the probe this test defends has
+          # to be the same text the positive control later proves can succeed.
+          tcp_probe() {
+            docker exec probe-check pg_isready -h 127.0.0.1 -p 5432 -U postgres \
+              >/dev/null 2>&1
+          }
           docker rm -f probe-check >/dev/null 2>&1 || true
           docker run -d --name probe-check -e POSTGRES_PASSWORD=drill \
             visio-slow-postgres:selftest >/dev/null
+          probe_start="$(date +%s)"
           socket_ready=0
-          for _ in $(seq 1 30); do
+          # Bounded by the hold itself: a poll allowed to outlast the window
+          # could leave it before ever looking, and then report on the real
+          # server while claiming to describe init.
+          for _ in $(seq 1 "$INIT_HOLD"); do
             if docker exec probe-check pg_isready -U postgres >/dev/null 2>&1; then
               socket_ready=1
               break
@@ -338,24 +351,32 @@ jobs:
             sleep 1
           done
           if [ "$socket_ready" -ne 1 ]; then
-            echo "::error::socket probe never reported ready inside the init window"
+            echo "::error::socket probe never reported ready within the ${INIT_HOLD}s hold"
             docker rm -f probe-check >/dev/null 2>&1 || true
             exit 1
           fi
-          if docker exec probe-check pg_isready -h 127.0.0.1 -p 5432 -U postgres \
-               >/dev/null 2>&1; then
-            echo "::error::TCP probe answered during init, so the probes no longer"\
-                 "disagree and this test can no longer tell waiting from racing"
+          if tcp_probe; then
+            spent=$(( $(date +%s) - probe_start ))
+            if [ "$spent" -ge "$INIT_HOLD" ]; then
+              echo "::error::this check spent ${spent}s and left the ${INIT_HOLD}s hold"\
+                   "before probing, so TCP answering means the runner was slow, NOT"\
+                   "that upstream changed — raise INIT_HOLD"
+            else
+              echo "::error::TCP answered ${spent}s into the ${INIT_HOLD}s hold, so the"\
+                   "probes no longer disagree and this test can no longer tell a"\
+                   "waiting drill from a racing one"
+            fi
             docker rm -f probe-check >/dev/null 2>&1 || true
             exit 1
           fi
-          echo "inside init: socket says ready, TCP does not — TCP is the strict probe"
-          docker rm -f probe-check >/dev/null 2>&1 || true
-          # That check would also pass vacuously if the TCP probe could never
-          # say yes at all — a typo'd flag reads the same as "not ready". The
-          # positive control is the drill run below: it polls the identical
-          # probe and would fail its own readiness timeout if the answer were
-          # always no. Both directions are therefore covered in this one step.
+          spent=$(( $(date +%s) - probe_start ))
+          echo "inside init (${spent}s of a ${INIT_HOLD}s hold): socket ready, TCP not"
+          # probe-check is deliberately LEFT RUNNING: the positive control for
+          # `tcp_probe` comes after the drill, once this container's own hold
+          # has expired. The drill's readiness poll is a different source line
+          # and cannot defend this one — a typo confined to `tcp_probe` would
+          # leave the disagreement assertion vacuously green while the drill
+          # and the elapsed check below stayed green too.
 
           start="$(date +%s)"
           DRILL_PG_IMAGE=visio-slow-postgres:selftest VISIO_DIR="$W" \
@@ -371,6 +392,31 @@ jobs:
             exit 1
           }
           echo "drill waited ${elapsed}s for the real server"
+
+          # Positive control, local to the line it defends. The disagreement
+          # assertion above would also hold if `tcp_probe` could never succeed
+          # at all, and nothing else in this job would notice: the drill polls
+          # its own line in restore-drill.sh, so a typo confined to this
+          # workflow's probe would leave the upstream-change detector dead
+          # while every other assertion here stayed green. probe-check has
+          # been running throughout the drill, so its hold is long expired and
+          # the SAME function must now succeed against it.
+          tcp_ok=0
+          for _ in $(seq 1 30); do
+            if tcp_probe; then
+              tcp_ok=1
+              break
+            fi
+            sleep 1
+          done
+          docker rm -f probe-check >/dev/null 2>&1 || true
+          [ "$tcp_ok" -eq 1 ] || {
+            echo "::error::the TCP probe never succeeded even after the init hold"\
+                 "expired, so it cannot answer yes and the disagreement check"\
+                 "above proved nothing"
+            exit 1
+          }
+          echo "after the hold: the same probe succeeds — the disagreement was real"
 
       - name: And the drill FAILS when a table it asserts on is missing
         run: |
