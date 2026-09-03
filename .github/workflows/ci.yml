@@ -373,6 +373,11 @@ jobs:
           docker rm -f probe-check >/dev/null 2>&1 || true
           docker run -d --name probe-check -e POSTGRES_PASSWORD=drill \
             visio-slow-postgres:selftest >/dev/null
+          # probe-check now has to outlive the disagreement check, because its
+          # positive control runs after the drill. Under `set -e` any failure
+          # in between would leave it running, so cleanup is a trap rather
+          # than a removal repeated at each exit.
+          trap 'docker rm -f probe-check >/dev/null 2>&1 || true' EXIT
           probe_start="$(date +%s)"
           socket_ready=0
           # Bounded by the hold itself: a poll allowed to outlast the window
@@ -386,8 +391,9 @@ jobs:
             sleep 1
           done
           if [ "$socket_ready" -ne 1 ]; then
-            echo "::error::socket probe never reported ready within the ${INIT_HOLD}s hold"
-            docker rm -f probe-check >/dev/null 2>&1 || true
+            echo "::error::socket probe never reported ready within the ${INIT_HOLD}s"\
+                 "hold, so this check never observed the init window — the runner was"\
+                 "slow, NOT an upstream change; raise INIT_HOLD"
             exit 1
           fi
           if tcp_probe; then
@@ -401,7 +407,6 @@ jobs:
                    "probes no longer disagree and this test can no longer tell a"\
                    "waiting drill from a racing one"
             fi
-            docker rm -f probe-check >/dev/null 2>&1 || true
             exit 1
           fi
           spent=$(( $(date +%s) - probe_start ))
@@ -444,7 +449,6 @@ jobs:
             fi
             sleep 1
           done
-          docker rm -f probe-check >/dev/null 2>&1 || true
           [ "$tcp_ok" -eq 1 ] || {
             echo "::error::the TCP probe never succeeded even after the init hold"\
                  "expired, so it cannot answer yes and the disagreement check"\
@@ -497,9 +501,16 @@ jobs:
   preflight-selftest:
     name: Preflight self-test
     runs-on: ubuntu-latest
-    # Proves preflight.sh's config checks still FAIL when their defect is
-    # present. A check that has quietly stopped detecting its bug is exactly
-    # the failure mode this whole repo exists to prevent.
+    # Proves the repository's checks still FAIL when their defect is present.
+    # A check that has quietly stopped detecting its bug is exactly the
+    # failure mode this whole repo exists to prevent.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: scripts/preflight-selftest.sh
+      # The same question, asked of the backup drill's readiness assertions.
+      # It runs HERE rather than inside `Backup end-to-end` so that a fixture
+      # which has rotted is distinguishable at a glance from a drill that has
+      # actually broken: two different problems, two different fixes. It uses
+      # a stub docker and does NOT replace that job's slow-postgres run.
+      - name: Drill readiness assertions still fire
+        run: scripts/drill-selftest-harness.sh
