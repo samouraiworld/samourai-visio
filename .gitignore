@@ -70,3 +70,6 @@ nohup.out
 
 # ── Subagent-driven-development scratch workspaces ─────────────────────────
 .superpowers/
+
+# The icon generator is a Python script the README tells people to run.
+__pycache__/
