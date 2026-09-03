@@ -1,42 +1,42 @@
 # Pinned by version AND by hash, so this job resolves the same artefact
 # every run — the rule the workflow already applies to every action SHA.
-# Only the artefacts the runner can use: CPython 3.12 manylinux x86_64,
-# plus the sdist, so a platform change fails loudly instead of quietly
+# Only the artefacts the runner can use: the CPython 3.12 manylinux x86_64
+# wheel, plus the sdist, so a platform change fails loudly instead of quietly
 # resolving something else.
+#
+# The cp312 musllinux x86_64 wheel is published and deliberately absent: this
+# job runs on ubuntu-latest, which is glibc. Listing it would widen what pip
+# may accept without widening what the job can run, and the loud failure is
+# the point of the curated set.
 #
 # Regenerate — one command per artefact, into an EMPTY scratch directory:
 #
 #   d=$(mktemp -d)
 #   pip download Pillow==<version> --no-deps --only-binary=:all: \
-#       --python-version 3.12 --platform manylinux_2_17_x86_64 -d "$d"
-#   pip download Pillow==<version> --no-deps --only-binary=:all: \
 #       --python-version 3.12 --platform manylinux_2_28_x86_64 -d "$d"
 #   pip download Pillow==<version> --no-deps --no-binary=:all: -d "$d"
 #   pip hash "$d"/*.whl "$d"/*.tar.gz
+#
+# The 11.x line also published a manylinux_2_17 wheel and the recipe had a
+# third command for it. The 12.x line does not: pip reports no such
+# distribution, and its version list for that platform stops at 11.3.0, which
+# reads like "12.3.0 does not exist" and is not. Check the release's file list
+# on PyPI before concluding an artefact is missing.
+#
+# The sdist command builds what it downloads, so it fails on a machine without
+# Pillow's build dependencies even though the artefact is fine. When that
+# happens the digest is still verifiable from the release's own metadata; it
+# is the same value.
 #
 # Not `-d .`: neither `pillow-*.whl` nor the tarball is in .gitignore, so the
 # artefacts land untracked in the tree — and the glob would then hash whatever
 # an earlier bump left behind, pinning a digest nobody chose. An empty
 # directory per run is what makes the glob mean what it says.
 #
-# One `--platform` per invocation: passing both to a single command resolves
-# one best match and silently returns a single wheel.
-#
 # `--python-version` here and `python-version` in the workflow's
 # `setup-python` step are one decision in two places. Move them together: the
 # hashes name CPython 3.12 wheels, so a job on 3.13 finds nothing it can
 # install and `--require-hashes` fails the build rather than falling back.
-#
-# NOT `--no-binary :none:`. pip reads `:none:` as "empty the set of packages
-# for which binaries are disallowed" — so it *allows* binaries and downloads
-# one wheel for whatever machine is running, which on a laptop is a macOS ARM
-# wheel this runner can never use. That was the instruction here before, and
-# it would have produced the wrong file at the next version bump.
-#
-# The cp312 musllinux wheel is deliberately absent: this job runs on
-# ubuntu-latest, which is glibc. Adding it would widen what pip may accept
-# without widening what the job can run.
-Pillow==11.3.0 \
-    --hash=sha256:67172f2944ebba3d4a7b54f2e95c786a3a50c21b88456329314caaa28cda70f6 \
-    --hash=sha256:676b2815362456b5b3216b4fd5bd89d362100dc6f4945154ff172e206a22c024 \
-    --hash=sha256:3828ee7586cd0b2091b6209e5ad53e20d0649bbe87164a459d0676e035e8f523
+Pillow==12.3.0 \
+    --hash=sha256:78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91 \
+    --hash=sha256:3b8182a766685eaa002637e28b4ec8d6b18819a0c71f579bf0dbaa5830297cce
