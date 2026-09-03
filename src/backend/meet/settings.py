@@ -750,6 +750,11 @@ class Base(Configuration):
         None, environ_name="RECORDING_MAX_DURATION", environ_prefix=None
     )
 
+    # Breakout rooms settings
+    MEET_BREAKOUT_ROOMS_ENABLED = values.BooleanValue(
+        False, environ_name="MEET_BREAKOUT_ROOMS_ENABLED", environ_prefix=None
+    )
+
     # Recording encoding options for LiveKit Egress (video composite egress only).
     # These settings affect screen recordings handled by VideoCompositeEgressService;
     # they are silently ignored by AudioCompositeEgressService (audio-only transcript
@@ -1248,6 +1253,9 @@ class Development(Base):
     """
 
     ALLOWED_HOSTS = ["*"]
+    MEET_BREAKOUT_ROOMS_ENABLED = values.BooleanValue(
+        True, environ_name="MEET_BREAKOUT_ROOMS_ENABLED", environ_prefix=None
+    )
     CORS_ALLOW_ALL_ORIGINS = True
     CSRF_TRUSTED_ORIGINS = ["http://localhost:8072", "http://localhost:3000"]
     DEBUG = True
@@ -1263,6 +1271,8 @@ class Development(Base):
 
 class Test(Base):
     """Test environment settings"""
+
+    MEET_BREAKOUT_ROOMS_ENABLED = True
 
     LOGGING = values.DictValue(
         {

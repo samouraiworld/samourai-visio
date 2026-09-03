@@ -335,7 +335,8 @@
         "exit": "Quitter le mode plein écran"
       },
       "support": "Contacter l'aide",
-      "documentation": "Documentation"
+      "documentation": "Documentation",
+      "breakoutRooms": "Salles de sous-groupe"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Enregistrer",
       "admin": "Commandes de l'organisateur",
       "tools": "Outils de réunion",
-      "info": "Informations sur la réunion"
+      "info": "Informations sur la réunion",
+      "breakout": "Salles de sous-groupe"
     },
     "content": {
       "participants": "les participants",
@@ -433,7 +435,8 @@
       "screenRecording": "enregistrer",
       "admin": "commandes de l'organisateur",
       "tools": "outils de réunion",
-      "info": "informations sur la réunion"
+      "info": "informations sur la réunion",
+      "breakout": "salles de sous-groupe"
     },
     "closeButton": "Masquer {{content}} (Échap)",
     "escapeHint": "Appuyez sur Échap pour fermer"
@@ -798,5 +801,75 @@
   },
   "participantTile": {
     "screenShare": "Écran de {{name}}"
+  },
+  "breakout": {
+    "menuItem": "Salles de sous-groupe",
+    "heading": "Salles de sous-groupe",
+    "setup": {
+      "roomCount": "Nombre de salles",
+      "create": "Créer les salles de sous-groupe",
+      "randomize": "Répartir aléatoirement",
+      "unassigned": "{{count}} non assigné(s)",
+      "openAll": "Ouvrir toutes les salles",
+      "cancel": "Annuler",
+      "duration": "Durée",
+      "durationOptions": {
+        "none": "Pas de minuteur",
+        "2min": "2 minutes",
+        "5min": "5 minutes",
+        "10min": "10 minutes",
+        "15min": "15 minutes",
+        "30min": "30 minutes",
+        "1h": "1 heure",
+        "20min": "20 minutes",
+        "45min": "45 minutes",
+        "1h30": "1 heure 30",
+        "2h": "2 heures",
+        "3h": "3 heures",
+        "4h": "4 heures"
+      },
+      "noParticipants": "Aucun participant assigné",
+      "assignParticipants": "Assigner les participants",
+      "unassignedOption": "Non assigné",
+      "allAssigned": "Tous les participants sont assignés"
+    },
+    "active": {
+      "timeRemaining": "Temps restant",
+      "closeAll": "Fermer toutes les salles",
+      "participantCount": "{{count}} participant(s)",
+      "visitRoom": "Visiter",
+      "returnToMain": "Retourner à la salle principale",
+      "broadcastTitle": "Diffuser une annonce",
+      "broadcastPlaceholder": "Écrivez une annonce pour toutes les salles...",
+      "broadcastSent": "Annonce diffusée à toutes les salles !",
+      "youAreHere": "Vous êtes ici",
+      "leaveRoom": "Quitter",
+      "mainRoom": "Salle principale",
+      "assignTo": "Attribuer à...",
+      "noParticipants": "Aucun participant dans cette salle"
+    },
+    "participant": {
+      "currentRoom": "Vous êtes dans {{room}}",
+      "returnButton": "Retourner à la salle principale",
+      "returningIn": "Retour à la salle principale dans {{seconds}}s",
+      "returning": "Retour à la salle principale…",
+      "askForHelp": "Demander de l'aide",
+      "askForHelpTooltip": "Avertir l'hôte que vous avez besoin d'aide",
+      "helpRequested": "Aide demandée"
+    },
+    "transition": {
+      "movingTo": "Déplacement vers {{room}}…",
+      "returningToMain": "Retour à la salle principale…"
+    },
+    "helpAlert": {
+      "title": "Aide demandée",
+      "body": "{{participantName}} dans {{roomName}} demande de l'aide",
+      "joinRoom": "Rejoindre la salle",
+      "dismiss": "Fermer l'alerte"
+    },
+    "broadcast": {
+      "title": "Annonce de l'hôte",
+      "dismiss": "Fermer l'annonce"
+    }
   }
 }

@@ -31,6 +31,11 @@ from .room_management import (
 )
 from .sip_management import SIPException, SIPManagement
 
+try:
+    from core.breakout.services import BreakoutService
+except ImportError:
+    BreakoutService = None
+
 logger = getLogger(__name__)
 
 
@@ -294,6 +299,16 @@ class LiveKitEventsService:
             raise ActionFailedError(
                 f"Failed to clear room cache for room {room_id}"
             ) from e
+
+        # Auto-close any active breakout sessions when the main room finishes
+        if BreakoutService is not None:
+            try:
+                BreakoutService().close_sessions_for_room(room_id)
+            except Exception:  # noqa: BLE001 # pylint: disable=broad-exception-caught
+                logger.warning(
+                    "Failed to close breakout sessions for room %s",
+                    room_id,
+                )
 
     def _handle_participant_left(self, data):
         """Handle 'participant_left': invalidate the presence cache.

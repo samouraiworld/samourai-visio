@@ -2,7 +2,7 @@
 Declare and configure the models for the Meet core application
 # pylint: disable=too-many-lines
 """
-# pylint: disable=too-many-lines
+# pylint: disable=too-many-lines,cyclic-import
 
 import secrets
 import uuid
@@ -1075,3 +1075,11 @@ class File(BaseModel):
 
         self.hard_deleted_at = timezone.now()
         self.save(update_fields=["hard_deleted_at"])
+
+
+# Import breakout models after BaseModel and Room are fully defined
+from .breakout.models import (  # pylint: disable=wrong-import-position,unused-import
+    BreakoutAssignment,
+    BreakoutRoom,
+    BreakoutSession,
+)

@@ -43,7 +43,7 @@ services:
     entrypoint: >
       sh -c "
       /usr/bin/mc alias set meet http://minio:9000 meet password && \
-      /usr/bin/mc mb meet/meet-media-storage && \
+      /usr/bin/mc mb --ignore-existing meet/meet-media-storage && \
       exit 0;"
 
   app-dev:
@@ -57,6 +57,7 @@ services:
     environment:
       - PYLINTHOME=/app/.pylint.d
       - DJANGO_CONFIGURATION=Development
+      - MEET_BREAKOUT_ROOMS_ENABLED=true
     env_file:
       - env.d/development/common
       - env.d/development/postgresql
