@@ -15,6 +15,7 @@ fewer — and the full mark returns at 48.
 
 import os
 import sys
+import tempfile
 
 from PIL import Image, ImageDraw
 
@@ -124,6 +125,50 @@ def verify_ico(path, name):
     return frames
 
 
+def same_pixels(a_path, b_path):
+    """Do two image files decode to the same pixels?
+
+    Not a byte comparison. PNG compression depends on the zlib build and the
+    platform, so the same generator on two machines writes different bytes for
+    identical images — a byte check would fail on a runner for reasons that
+    have nothing to do with the icons. What must hold is that the committed
+    file shows what the generator draws.
+    """
+    with Image.open(a_path) as a, Image.open(b_path) as b:
+        if a.format != b.format:
+            return False
+
+        if a.format == "ICO":
+            # Every frame, not just the one Pillow picks by default — the bug
+            # that started all this was a missing frame, which comparing only
+            # the default would not have seen.
+            frames = sorted(a.info.get("sizes", []))
+            if frames != sorted(b.info.get("sizes", [])):
+                return False
+            for size in frames:
+                a.size = size
+                b.size = size
+                if a.convert("RGBA").tobytes() != b.convert("RGBA").tobytes():
+                    return False
+            return True
+
+        if a.size != b.size:
+            return False
+        return a.convert("RGBA").tobytes() == b.convert("RGBA").tobytes()
+
+
+def check_against(out):
+    """Every committed icon shows what a fresh run draws."""
+    with tempfile.TemporaryDirectory() as tmp:
+        made = render(tmp)
+        stale = [n for n in made
+                 if not same_pixels(os.path.join(out, n), os.path.join(tmp, n))]
+    if stale:
+        raise SystemExit(
+            "these committed icons do not match the generator: " + ", ".join(stale))
+    print(f"  all {len(made)} icons match a fresh run, pixel for pixel")
+
+
 def check_boundary():
     """Prove the boundary size renders the full mark, not the small one.
 
@@ -152,8 +197,8 @@ def check_boundary():
             f"{FULL_MARK_FROM}px renders the same as the single-ring mark")
 
 
-def main(out):
-    check_boundary()
+def render(out):
+    """Draw the whole set into `out`. Returns the file names written."""
     os.makedirs(out, exist_ok=True)
     made = []
     for size, name in [(16, "favicon-16x16.png"), (32, "favicon-32x32.png"),
@@ -174,8 +219,18 @@ def main(out):
     large.save(os.path.join(out, "favicon.ico"),
                sizes=[(48, 48), (32, 32), (16, 16)], append_images=smaller)
     made.append("favicon.ico")
+    return made
 
-    for name in made:
+
+def main(argv):
+    check_boundary()
+
+    if argv and argv[0] == "--check":
+        check_against(argv[1] if len(argv) > 1 else "theme/icons")
+        return 0
+
+    out = argv[0] if argv else "out"
+    for name in render(out):
         path = os.path.join(out, name)
         if name.endswith(".png"):
             found = verify_png(path, name)
@@ -183,7 +238,8 @@ def main(out):
         else:
             frames = verify_ico(path, name)
             print(f"  {name:38s} {len(frames)} frames {frames}")
+    return 0
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "out")
+    sys.exit(main(sys.argv[1:]))

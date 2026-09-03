@@ -96,15 +96,14 @@ jobs:
         run: pip install --disable-pip-version-check "Pillow==11.3.0"
       - name: Prove each guard can fail
         run: scripts/generate-icons.selftest.py
+      # Compares decoded pixels, not file bytes. PNG compression depends on the
+      # zlib build and the platform, so the same generator writes different
+      # bytes on a runner than on a laptop — a byte comparison here failed for
+      # reasons that had nothing to do with the icons. What must hold is that
+      # the committed file shows what the generator draws, and that is
+      # identical everywhere.
       - name: The committed icons match their source
-        run: |
-          set -euo pipefail
-          scripts/generate-icons.py theme/icons
-          if ! git diff --quiet -- theme/icons; then
-            echo "::error::theme/icons does not match a fresh run of the generator"
-            git --no-pager diff --stat -- theme/icons
-            exit 1
-          fi
+        run: scripts/generate-icons.py --check theme/icons
 
   upstream-contract:
     name: Upstream contract
