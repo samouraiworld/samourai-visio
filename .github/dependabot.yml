@@ -72,10 +72,19 @@ updates:
       python:
         patterns:
           - "*"
-    ignore:
-      # Same rule as the actions above: a major is a decision with a migration
-      # note, not a bump.
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    # NO `ignore` here, deliberately, and it is not an oversight.
+    #
+    # Dependabot's SECURITY updates honour `ignore` conditions. Ignoring
+    # `version-update:semver-major` on this entry would mean a Pillow security
+    # release that crosses a major produces no pull request at all -- silence
+    # in exactly the case the entry exists to surface. The 11.3.0 -> 12.3.0
+    # bump reached us only because there was no pip entry here yet to suppress
+    # it; adding one with the actions entry's `ignore` would have closed the
+    # door behind it.
+    #
+    # "A major is a decision, not a chore" still holds. It is enforced by the
+    # rule in the comment above -- a Dependabot PR here is never merged as it
+    # stands, whatever its version bump -- rather than by suppressing the
+    # notification. A reader's rule surfaces the major; an `ignore` hides it.
     labels:
       - dependencies
