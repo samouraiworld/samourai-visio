@@ -67,10 +67,33 @@ done
 
 sed -E "s/^INIT_HOLD=[0-9]+\$/INIT_HOLD=$HOLD/; s/^( *for _ in \\\$\\(seq 1 )30(\\); do)\$/\\1$POLL\\2/" \
   "$WORK/step.raw" > "$WORK/step.sh"
-grep -qx "INIT_HOLD=$HOLD" "$WORK/step.sh" ||
+# Both guards anchored the same way. The poll bound was matched as a loose
+# substring while INIT_HOLD was matched as a whole line, which would have
+# accepted a rewrite that landed somewhere other than the line it was aimed at.
+grep -qxF "INIT_HOLD=$HOLD" "$WORK/step.sh" ||
   die "could not rewrite INIT_HOLD — its assignment changed shape"
-grep -q "seq 1 $POLL" "$WORK/step.sh" ||
+grep -qxF "for _ in \$(seq 1 $POLL); do" "$WORK/step.sh" ||
   die "could not rewrite the positive control's poll bound — its loop changed shape"
+
+# Nothing but those two constants may differ, so the rewrite is provably
+# surgical: if a sed ever lands on a line it was not aimed at, it is reported
+# here rather than as a puzzling failure several cases later.
+#
+# Read the limit with the guarantee. This compares production against the
+# fixture's copy, so it sees only what the REWRITE changed. A constant ADDED
+# to the step is invisible to it — the new line is identical on both sides —
+# and would still arrive disguised as a probe complaint. That is a legibility
+# gap, not a safety one: an unrewritten constant either falls inside both
+# holds and changes nothing, or outside the fixture's and fails a case, so it
+# can only raise a false alarm and never let a defect through.
+changed="$(diff "$WORK/step.raw" "$WORK/step.sh" | grep -E '^[<>]')"
+unexpected="$(printf '%s\n' "$changed" |
+  grep -vE '^[<>] (INIT_HOLD=[0-9]+|for _ in \$\(seq 1 [0-9]+\); do)$')"
+if [ -n "$unexpected" ]; then
+  die "the fixture's copy differs from the production step in more than the two constants it rewrites:
+$unexpected"
+fi
+ok "fixture copy differs from production only in the two constants it rewrites"
 
 # ── The stub docker ─────────────────────────────────────────────────────────
 mkdir -p "$WORK/bin" "$WORK/tmp/visio" "$WORK/ws/scripts"
