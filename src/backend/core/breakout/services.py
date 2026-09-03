@@ -6,6 +6,7 @@ and session state transitions are orchestrated here.  Viewsets should
 delegate to this service rather than calling LiveKit directly.
 """
 
+import asyncio
 import random
 from datetime import timedelta
 from logging import getLogger
@@ -275,17 +276,25 @@ class BreakoutService:
             normalized_assignments[room_id] = normalized_list
 
         with transaction.atomic():
+            # Prefetch all rooms in one query, then validate IDs.
+            # A single unknown ID must abort the whole operation and leave
+            # existing assignments intact (Bug 3 fix — N-queries → 1 query).
+            session_rooms = {str(r.id): r for r in session.breakout_rooms.all()}
+            resolved_rooms = {}
+            for room_id_str in normalized_assignments:
+                if room_id_str not in session_rooms:
+                    raise BreakoutServiceError(
+                        f"Breakout room {room_id_str} does not belong to this session."
+                    )
+                resolved_rooms[room_id_str] = session_rooms[room_id_str]
+
             # Clear and rebuild atomically
             BreakoutAssignment.objects.filter(
                 breakout_room__session=session,
             ).delete()
 
             for room_id_str, participants in normalized_assignments.items():
-                try:
-                    breakout_room = session.breakout_rooms.get(id=room_id_str)
-                except BreakoutRoom.DoesNotExist:
-                    logger.warning("Breakout room %s not found, skipping", room_id_str)
-                    continue
+                breakout_room = resolved_rooms[room_id_str]
 
                 BreakoutAssignment.objects.bulk_create(
                     [
@@ -341,43 +350,40 @@ class BreakoutService:
 
     @async_to_sync
     async def _fetch_live_status(self, rooms: List[BreakoutRoom]) -> List[Dict]:
-        rooms_status = []
+        """Query LiveKit for participant counts — all rooms concurrently."""
         lkapi = utils.create_livekit_client()
 
-        try:
-            for br in rooms:
-                try:
-                    response = await lkapi.room.list_participants(
-                        ListParticipantsRequest(room=br.livekit_room_name)
-                    )
-                    participants = [
-                        {
-                            "identity": p.identity,
-                            "name": p.name,
-                        }
-                        for p in response.participants
-                    ]
-                except Exception:  # noqa: BLE001
-                    logger.warning(
-                        "Failed to list participants for breakout room %s",
-                        br.livekit_room_name,
-                    )
-                    participants = []
-
-                rooms_status.append(
-                    {
-                        "id": str(br.id),
-                        "name": br.name,
-                        "livekit_room_name": br.livekit_room_name,
-                        "order": br.order,
-                        "participant_count": len(participants),
-                        "participants": participants,
-                    }
+        async def fetch_one(br: BreakoutRoom) -> Dict:
+            try:
+                response = await lkapi.room.list_participants(
+                    ListParticipantsRequest(room=br.livekit_room_name)
                 )
+                participants = [
+                    {"identity": p.identity, "name": p.name}
+                    for p in response.participants
+                ]
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to list participants for breakout room %s",
+                    br.livekit_room_name,
+                )
+                participants = []
+
+            return {
+                "id": str(br.id),
+                "name": br.name,
+                "livekit_room_name": br.livekit_room_name,
+                "order": br.order,
+                "participant_count": len(participants),
+                "participants": participants,
+            }
+
+        try:
+            results = await asyncio.gather(*[fetch_one(br) for br in rooms])
         finally:
             await lkapi.aclose()
 
-        return rooms_status
+        return list(results)
 
     # ── Token Generation ───────────────────────────────────────────────
 
@@ -482,13 +488,47 @@ class BreakoutService:
                 }
         return assignments
 
+    def _build_breakout_metadata(
+        self, session: BreakoutSession, assignments: dict
+    ) -> dict:
+        """Build the complete breakout blob for LiveKit room metadata.
+
+        Always includes session_id, status, started_at, duration_seconds, rooms,
+        and assignments so that a top-level merge in RoomManagement.update_metadata
+        never silently drops fields that useBreakoutMetadataWatcher gates on.
+        """
+        return {
+            "session_id": str(session.id),
+            "status": session.status,
+            "started_at": (
+                session.started_at.isoformat() if session.started_at else None
+            ),
+            "duration_seconds": session.duration_seconds,
+            "rooms": [
+                {
+                    "id": str(br.id),
+                    "name": br.name,
+                    "livekit_room_name": br.livekit_room_name,
+                    "order": br.order,
+                }
+                for br in session.breakout_rooms.order_by("order")
+            ],
+            "assignments": assignments,
+        }
+
     def _update_assignment_metadata(self, session: BreakoutSession) -> None:
-        """Push updated assignments to main room metadata."""
+        """Push the full breakout blob to main room metadata after an assignment change.
+
+        Publishes the complete blob (not just assignments) so that the top-level
+        merge in RoomManagement.update_metadata never clobbers status, session_id,
+        rooms, or timing fields that the frontend watcher relies on.
+        """
         assignments = self._build_assignment_map(session)
+        full_breakout = self._build_breakout_metadata(session, assignments)
         try:
             RoomManagement().update_metadata(
                 room_name=str(session.room_id),
-                metadata={"breakout": {"assignments": assignments}},
+                metadata={"breakout": full_breakout},
             )
         except RoomManagementException:
             logger.exception(

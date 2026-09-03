@@ -451,3 +451,93 @@ def test_join_breakout_room_anonymous_unassigned_returns_403():
     )
     assert resp.status_code == 403
     assert resp.json()["detail"] == "You are not assigned to this breakout room."
+
+
+# ── Regression: W2-1 — list returns [] for authenticated members ──────────────
+
+
+def test_list_breakout_sessions_returns_empty_for_member():
+    """Authenticated room member gets [] instead of 403 on the list endpoint."""
+    room = RoomFactory()
+    member = UserFactory()
+    room.accesses.create(user=member, role=RoleChoices.MEMBER)
+    # Create an active session as admin
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
+
+    client = APIClient()
+    client.force_login(member)
+
+    response = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
+    assert response.status_code == 200
+    # Member sees empty list, not the session details
+    assert response.json() == []
+
+
+# ── Regression: W2-2 — BulkAssign bounds prevent DoS ────────────────────────
+
+
+def test_assignments_exceeding_room_limit_returns_400():
+    """Sending >10 rooms in assignments payload returns 400."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(room=room)
+    br = BreakoutRoomFactory(session=session)
+
+    client = APIClient()
+    client.force_login(admin)
+
+    # Build a payload with 11 rooms (limit is 10)
+    oversized = {str(br.id): []} | {
+        f"00000000-0000-0000-0000-{str(i).zfill(12)}": [] for i in range(11)
+    }
+    response = client.put(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
+        {"assignments": oversized},
+        format="json",
+    )
+    assert response.status_code == 400
+
+
+# ── Regression: Bug 3 / W2-5 — unknown room ID → 400, DB preserved ──────────
+
+
+def test_assignments_unknown_room_id_returns_400_and_preserves_db():
+    """Unknown room ID in assignments → 400 and existing assignments are intact."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(
+        room=room, status=BreakoutSession.Status.CONFIGURING
+    )
+    br = BreakoutRoomFactory(session=session)
+    BreakoutAssignmentFactory(breakout_room=br, participant_identity="original-p1")
+
+    client = APIClient()
+    client.force_login(admin)
+
+    response = client.put(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
+        {
+            "assignments": {
+                "00000000-0000-0000-0000-000000000000": [
+                    {"identity": "p2", "name": "Ghost"}
+                ]
+            }
+        },
+        format="json",
+    )
+    assert response.status_code == 400
+
+    # Original assignment must be intact
+    assert (
+        BreakoutAssignment.objects.filter(breakout_room__session=session).count() == 1
+    )
+    assert (
+        BreakoutAssignment.objects.get(
+            breakout_room__session=session
+        ).participant_identity
+        == "original-p1"
+    )

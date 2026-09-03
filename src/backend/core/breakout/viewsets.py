@@ -121,14 +121,26 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     # ── GET /rooms/{room_id}/breakout-sessions/ ───────────────────────
 
     def list(self, request, room_id=None):
-        """List active/configuring breakout sessions for a room."""
+        """List active/configuring breakout sessions for a room.
+
+        - Unauthenticated users → 403.
+        - Authenticated room members (non-admin) → empty list [].
+          Session existence is already visible via LiveKit room metadata;
+          this endpoint is the authoritative source for admins only.
+        - Admins/owners → full session list with nested rooms and assignments.
+        """
         room = self._get_room(room_id)
 
-        if not self._can_manage(room, request.user):
+        if not request.user or not request.user.is_authenticated:
             return Response(
-                {"detail": "You do not have permission to manage breakout sessions."},
+                {"detail": "Authentication required."},
                 status=status.HTTP_403_FORBIDDEN,
             )
+
+        # Non-admin members: return empty list rather than 403 so that
+        # useBreakoutSession polling does not permanently fail on reload.
+        if not self._can_manage(room, request.user):
+            return Response([])
 
         sessions = BreakoutSession.objects.filter(
             room=room,

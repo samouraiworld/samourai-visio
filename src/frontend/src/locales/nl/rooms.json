@@ -335,7 +335,8 @@
         "exit": "Stop volledig scherm stand"
       },
       "support": "Contact ondersteuning",
-      "documentation": "Documentatie"
+      "documentation": "Documentatie",
+      "breakoutRooms": "Groepsruimtes"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Opnemen",
       "admin": "Beheerdersbediening",
       "tools": "Meer tools",
-      "info": "Vergaderinformatie"
+      "info": "Vergaderinformatie",
+      "breakout": "Groepsruimtes"
     },
     "content": {
       "participants": "deelnemers",
@@ -433,7 +435,8 @@
       "transcript": "transcriberen",
       "admin": "beheerdersbediening",
       "tools": "meer tools",
-      "info": "vergaderinformatie"
+      "info": "vergaderinformatie",
+      "breakout": "groepsruimtes"
     },
     "closeButton": "Verberg {{content}} (Escape)",
     "escapeHint": "Druk op Escape om te sluiten"
@@ -798,5 +801,75 @@
   },
   "participantTile": {
     "screenShare": "{{name}} scherm"
+  },
+  "breakout": {
+    "menuItem": "Groepsruimtes",
+    "heading": "Groepsruimtes",
+    "setup": {
+      "roomCount": "Aantal ruimtes",
+      "create": "Groepsruimtes aanmaken",
+      "randomize": "Willekeurig indelen",
+      "unassigned": "{{count}} niet toegewezen",
+      "openAll": "Alle ruimtes openen",
+      "cancel": "Annuleren",
+      "duration": "Duur",
+      "durationOptions": {
+        "none": "Geen timer",
+        "2min": "2 minuten",
+        "5min": "5 minuten",
+        "10min": "10 minuten",
+        "15min": "15 minuten",
+        "20min": "20 minuten",
+        "30min": "30 minuten",
+        "45min": "45 minuten",
+        "1h": "1 uur",
+        "1h30": "1 uur 30 minuten",
+        "2h": "2 uur",
+        "3h": "3 uur",
+        "4h": "4 uur"
+      },
+      "noParticipants": "Geen deelnemers toegewezen",
+      "assignParticipants": "Deelnemers toewijzen",
+      "unassignedOption": "Niet toegewezen",
+      "allAssigned": "Alle deelnemers toegewezen"
+    },
+    "active": {
+      "timeRemaining": "Resterende tijd",
+      "closeAll": "Alle ruimtes sluiten",
+      "participantCount": "{{count}} deelnemer(s)",
+      "visitRoom": "Bezoeken",
+      "returnToMain": "Terug naar de hoofdruimte",
+      "broadcastTitle": "Aankondiging sturen",
+      "broadcastPlaceholder": "Typ een aankondiging voor alle ruimtes...",
+      "broadcastSent": "Aankondiging verzonden naar alle ruimtes!",
+      "youAreHere": "U bent hier",
+      "leaveRoom": "Verlaten",
+      "mainRoom": "Hoofdruimte",
+      "assignTo": "Toewijzen aan...",
+      "noParticipants": "Geen deelnemers in deze ruimte"
+    },
+    "participant": {
+      "currentRoom": "U bevindt zich in {{room}}",
+      "returnButton": "Terug naar de hoofdruimte",
+      "returningIn": "Terugkeren naar de hoofdruimte in {{seconds}}s",
+      "returning": "Terugkeren naar de hoofdruimte…",
+      "askForHelp": "Om hulp vragen",
+      "askForHelpTooltip": "De host informeren dat u hulp nodig heeft",
+      "helpRequested": "Hulp aangevraagd"
+    },
+    "transition": {
+      "movingTo": "Verplaatsen naar {{room}}…",
+      "returningToMain": "Terugkeren naar de hoofdruimte…"
+    },
+    "helpAlert": {
+      "title": "Hulp aangevraagd",
+      "body": "{{participantName}} in {{roomName}} vraagt om hulp",
+      "joinRoom": "Ruimte betreden",
+      "dismiss": "Melding sluiten"
+    },
+    "broadcast": {
+      "title": "Aankondiging van de host",
+      "dismiss": "Aankondiging sluiten"
+    }
   }
 }

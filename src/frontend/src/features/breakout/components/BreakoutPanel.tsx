@@ -7,10 +7,10 @@
  * - Session ACTIVE → BreakoutActiveView (monitor + close)
  */
 
-import { useState } from 'react'
 import { useSnapshot } from 'valtio'
 import { breakoutStore } from '../stores/breakout'
 import { useRoomData } from '@/features/rooms/livekit/hooks/useRoomData'
+import { useBreakoutSession } from '../api/useBreakoutSession'
 import { BreakoutSetup } from './BreakoutSetup'
 import { BreakoutActiveView } from './BreakoutActiveView'
 import type { BreakoutSession } from '../api/types'
@@ -18,12 +18,15 @@ import type { BreakoutSession } from '../api/types'
 export const BreakoutPanel = () => {
   const roomData = useRoomData()
   const snap = useSnapshot(breakoutStore)
-  const [localSession, setLocalSession] = useState<BreakoutSession | null>(null)
 
-  // Trigger reactivity via snap, but use mutable store reference for child prop passing
-  const session = snap.session
-    ? (breakoutStore.session as BreakoutSession)
-    : localSession
+  // API is the source of truth — survives host reload over a live session.
+  const { data: remoteSession } = useBreakoutSession(roomData?.id)
+
+  // breakoutStore.session provides optimistic state during the brief window
+  // after creation before the first poll returns (10s interval).
+  const session =
+    remoteSession ?? (snap.session as BreakoutSession | null) ?? null
+
   const roomUuid = roomData?.id ?? ''
 
   if (!roomData) return null
@@ -39,7 +42,8 @@ export const BreakoutPanel = () => {
       roomUuid={roomUuid}
       session={session?.status === 'configuring' ? session : null}
       onSessionCreated={(s) => {
-        setLocalSession(s)
+        // Optimistic update: store the session so the panel transitions
+        // immediately, before useBreakoutSession's next poll returns.
         breakoutStore.session = s
       }}
     />

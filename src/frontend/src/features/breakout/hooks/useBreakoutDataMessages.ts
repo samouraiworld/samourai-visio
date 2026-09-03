@@ -4,7 +4,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useRoomContext } from '@livekit/components-react'
-import { RoomEvent } from 'livekit-client'
+import { RoomEvent, type RemoteParticipant } from 'livekit-client'
 import { breakoutStore } from '../stores/breakout'
 
 interface UseBreakoutDataMessagesOptions {
@@ -24,18 +24,29 @@ export const useBreakoutDataMessages = (
   useEffect(() => {
     if (!room) return
 
-    const handleData = (payload: Uint8Array) => {
+    const handleData = (
+      payload: Uint8Array,
+      participant?: RemoteParticipant
+    ) => {
       try {
         const text = new TextDecoder().decode(payload)
         const data = JSON.parse(text)
 
-        if (data.type === 'breakout:broadcast' && data.message) {
+        // Only accept control messages from the server (participant === undefined).
+        // A remote participant must not be able to forge host-level commands.
+        if (
+          !participant &&
+          data.type === 'breakout:broadcast' &&
+          data.message
+        ) {
           breakoutStore.broadcastAnnouncement = {
             message: data.message,
             timestamp: Date.now(),
           }
         }
 
+        // breakout:help_request is legitimately participant-sourced (guests
+        // send it to surface the SOS beacon on the host panel).
         if (data.type === 'breakout:help_request') {
           breakoutStore.helpAlert = {
             roomName: data.room_name || 'Breakout Room',
@@ -47,7 +58,10 @@ export const useBreakoutDataMessages = (
         }
 
         if (data.type === 'breakout:recall' || data.type === 'breakout:close') {
-          onRecallRef.current?.()
+          // Reject recall/close from any remote participant — server only.
+          if (!participant) {
+            onRecallRef.current?.()
+          }
         }
       } catch {
         // Not a JSON message — ignore

@@ -174,6 +174,7 @@ class BreakoutAssignment(BaseModel):
     )
     participant_identity = models.CharField(
         max_length=255,
+        db_index=True,
         verbose_name=_("participant identity"),
         help_text=_("LiveKit identity (user.sub or stable anonymous UUID)."),
     )

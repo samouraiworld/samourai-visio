@@ -485,6 +485,18 @@ class Base(Configuration):
     CELERY_BROKER_URL = values.Value("redis://redis:6379/0", environ_prefix=None)
     CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({}, environ_prefix=None)
 
+    # Celery Beat — periodic tasks
+    # Each entry runs on the configured schedule when CELERY_ENABLED=True and
+    # a celery beat worker is active.
+    CELERY_BEAT_SCHEDULE = {
+        # Auto-close breakout sessions that have exceeded their duration + grace
+        # period (5 min). Runs every 5 minutes so worst-case overrun is 10 min.
+        "cleanup-stale-breakout-sessions": {
+            "task": "core.breakout.tasks.cleanup_stale_breakout_sessions",
+            "schedule": 300,  # seconds
+        },
+    }
+
     # Session
     SESSION_ENGINE = values.Value(
         default="django.contrib.sessions.backends.cache",

@@ -47,6 +47,7 @@ import { MeetDevtools } from '@/features/devtools'
 import { VOICE_AUDIO_CONSTRAINTS } from '@/features/rooms/livekit/utils/constants'
 import {
   breakoutStore,
+  clearBreakoutState,
   registerRoomSwapHandler,
 } from '@/features/breakout/stores/breakout'
 import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
@@ -77,6 +78,57 @@ const BreakoutWatcher = ({
   })
   useBreakoutDataMessages({ onRecall: returnToMainRoom })
   return null
+}
+
+/**
+ * Inner component rendered inside <LiveKitRoom> that owns the hooks requiring
+ * a room provider context (useLocalParticipant via useBreakoutRoomSwap) and
+ * the overlays driven by those hooks.
+ *
+ * Must NOT be called at Conference component scope — it would be above
+ * <LiveKitRoom> in the render tree and throw: "No room provided".
+ */
+const BreakoutActions = ({
+  roomId,
+  setActiveRoomConnection,
+  mainRoomId,
+}: {
+  roomId: string
+  setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
+  mainRoomId: string
+}) => {
+  const { returnToMainRoom, moveToBreakoutRoom } = useBreakoutRoomSwap({
+    currentRoomSlug: roomId,
+    setActiveRoomConnection,
+  })
+  const snap = useSnapshot(breakoutStore)
+  return (
+    <>
+      {snap.currentBreakoutRoomLkName && (
+        <BreakoutParticipantOverlay onReturnToMain={returnToMainRoom} />
+      )}
+      {snap.helpAlert && (
+        <BreakoutHelpAlertBanner
+          roomName={snap.helpAlert.roomName}
+          participantName={snap.helpAlert.participantName}
+          onJoinRoom={() => {
+            if (snap.helpAlert) {
+              moveToBreakoutRoom(
+                snap.helpAlert.breakoutRoomId,
+                snap.helpAlert.sessionId,
+                mainRoomId,
+                snap.helpAlert.roomName
+              )
+              breakoutStore.helpAlert = null
+            }
+          }}
+          onDismiss={() => {
+            breakoutStore.helpAlert = null
+          }}
+        />
+      )}
+    </>
+  )
 }
 
 export const Conference = ({
@@ -169,10 +221,10 @@ export const Conference = ({
     }
   }, [data?.id, roomId])
 
-  const { returnToMainRoom, moveToBreakoutRoom } = useBreakoutRoomSwap({
-    currentRoomSlug: roomId,
-    setActiveRoomConnection,
-  })
+  // NOTE: useBreakoutRoomSwap is intentionally NOT called here.
+  // It calls useLocalParticipant() internally, which requires a LiveKit room
+  // provider context. This hook is called inside <BreakoutActions> below,
+  // which is rendered inside <LiveKitRoom>.
 
   const roomOptions = useMemo((): RoomOptions => {
     return {
@@ -341,6 +393,10 @@ export const Conference = ({
             // Breakout room swap in progress — do NOT navigate to feedback
             if (breakoutStore.isTransitioning) return
 
+            // Clear any residual breakout state so it does not bleed into
+            // the next meeting or reconnect attempt.
+            clearBreakoutState()
+
             const metadata = {
               room_id: roomId,
             }
@@ -378,9 +434,6 @@ export const Conference = ({
             mainRoomId={data?.id ?? ''}
           />
           {breakoutSnap.isTransitioning && <BreakoutTransition />}
-          {breakoutSnap.currentBreakoutRoomLkName && (
-            <BreakoutParticipantOverlay onReturnToMain={returnToMainRoom} />
-          )}
           {breakoutSnap.broadcastAnnouncement && (
             <BreakoutBroadcastBanner
               message={breakoutSnap.broadcastAnnouncement.message}
@@ -389,26 +442,12 @@ export const Conference = ({
               }}
             />
           )}
-          {breakoutSnap.helpAlert && (
-            <BreakoutHelpAlertBanner
-              roomName={breakoutSnap.helpAlert.roomName}
-              participantName={breakoutSnap.helpAlert.participantName}
-              onJoinRoom={() => {
-                if (breakoutSnap.helpAlert) {
-                  moveToBreakoutRoom(
-                    breakoutSnap.helpAlert.breakoutRoomId,
-                    breakoutSnap.helpAlert.sessionId,
-                    data?.id ?? '',
-                    breakoutSnap.helpAlert.roomName
-                  )
-                  breakoutStore.helpAlert = null
-                }
-              }}
-              onDismiss={() => {
-                breakoutStore.helpAlert = null
-              }}
-            />
-          )}
+          {/* BreakoutActions owns useBreakoutRoomSwap — must stay inside <LiveKitRoom> */}
+          <BreakoutActions
+            roomId={roomId}
+            setActiveRoomConnection={setActiveRoomConnection}
+            mainRoomId={data?.id ?? ''}
+          />
           <VideoConference />
           {!isMobile && <InviteDialog mode={mode} />}
           <PictureInPictureConference />

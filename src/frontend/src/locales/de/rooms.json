@@ -335,7 +335,8 @@
         "exit": "Vollbildmodus verlassen"
       },
       "support": "Support kontaktieren",
-      "documentation": "Dokumentation"
+      "documentation": "Dokumentation",
+      "breakoutRooms": "Gruppenräume"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Aufzeichnen",
       "admin": "Admin-Einstellungen",
       "tools": "Weitere Tools",
-      "info": "Meeting-Informationen"
+      "info": "Meeting-Informationen",
+      "breakout": "Gruppenräume"
     },
     "content": {
       "participants": "Teilnehmende",
@@ -433,7 +435,8 @@
       "screenRecording": "aufzeichnen",
       "admin": "Admin-Einstellungen",
       "tools": "Weitere Tools",
-      "info": "Meeting-Informationen"
+      "info": "Meeting-Informationen",
+      "breakout": "Gruppenräume"
     },
     "closeButton": "{{content}} ausblenden (Escape)",
     "escapeHint": "Escape drücken zum Schließen"
@@ -798,5 +801,75 @@
   },
   "participantTile": {
     "screenShare": "{{name}}’s Bildschirm"
+  },
+  "breakout": {
+    "menuItem": "Gruppenräume",
+    "heading": "Gruppenräume",
+    "setup": {
+      "roomCount": "Anzahl der Räume",
+      "create": "Gruppenräume erstellen",
+      "randomize": "Zufällig zuweisen",
+      "unassigned": "{{count}} nicht zugewiesen",
+      "openAll": "Alle Räume öffnen",
+      "cancel": "Abbrechen",
+      "duration": "Dauer",
+      "durationOptions": {
+        "none": "Kein Timer",
+        "2min": "2 Minuten",
+        "5min": "5 Minuten",
+        "10min": "10 Minuten",
+        "15min": "15 Minuten",
+        "20min": "20 Minuten",
+        "30min": "30 Minuten",
+        "45min": "45 Minuten",
+        "1h": "1 Stunde",
+        "1h30": "1 Stunde 30 Minuten",
+        "2h": "2 Stunden",
+        "3h": "3 Stunden",
+        "4h": "4 Stunden"
+      },
+      "noParticipants": "Keine Teilnehmer zugewiesen",
+      "assignParticipants": "Teilnehmer zuweisen",
+      "unassignedOption": "Nicht zugewiesen",
+      "allAssigned": "Alle Teilnehmer zugewiesen"
+    },
+    "active": {
+      "timeRemaining": "Verbleibende Zeit",
+      "closeAll": "Alle Räume schließen",
+      "participantCount": "{{count}} Teilnehmer",
+      "visitRoom": "Besuchen",
+      "returnToMain": "Zurück zum Hauptraum",
+      "broadcastTitle": "Ankündigung senden",
+      "broadcastPlaceholder": "Ankündigung an alle Räume eingeben...",
+      "broadcastSent": "Ankündigung an alle Räume gesendet!",
+      "youAreHere": "Sie sind hier",
+      "leaveRoom": "Verlassen",
+      "mainRoom": "Hauptraum",
+      "assignTo": "Zuweisen zu...",
+      "noParticipants": "Keine Teilnehmer in diesem Raum"
+    },
+    "participant": {
+      "currentRoom": "Sie sind in {{room}}",
+      "returnButton": "Zurück zum Hauptraum",
+      "returningIn": "Rückkehr zum Hauptraum in {{seconds}}s",
+      "returning": "Rückkehr zum Hauptraum…",
+      "askForHelp": "Um Hilfe bitten",
+      "askForHelpTooltip": "Den Gastgeber um Unterstützung bitten",
+      "helpRequested": "Hilfe angefordert"
+    },
+    "transition": {
+      "movingTo": "Wechsel zu {{room}}…",
+      "returningToMain": "Rückkehr zum Hauptraum…"
+    },
+    "helpAlert": {
+      "title": "Hilfe angefordert",
+      "body": "{{participantName}} in {{roomName}} braucht Hilfe",
+      "joinRoom": "Raum beitreten",
+      "dismiss": "Meldung schließen"
+    },
+    "broadcast": {
+      "title": "Ankündigung des Gastgebers",
+      "dismiss": "Ankündigung schließen"
+    }
   }
 }

@@ -142,10 +142,13 @@ export const useBreakoutMetadataWatcher = ({
     returnToMainRoom,
   ])
 
-  // Reset trigger ref when session changes
+  // Reset trigger ref whenever the session ID changes (including null → id,
+  // id → null, and old-id → new-id for back-to-back sessions).
+  const prevSessionIdRef = useRef<string | null | undefined>(undefined)
   useEffect(() => {
-    if (!snap.activeSessionId) {
+    if (snap.activeSessionId !== prevSessionIdRef.current) {
       hasTriggeredRef.current = false
+      prevSessionIdRef.current = snap.activeSessionId
     }
   }, [snap.activeSessionId])
 }

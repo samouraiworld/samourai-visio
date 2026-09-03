@@ -18,6 +18,7 @@ import { useCreateBreakoutSession } from '../api/useCreateBreakoutSession'
 import { useRandomizeAssignments } from '../api/useRandomizeAssignments'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
+import { ApiError } from '@/api/ApiError'
 import { breakoutStore } from '../stores/breakout'
 import type { BreakoutSession } from '../api/types'
 import {
@@ -80,13 +81,22 @@ export const BreakoutSetup = ({
   )
 
   const handleCreate = useCallback(async () => {
-    const created = await createSession({
-      roomId: roomUuid,
-      numRooms,
-      durationSeconds: duration === '0' ? null : parseInt(duration, 10),
-    })
-    onSessionCreated(created)
-    breakoutStore.session = created
+    try {
+      const created = await createSession({
+        roomId: roomUuid,
+        numRooms,
+        durationSeconds: duration === '0' ? null : parseInt(duration, 10),
+      })
+      onSessionCreated(created)
+      breakoutStore.session = created
+    } catch (e) {
+      if (e instanceof ApiError && e.statusCode === 409) {
+        // A session already exists (e.g. host reloaded the tab mid-session).
+        // useBreakoutSession polling will surface it within its next interval.
+        return
+      }
+      throw e
+    }
   }, [roomUuid, numRooms, duration, createSession, onSessionCreated])
 
   const handleRandomize = useCallback(async () => {

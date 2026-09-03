@@ -292,3 +292,69 @@ def test_generate_breakout_token_ttl_scoped(mock_gen_token, service):
     mock_gen_token.assert_called_once()
     _, kwargs = mock_gen_token.call_args
     assert kwargs["ttl"] == timedelta(seconds=900)  # 600 + 300
+
+
+# ── Regression: Bug 2 — metadata must include full blob on reassignment ──────
+
+
+@mock.patch.object(BreakoutService, "_send_data_to_room")
+@mock.patch("core.services.room_management.RoomManagement.update_metadata")
+def test_reassign_while_active_republishes_full_metadata(mock_meta, mock_send, service):
+    """Reassigning during an active session must republish the whole breakout blob.
+
+    _update_assignment_metadata used to push only {"breakout": {"assignments": ...}},
+    which caused the top-level merge in RoomManagement.update_metadata to replace the
+    entire "breakout" key, dropping status/session_id/rooms and making recall impossible.
+    """
+    session = BreakoutSessionFactory(
+        status=BreakoutSession.Status.CONFIGURING, duration_seconds=600
+    )
+    br1 = BreakoutRoomFactory(session=session, order=0)
+    br2 = BreakoutRoomFactory(session=session, order=1)
+
+    service.activate_session(session)
+    service.assign_participants(
+        session, {str(br2.id): [{"identity": "p1", "name": "Alice"}]}
+    )
+
+    # The last call to update_metadata (from _update_assignment_metadata) must
+    # carry the full breakout blob, not just the assignments dict.
+    breakout = mock_meta.call_args.kwargs["metadata"]["breakout"]
+    assert breakout["status"] == "active"
+    assert breakout["session_id"] == str(session.id)
+    assert [r["id"] for r in breakout["rooms"]] == [str(br1.id), str(br2.id)]
+
+
+# ── Regression: Bug 3 — unknown room ID must not wipe existing assignments ────
+
+
+def test_assign_unknown_room_id_raises_and_preserves_assignments(service):
+    """An unknown breakout_room_id in the payload must raise and leave DB intact.
+
+    assign_participants used to DELETE all assignments before resolving room IDs,
+    so a stale payload with one bad ID wiped everything and returned 200.
+    """
+    session = BreakoutSessionFactory(status=BreakoutSession.Status.CONFIGURING)
+    br = BreakoutRoomFactory(session=session)
+    BreakoutAssignmentFactory(breakout_room=br, participant_identity="p1")
+
+    with pytest.raises(BreakoutServiceError):
+        service.assign_participants(
+            session,
+            {
+                "00000000-0000-0000-0000-000000000000": [
+                    {"identity": "p2", "name": "Bob"}
+                ]
+            },
+        )
+
+    # Original assignment must be intact
+    assert (
+        BreakoutAssignment.objects.filter(breakout_room__session=session).count() == 1
+    )
+    assert (
+        BreakoutAssignment.objects.get(
+            breakout_room__session=session
+        ).participant_identity
+        == "p1"
+    )

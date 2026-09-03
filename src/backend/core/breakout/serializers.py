@@ -92,10 +92,35 @@ class BulkAssignSerializer(serializers.Serializer):
     assignments = serializers.DictField(
         child=serializers.ListField(
             child=serializers.DictField(
-                child=serializers.CharField(),
-            )
-        )
+                child=serializers.CharField(max_length=255),
+            ),
+        ),
     )
+
+    def validate_assignments(self, value):
+        """Enforce size bounds and reject unexpected participant dict keys."""
+        # Hard cap: sessions allow at most 10 rooms
+        if len(value) > 10:
+            raise serializers.ValidationError(
+                f"Too many rooms in assignment payload: {len(value)} (max 10)."
+            )
+
+        allowed_keys = {"identity", "name"}
+        for room_id, participants in value.items():
+            # Cap participants per room
+            if len(participants) > 500:
+                raise serializers.ValidationError(
+                    f"Room '{room_id}' has {len(participants)} participants (max 500)."
+                )
+            for idx, participant in enumerate(participants):
+                extra = set(participant.keys()) - allowed_keys
+                if extra:
+                    raise serializers.ValidationError(
+                        f"Participant at room '{room_id}' index {idx} contains "
+                        f"unexpected keys: {sorted(extra)}. "
+                        f"Only 'identity' and 'name' are allowed."
+                    )
+        return value
 
 
 class JoinBreakoutRoomSerializer(serializers.Serializer):
