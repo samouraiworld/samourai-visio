@@ -46,9 +46,17 @@ Pillow drops a requested size larger than the image it is saving from and says
 nothing; and that the boundary size renders the full mark and not the small
 one, because that comparison shipped inverted once and nothing noticed.
 
-Each of the three is mutation-tested: reverting the boundary, adding a `dpi=`,
-or saving the icon from its smallest frame each makes the generator exit
-non-zero with the reason.
+`scripts/generate-icons.selftest.py` re-proves all three on every run: it
+loads a fresh copy of the generator per case, breaks one guard in memory, and
+requires it to raise. The self-test is itself mutation-tested — removing any
+guard makes it fail by name — so the sentence above is now something the
+repository checks rather than something someone once did.
+
+`scripts/generate-icons.py --check theme/icons` asserts the committed icons
+show what the generator draws. It compares **decoded pixels, not file bytes**:
+PNG compression depends on the zlib build and the platform, so the same
+generator writes different bytes on a runner than on a laptop. A byte
+comparison fails there for reasons that have nothing to do with the icons.
 
 ## Regenerating
 
