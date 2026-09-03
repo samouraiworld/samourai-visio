@@ -8,8 +8,8 @@ version: 2
 # Workflow actions only. The images in deploy/greffon/visio/1.0/docker-compose.yml
 # belong to the mirror-and-pin pipeline described in SUPPLY_CHAIN_POLICY sections
 # 1 to 3, which resolves them by digest with a scan step of its own; a docker
-# ecosystem here would give two sources for the same number. There is no npm or
-# pip entry because this repository ships no application manifest.
+# ecosystem here would give two sources for the same number. There is no npm
+# entry because this repository ships no JavaScript manifest.
 updates:
   # Every `uses:` in this repository is pinned to a full commit SHA with the
   # readable version in a trailing comment, per samourai-core
@@ -40,3 +40,42 @@ updates:
       # migration note, not with an auto-merged bump.
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  # `requirements-icons.txt`: the hash-pinned Pillow the icon generator draws
+  # with. It arrived without an entry here, which left a pinned file nobody
+  # was watching -- a pin with no watcher goes stale silently, which is the
+  # supply-chain shape of a check nobody runs.
+  #
+  # READ THIS BEFORE MERGING A DEPENDABOT PR AGAINST THAT FILE.
+  #
+  # Dependabot's pip updater writes the hash of EVERY published artefact of
+  # the release into a hash-pinned file -- 87 of them for Pillow 12.3.0,
+  # every digest genuine. That puts back the musllinux wheel the file
+  # deliberately excludes and destroys the fail-loud property its header
+  # promises: the point of the curated set is that a platform change cannot
+  # resolve, and 87 hashes resolve almost anything.
+  #
+  # So a Dependabot pull request here is a SIGNAL THAT THE PIN IS STALE, and
+  # never a merge as it stands -- however green its CI is, because green is
+  # exactly what it will be. The response is the recipe in
+  # `requirements-icons.txt`, run by a person, in a pull request of their own,
+  # with Dependabot's closed as superseded.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+    groups:
+      python:
+        patterns:
+          - "*"
+    ignore:
+      # Same rule as the actions above: a major is a decision with a migration
+      # note, not a bump.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    labels:
+      - dependencies
