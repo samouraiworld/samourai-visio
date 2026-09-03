@@ -147,12 +147,20 @@ done
 # Keep psql's own stderr in the failure line. Discarding it is what turned the
 # readiness race above into "FAIL CREATE ROLE meet failed" with no cause named,
 # which is a failure a reader re-runs instead of diagnosing.
+#
+# Flattened to ONE line, because every assertion against this script — here, in
+# CI, and in the runbook — is an anchored ^FAIL grep. psql's errors are
+# routinely two lines ("connection to server failed:" then the FATAL that says
+# why), so a raw multi-line splice would put the half that explains the failure
+# on a continuation line nothing greps, which is the very illegibility this is
+# meant to remove.
+oneline() { printf '%s' "${1//$'\n'/ }"; }
 err="$(docker exec "$CONTAINER" psql -U postgres \
        -c "CREATE ROLE $DRILL_DB_USER LOGIN" 2>&1 >/dev/null)" \
-  || fail "CREATE ROLE $DRILL_DB_USER failed${err:+ — $err}"
+  || fail "CREATE ROLE $DRILL_DB_USER failed${err:+ — $(oneline "$err")}"
 err="$(docker exec "$CONTAINER" psql -U postgres \
        -c "CREATE DATABASE drill OWNER $DRILL_DB_USER" 2>&1 >/dev/null)" \
-  || fail "CREATE DATABASE drill failed${err:+ — $err}"
+  || fail "CREATE DATABASE drill failed${err:+ — $(oneline "$err")}"
 
 gunzip -c "$DUMP" | docker exec -i "$CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres -d drill \
   || fail "restore of $DUMP into drill failed"
