@@ -36,6 +36,9 @@ FULL_MARK_FROM = 48
 # the sentence above it.
 ALLOWED_CHUNKS = {b"IHDR", b"IDAT", b"IEND"}
 
+# The icon ships 16, 32 and 48.
+ICO_FRAMES = 3
+
 
 def census(path):
     """The set of chunk types a PNG on disk actually carries."""
@@ -103,6 +106,24 @@ def draw(size, inset=0.0, ground=True, mark=None):
     return img.resize((size, size), Image.LANCZOS)
 
 
+def verify_png(path, name):
+    """A published raster carries image data and nothing else."""
+    found = census(path)
+    extra = found - ALLOWED_CHUNKS
+    if extra:
+        raise SystemExit(f"{name} carries {', '.join(sorted(c.decode() for c in extra))}")
+    return found
+
+
+def verify_ico(path, name):
+    """The icon carries all three frames, not just the one it was saved from."""
+    with Image.open(path) as im:
+        frames = sorted(im.info.get("sizes", []))
+    if len(frames) != ICO_FRAMES:
+        raise SystemExit(f"{name} has {len(frames)} frames, expected {ICO_FRAMES}")
+    return frames
+
+
 def check_boundary():
     """Prove the boundary size renders the full mark, not the small one.
 
@@ -157,17 +178,10 @@ def main(out):
     for name in made:
         path = os.path.join(out, name)
         if name.endswith(".png"):
-            found = census(path)
-            extra = found - ALLOWED_CHUNKS
-            if extra:
-                raise SystemExit(
-                    f"{name} carries {', '.join(sorted(c.decode() for c in extra))}")
+            found = verify_png(path, name)
             print(f"  {name:38s} {' '.join(sorted(c.decode() for c in found))}")
         else:
-            with Image.open(path) as im:
-                frames = sorted(im.info.get("sizes", []))
-            if len(frames) != 3:
-                raise SystemExit(f"{name} has {len(frames)} frames, expected 3")
+            frames = verify_ico(path, name)
             print(f"  {name:38s} {len(frames)} frames {frames}")
 
 

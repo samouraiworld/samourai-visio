@@ -76,6 +76,36 @@ jobs:
           python-version: "3.12"
       - run: scripts/check-contrast.py theme/custom.css
 
+  # The icon generator carries three guards — the chunk allowlist, the icon
+  # frame count and the mark boundary — and until now nothing re-proved any of
+  # them. They were exercised by hand once and the README claimed the present
+  # tense. This job is that claim made true.
+  #
+  # It also regenerates the set and requires the working tree to be unchanged,
+  # so a committed icon that no longer matches its source is a failure rather
+  # than a discovery.
+  icon-generator:
+    name: Icon generator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - name: Install Pillow
+        run: pip install --disable-pip-version-check "Pillow==11.3.0"
+      - name: Prove each guard can fail
+        run: scripts/generate-icons.selftest.py
+      - name: The committed icons match their source
+        run: |
+          set -euo pipefail
+          scripts/generate-icons.py theme/icons
+          if ! git diff --quiet -- theme/icons; then
+            echo "::error::theme/icons does not match a fresh run of the generator"
+            git --no-pager diff --stat -- theme/icons
+            exit 1
+          fi
+
   upstream-contract:
     name: Upstream contract
     runs-on: ubuntu-latest
