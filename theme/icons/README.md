@@ -62,9 +62,15 @@ One trap the script documents in place: Pillow draws `ellipse(outline=…, width
 
 Regenerate every size together if the geometry changes; the sizes are not independent.
 
-Two things this does **not** cover. `landing/logo-visio.svg` still carries the
-retired coral glyph and is not produced here. And the geometry now exists twice
-— in `design/v0.1/brand/glyphs/visio.svg` and in this script's constants — with
+Three things this does **not** cover. `landing/logo-visio.svg` is a byte-identical
+copy of `logo.svg`, and `landing/logo-mark.png` is the full two-ring mark at 40 px,
+rendered from the glyph SVG with headless Chrome and Lanczos-downsampled: neither
+is produced by this script, and the 40 px raster keeps both rings, below the
+threshold above, because it is the raster twin of the SVG it sits beside.
+`landing/og-card.png` is the design of record's share card at 1200×630. All three
+carry only `IHDR`, `IDAT` and `IEND`, but no gate in this repository checks the
+landing files. And the geometry now exists twice — in
+`design/v0.1/brand/glyphs/visio.svg` and in this script's constants — with
 nothing checking the two agree; a change to the vector source will not fail
 anything here.
 
