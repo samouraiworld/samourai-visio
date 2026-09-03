@@ -16,7 +16,7 @@ fewer — and the full mark returns at 48.
 import os
 import sys
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 SS = 16
 GRID = 24.0
@@ -29,10 +29,12 @@ COBALT = (43, 75, 219, 255)
 # because the previous name invited an off-by-one and got one.
 FULL_MARK_FROM = 48
 
-# A published raster carries image data and nothing else. Text, provenance and
-# EXIF chunks are how attribution travels into a repository unnoticed, so the
-# absence is asserted after every save rather than left as a claim in prose.
-FORBIDDEN_CHUNKS = (b"tEXt", b"zTXt", b"iTXt", b"eXIf", b"caBX", b"dSIG")
+# A published raster carries image data and nothing else. Stated as the
+# allowlist it is, not as a list of the metadata types thought of on the day:
+# a denylist passed `pHYs` — which one `dpi=` argument is enough to write —
+# and would have passed `tIME` and `iCCP` too, so the guard did not enforce
+# the sentence above it.
+ALLOWED_CHUNKS = {b"IHDR", b"IDAT", b"IEND"}
 
 
 def census(path):
@@ -49,7 +51,12 @@ def census(path):
     return found
 
 
-def draw(size, inset=0.0, ground=True):
+def mark_for(size):
+    """Which mark a size carries. One place, so the boundary is testable."""
+    return "full" if size >= FULL_MARK_FROM else "single"
+
+
+def draw(size, inset=0.0, ground=True, mark=None):
     px = size * SS
     img = Image.new("RGBA", (px, px), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
@@ -83,7 +90,7 @@ def draw(size, inset=0.0, ground=True):
         rr = r * u * scale
         d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=fill)
 
-    if size < FULL_MARK_FROM:
+    if (mark or mark_for(size)) == "single":
         # One ring around the node. Larger radius and heavier stroke than a
         # single ring of the full mark, because it is carrying the whole glyph.
         ring(12.0, 12.0, 6.0, 2.2)
@@ -96,7 +103,35 @@ def draw(size, inset=0.0, ground=True):
     return img.resize((size, size), Image.LANCZOS)
 
 
+def check_boundary():
+    """Prove the boundary size renders the full mark, not the small one.
+
+    This is the regression that shipped: the comparison was `<=`, so 48 took
+    the single-ring branch against the docstring, the README table and the
+    body of the pull request — and nothing failed, because the only check was
+    that the script reproduced its own output, which it did, wrongly.
+
+    Restoring `<=` makes the two renders below identical and this raises.
+    """
+    if mark_for(FULL_MARK_FROM) != "full":
+        raise SystemExit(
+            f"{FULL_MARK_FROM}px must carry the full mark; the boundary "
+            f"comparison is inverted")
+    if mark_for(FULL_MARK_FROM - 1) != "single":
+        raise SystemExit(f"{FULL_MARK_FROM - 1}px must carry the single ring")
+
+    # Compared as bytes, not with ImageChops.difference().getbbox(). On two
+    # opaque RGBA images the difference has alpha 0 everywhere, so getbbox()
+    # reports no difference for images that plainly differ — a comparison that
+    # answers the wrong question, which is the mistake this whole file keeps
+    # being about.
+    if draw(FULL_MARK_FROM).tobytes() == draw(FULL_MARK_FROM, mark="single").tobytes():
+        raise SystemExit(
+            f"{FULL_MARK_FROM}px renders the same as the single-ring mark")
+
+
 def main(out):
+    check_boundary()
     os.makedirs(out, exist_ok=True)
     made = []
     for size, name in [(16, "favicon-16x16.png"), (32, "favicon-32x32.png"),
@@ -122,9 +157,10 @@ def main(out):
         path = os.path.join(out, name)
         if name.endswith(".png"):
             found = census(path)
-            bad = [c.decode() for c in FORBIDDEN_CHUNKS if c in found]
-            if bad:
-                raise SystemExit(f"{name} carries {', '.join(bad)}")
+            extra = found - ALLOWED_CHUNKS
+            if extra:
+                raise SystemExit(
+                    f"{name} carries {', '.join(sorted(c.decode() for c in extra))}")
             print(f"  {name:38s} {' '.join(sorted(c.decode() for c in found))}")
         else:
             with Image.open(path) as im:
