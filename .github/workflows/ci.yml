@@ -275,6 +275,47 @@ jobs:
           grep -q '^OK restored from remote ' /tmp/drill-remote.out ||
             { echo "::error::remote drill did not report OK"; exit 1; }
 
+      - name: And it WAITS for Postgres instead of racing its startup
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          # The postgres entrypoint runs initdb against a TEMPORARY server it
+          # starts with listen_addresses='' and stops again before the real
+          # server comes up. That temporary server answers on the Unix socket,
+          # so a socket pg_isready reports "accepting connections" while the
+          # database is still initialising. A drill that believes that probe
+          # walks into the shutdown and fails on whichever statement it had
+          # reached — which is how this job produced "FAIL CREATE ROLE meet
+          # failed" on a commit that touched only icons, then passed on a
+          # re-run of the very same commit.
+          #
+          # An init script holds that window open for a fixed 15s, so the race
+          # becomes a test with an answer instead of a coin flip.
+          mkdir -p "$W/slowpg"
+          printf '#!/bin/sh\nsleep 15\n' > "$W/slowpg/00-slow-init.sh"
+          chmod +x "$W/slowpg/00-slow-init.sh"
+          cat > "$W/slowpg/Dockerfile" <<'DOCKER'
+          FROM postgres:16
+          COPY 00-slow-init.sh /docker-entrypoint-initdb.d/00-slow-init.sh
+          DOCKER
+          docker build -q -t visio-slow-postgres:selftest "$W/slowpg"
+
+          start="$(date +%s)"
+          DRILL_PG_IMAGE=visio-slow-postgres:selftest VISIO_DIR="$W" \
+            "$GITHUB_WORKSPACE/scripts/restore-drill.sh" | tee /tmp/drill-slow.out
+          elapsed=$(( $(date +%s) - start ))
+          grep -q '^OK restored from local ' /tmp/drill-slow.out ||
+            { echo "::error::drill did not survive a slow-starting Postgres"; exit 1; }
+          # Proof it WAITED rather than got lucky: it cannot have finished
+          # before the init window it had to sit through had even closed.
+          [ "$elapsed" -ge 15 ] || {
+            echo "::error::drill returned in ${elapsed}s, so it started work"\
+                 "before Postgres was really up"
+            exit 1
+          }
+          echo "drill waited ${elapsed}s for the real server"
+
       - name: And the drill FAILS when a table it asserts on is missing
         run: |
           set -euo pipefail
