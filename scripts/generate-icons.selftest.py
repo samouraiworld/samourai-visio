@@ -6,9 +6,11 @@ The generator's guards did not: they were exercised by hand once, before
 merge, and the README said so in the present tense as though something re-ran
 them. Nothing did. This is that something.
 
-Each case below breaks one guard in memory — no file in the working tree is
-touched — and requires the guard to raise. If a guard stops working, this
-fails on the next run instead of on the day somebody happens to look.
+Each case below breaks one guard — in memory, or in a copy of the icon set
+written to a temporary directory — and requires the guard to raise. No file in
+the working tree is touched. A fresh copy of the generator is loaded per
+mutation, so a break never leaks into the next case. If a guard stops working,
+this fails on the next run instead of on the day somebody happens to look.
 """
 
 import importlib.util
@@ -102,6 +104,25 @@ def main():
     large.save(three, sizes=[(48, 48), (32, 32), (16, 16)], append_images=smaller)
     expect_passes("an icon saved from its largest frame",
                   lambda: gen.verify_ico(three, "three.ico"))
+
+    # 4. The committed set, not just fresh renders. A chunk planted into a
+    #    committed icon changes no pixel, so a comparison alone passed it — and
+    #    `--check` exited 0 with "all 7 icons match". That is metadata reaching
+    #    a published asset past a green pipeline.
+    gen = load()
+    committed = os.path.join(work, "committed")
+    names = gen.render(committed)
+    expect_passes("a clean committed set", lambda: gen.check_against(committed))
+
+    target = os.path.join(committed, "favicon-32x32.png")
+    raw = open(target, "rb").read()
+    at = raw.index(b"IDAT") - 4
+    planted = (raw[:at]
+               + chunk(b"tEXt", b"Software\x00an optimiser was here")
+               + raw[at:])
+    open(target, "wb").write(planted)
+    expect_raises("a chunk planted into a committed icon, pixels untouched",
+                  lambda: gen.check_against(committed))
 
     print("self-test passed: every guard fails when the thing it guards breaks")
     return 0
