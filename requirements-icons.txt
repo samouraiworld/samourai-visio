@@ -19,14 +19,17 @@
 #
 # The 11.x line also published a manylinux_2_17 wheel and the recipe had a
 # third command for it. The 12.x line does not: pip reports no such
-# distribution, and its version list for that platform stops at 11.3.0, which
-# reads like "12.3.0 does not exist" and is not. Check the release's file list
-# on PyPI before concluding an artefact is missing.
+# distribution, and its version list for that platform stops at 12.2.0 --
+# omitting only the version asked for, which reads like "12.3.0 does not
+# exist" and is not. The list is filtered by the platform requested and pip
+# does not say so. Check the release's file list on PyPI before concluding an
+# artefact is missing.
 #
-# The sdist command builds what it downloads, so it fails on a machine without
-# Pillow's build dependencies even though the artefact is fine. When that
-# happens the digest is still verifiable from the release's own metadata; it
-# is the same value.
+# The sdist command builds what it downloads, so it can fail on a machine
+# without Pillow's build dependencies even though the artefact is fine. It did
+# on one machine here and not on another, so treat it as environment-dependent
+# rather than expected. When it happens the digest is still verifiable from
+# the release's own metadata; it is the same value.
 #
 # Not `-d .`: neither `pillow-*.whl` nor the tarball is in .gitignore, so the
 # artefacts land untracked in the tree — and the glob would then hash whatever
