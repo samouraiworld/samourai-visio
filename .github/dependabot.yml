@@ -1,5 +1,10 @@
 version: 2
 
+# Majors are never automatic: a major arrives as an issue carrying a
+# migration note and lands as its own reviewed change. Security updates are
+# immediate and ungrouped (Dependabot's security updates ignore `schedule`
+# and `groups` for the security PR).
+#
 # Workflow actions only. The images in deploy/greffon/visio/1.0/docker-compose.yml
 # belong to the mirror-and-pin pipeline described in SUPPLY_CHAIN_POLICY sections
 # 1 to 3, which resolves them by digest with a scan step of its own; a docker
@@ -7,14 +12,14 @@ version: 2
 # pip entry because this repository ships no application manifest.
 updates:
   # Every `uses:` in this repository is pinned to a full commit SHA with the
-  # readable version in a trailing comment, per SUPPLY_CHAIN_POLICY sections 6
-  # and 8: a workflow is the one dependency that runs with repository
-  # credentials, and a tag can be moved under it. That format is the
-  # configuration -- dependabot has no "prefer SHA" switch, it follows whatever
-  # the workflow already carries, and it rewrites the SHA and the trailing
-  # comment together when it bumps. Reverting a `uses:` to a bare tag silently
-  # opts that action out of pinning, so a pull request that does it is a
-  # reject, not a nit.
+  # readable version in a trailing comment, per samourai-core
+  # `docs/security/SUPPLY_CHAIN_POLICY.md` sections 6 and 8: a workflow is
+  # the one dependency that runs with repository credentials, and a tag can
+  # be moved under it. That format is the configuration -- dependabot has no
+  # "prefer SHA" switch, it follows whatever the workflow already carries,
+  # and it rewrites the SHA and the trailing comment together when it bumps.
+  # Reverting a `uses:` to a bare tag silently opts that action out of
+  # pinning, so a pull request that does it is a reject, not a nit.
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -30,3 +35,8 @@ updates:
       actions:
         patterns:
           - "*"
+    ignore:
+      # Majors are a decision, not a chore: they arrive as an issue with a
+      # migration note, not with an auto-merged bump.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
