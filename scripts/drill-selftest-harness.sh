@@ -65,6 +65,20 @@ for token in tcp_probe INIT_HOLD probe-check; do
     die "the extracted step never mentions '$token' — it was restructured, and this fixture no longer exercises what it claims to"
 done
 
+# Each rewrite must have exactly ONE target. The sed patterns below are
+# anchored to a shape, not to a line number, so a second line of the same
+# shape would be rewritten too — and the difference check further down filters
+# by shape, so it would accept both and stay silent. Counting the targets is
+# what makes "a sed landing on a line it was not aimed at is reported" true,
+# and unlike an inventory of time constants it needs no notion of what a
+# constant is: it only asks how many lines each rewrite can reach.
+n_hold="$(grep -cE '^INIT_HOLD=[0-9]+$' "$WORK/step.raw")"
+n_poll="$(grep -cE '^ *for _ in \$\(seq 1 [0-9]+\); do$' "$WORK/step.raw")"
+[ "$n_hold" -eq 1 ] ||
+  die "the step carries $n_hold INIT_HOLD assignments, not 1 — this fixture rewrites every line of that shape, so it would silently shrink more than it means to"
+[ "$n_poll" -eq 1 ] ||
+  die "the step carries $n_poll literal 'seq 1 N' bounds, not 1 — this fixture rewrites every line of that shape, so it would silently shrink more than it means to"
+
 sed -E "s/^INIT_HOLD=[0-9]+\$/INIT_HOLD=$HOLD/; s/^( *for _ in \\\$\\(seq 1 )30(\\); do)\$/\\1$POLL\\2/" \
   "$WORK/step.raw" > "$WORK/step.sh"
 # Both guards anchored the same way. The poll bound was matched as a loose
