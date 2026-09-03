@@ -24,7 +24,29 @@ SLATE = (47, 58, 69, 255)
 WHITE = (255, 255, 255, 255)
 COBALT = (43, 75, 219, 255)
 
-SMALL_ABOVE = 48  # sizes at or below this use the single-ring mark
+# The full two-ring mark returns AT this size; anything smaller carries the
+# single ring. Named for the branch it opens rather than the one it closes,
+# because the previous name invited an off-by-one and got one.
+FULL_MARK_FROM = 48
+
+# A published raster carries image data and nothing else. Text, provenance and
+# EXIF chunks are how attribution travels into a repository unnoticed, so the
+# absence is asserted after every save rather than left as a claim in prose.
+FORBIDDEN_CHUNKS = (b"tEXt", b"zTXt", b"iTXt", b"eXIf", b"caBX", b"dSIG")
+
+
+def census(path):
+    """The set of chunk types a PNG on disk actually carries."""
+    raw = open(path, "rb").read()
+    found, offset = set(), 8
+    while offset + 8 <= len(raw):
+        length = int.from_bytes(raw[offset:offset + 4], "big")
+        kind = raw[offset + 4:offset + 8]
+        found.add(kind)
+        offset += 12 + length
+        if kind == b"IEND":
+            break
+    return found
 
 
 def draw(size, inset=0.0, ground=True):
@@ -61,7 +83,7 @@ def draw(size, inset=0.0, ground=True):
         rr = r * u * scale
         d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=fill)
 
-    if size <= SMALL_ABOVE:
+    if size < FULL_MARK_FROM:
         # One ring around the node. Larger radius and heavier stroke than a
         # single ring of the full mark, because it is carrying the whole glyph.
         ring(12.0, 12.0, 6.0, 2.2)
@@ -87,13 +109,29 @@ def main(out):
     draw(512, inset=0.2).save(os.path.join(out, "android-chrome-512x512-maskable.png"))
     made.append("android-chrome-512x512-maskable.png")
 
-    ico = [draw(s) for s in (16, 32, 48)]
-    ico[0].save(os.path.join(out, "favicon.ico"),
-                sizes=[(16, 16), (32, 32), (48, 48)], append_images=ico[1:])
+    # Save from the LARGEST frame. Pillow silently drops any requested size
+    # bigger than the image it is called on, so saving from the 16 px frame
+    # produced a one-frame icon and no error — and comparing the script's
+    # output with itself could never notice, because both sides were wrong.
+    large, *smaller = [draw(s) for s in (48, 32, 16)]
+    large.save(os.path.join(out, "favicon.ico"),
+               sizes=[(48, 48), (32, 32), (16, 16)], append_images=smaller)
     made.append("favicon.ico")
 
     for name in made:
-        print(f"  {name}")
+        path = os.path.join(out, name)
+        if name.endswith(".png"):
+            found = census(path)
+            bad = [c.decode() for c in FORBIDDEN_CHUNKS if c in found]
+            if bad:
+                raise SystemExit(f"{name} carries {', '.join(bad)}")
+            print(f"  {name:38s} {' '.join(sorted(c.decode() for c in found))}")
+        else:
+            with Image.open(path) as im:
+                frames = sorted(im.info.get("sizes", []))
+            if len(frames) != 3:
+                raise SystemExit(f"{name} has {len(frames)} frames, expected 3")
+            print(f"  {name:38s} {len(frames)} frames {frames}")
 
 
 if __name__ == "__main__":

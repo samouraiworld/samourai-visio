@@ -26,7 +26,20 @@ Below 48 the two rings cannot survive. They sit 5 units apart with radius 4.5, s
 | `android-chrome-192x192.png`, `android-chrome-512x512.png` | PWA icons |
 | `android-chrome-512x512-maskable.png` | PWA maskable icon; the mark sits inside the central 80 % safe zone |
 | `site.webmanifest` | names the app "Samouraï Visio" / "Visio"; upstream's manifest has empty names |
-| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`); also `landing/logo-visio.svg` |
+| `logo.svg` | the in-room header logo, mounted over `/assets/logo.svg` (`Header.tsx`) |
+
+## What a published raster may carry
+
+Only `IHDR`, `IDAT` and `IEND`. These are published assets: they must not ship
+text, provenance or EXIF metadata, which is how another party's attribution
+travels into a repository unnoticed.
+
+That is no longer only a statement here. The generator reads back every PNG it
+writes, walks its chunks, and refuses to finish if a forbidden type is present
+— and it prints the census, so the invariant is visible on every run rather
+than asserted once in prose. It also checks that `favicon.ico` came out with
+its three frames, because Pillow drops a requested size larger than the image
+it is saving from and says nothing.
 
 ## Regenerating
 
@@ -39,6 +52,12 @@ Every raster comes from that script and nothing is drawn by hand, so the set is 
 One trap the script documents in place: Pillow draws `ellipse(outline=…, width=…)` **inward** from the bounding box, while an SVG stroke straddles its path. Passing the path radius as the bounding box puts the ring a half-stroke too far in, which closes the counter between the two rings and fills the lens white. The bounding box has to be the outer edge, `r + w/2`.
 
 Regenerate every size together if the geometry changes; the sizes are not independent.
+
+Two things this does **not** cover. `landing/logo-visio.svg` still carries the
+retired coral glyph and is not produced here. And the geometry now exists twice
+— in `design/v0.1/brand/glyphs/visio.svg` and in this script's constants — with
+nothing checking the two agree; a change to the vector source will not fail
+anything here.
 
 ## Deploying
 
