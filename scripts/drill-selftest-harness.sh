@@ -72,12 +72,27 @@ done
 # what makes "a sed landing on a line it was not aimed at is reported" true,
 # and unlike an inventory of time constants it needs no notion of what a
 # constant is: it only asks how many lines each rewrite can reach.
-n_hold="$(grep -cE '^INIT_HOLD=[0-9]+$' "$WORK/step.raw")"
+# Both counts tolerate leading space, and deliberately match WIDER than the
+# seds they guard. Wider is what keeps the rewrite guards downstream
+# reachable: a line the sed cannot touch — an indented INIT_HOLD, a bound that
+# is not literally 30 — is still counted here, so it survives to the rewrite
+# guard and is reported there. A count pattern narrowed to its sed would make
+# that guard dead code, which is how a check stops being able to fail.
+n_hold="$(grep -cE '^ *INIT_HOLD=[0-9]+$' "$WORK/step.raw")"
 n_poll="$(grep -cE '^ *for _ in \$\(seq 1 [0-9]+\); do$' "$WORK/step.raw")"
-[ "$n_hold" -eq 1 ] ||
-  die "the step carries $n_hold INIT_HOLD assignments, not 1 — this fixture rewrites every line of that shape, so it would silently shrink more than it means to"
-[ "$n_poll" -eq 1 ] ||
-  die "the step carries $n_poll literal 'seq 1 N' bounds, not 1 — this fixture rewrites every line of that shape, so it would silently shrink more than it means to"
+# Two different faults, two different messages. Zero targets means the shape
+# changed and there is nothing to rewrite; more than one means every line of
+# that shape gets rewritten, which shrinks more than the fixture means to.
+if [ "$n_hold" -eq 0 ]; then
+  die "the step has no INIT_HOLD=<number> line — the assignment changed shape, and this fixture cannot rewrite what it cannot find"
+elif [ "$n_hold" -ne 1 ]; then
+  die "the step carries $n_hold INIT_HOLD assignments — this fixture rewrites every line of that shape, so it would shrink more than it means to"
+fi
+if [ "$n_poll" -eq 0 ]; then
+  die "the step has no literal 'seq 1 N' bound — the positive control's loop changed shape, and this fixture cannot rewrite what it cannot find"
+elif [ "$n_poll" -ne 1 ]; then
+  die "the step carries $n_poll literal 'seq 1 N' bounds — this fixture rewrites every line of that shape, so it would shrink more than it means to"
+fi
 
 sed -E "s/^INIT_HOLD=[0-9]+\$/INIT_HOLD=$HOLD/; s/^( *for _ in \\\$\\(seq 1 )30(\\); do)\$/\\1$POLL\\2/" \
   "$WORK/step.raw" > "$WORK/step.sh"
