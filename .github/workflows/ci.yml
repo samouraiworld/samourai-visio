@@ -214,10 +214,25 @@ jobs:
           YAML
           chmod 600 "$W/env.d/backup"
           cd "$W" && docker compose up -d
+          # TCP, not the default Unix socket, for the reason restore-drill.sh
+          # spells out: the entrypoint's temporary initdb server answers on
+          # the socket, so a socket probe lets the psql calls below race the
+          # real server's startup. And a wait that gives up has to SAY so —
+          # falling through silently turns a timeout into a confusing psql
+          # error further down.
+          ready=0
           for _ in $(seq 1 30); do
-            docker compose exec -T postgresql pg_isready -U meet >/dev/null 2>&1 && break
+            if docker compose exec -T postgresql \
+                 pg_isready -h 127.0.0.1 -U meet >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
             sleep 2
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Postgres never became ready"
+            exit 1
+          fi
           # >10 MB of rows: large enough that the decompressed stream dwarfs
           # the pipe buffer, which is the whole point of this fixture.
           docker compose exec -T postgresql psql -q -U meet -d meet -c \
