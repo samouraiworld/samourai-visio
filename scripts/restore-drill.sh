@@ -126,20 +126,33 @@ docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
 docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=drill "$DRILL_PG_IMAGE" >/dev/null \
   || fail "docker run $DRILL_PG_IMAGE failed"
 
+# Probe over TCP, never the default Unix socket. The postgres entrypoint runs
+# initdb against a TEMPORARY server it starts with `listen_addresses=''` and
+# then stops with `pg_ctl -m fast` before the real server starts. That
+# temporary server accepts SOCKET connections, so `pg_isready` with no -h
+# answers "accepting connections" while the database is still initialising:
+# the drill would restore into a server about to be shut down, and whichever
+# statement it had reached at the handover fails for a reason that has nothing
+# to do with the backup. Only the real server ever answers on TCP.
 ready=0
 for _ in $(seq 1 30); do
-  if docker exec "$CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then
+  if docker exec "$CONTAINER" pg_isready -h 127.0.0.1 -p 5432 -U postgres >/dev/null 2>&1; then
     ready=1
     break
   fi
-  sleep 1
+  sleep 2
 done
-[ "$ready" -eq 1 ] || fail "postgres in $CONTAINER did not become ready within 30s"
+[ "$ready" -eq 1 ] || fail "postgres in $CONTAINER did not become ready within 60s"
 
-docker exec "$CONTAINER" psql -U postgres -c "CREATE ROLE $DRILL_DB_USER LOGIN" >/dev/null 2>&1 \
-  || fail "CREATE ROLE $DRILL_DB_USER failed"
-docker exec "$CONTAINER" psql -U postgres -c "CREATE DATABASE drill OWNER $DRILL_DB_USER" >/dev/null 2>&1 \
-  || fail "CREATE DATABASE drill failed"
+# Keep psql's own stderr in the failure line. Discarding it is what turned the
+# readiness race above into "FAIL CREATE ROLE meet failed" with no cause named,
+# which is a failure a reader re-runs instead of diagnosing.
+err="$(docker exec "$CONTAINER" psql -U postgres \
+       -c "CREATE ROLE $DRILL_DB_USER LOGIN" 2>&1 >/dev/null)" \
+  || fail "CREATE ROLE $DRILL_DB_USER failed${err:+ — $err}"
+err="$(docker exec "$CONTAINER" psql -U postgres \
+       -c "CREATE DATABASE drill OWNER $DRILL_DB_USER" 2>&1 >/dev/null)" \
+  || fail "CREATE DATABASE drill failed${err:+ — $err}"
 
 gunzip -c "$DUMP" | docker exec -i "$CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres -d drill \
   || fail "restore of $DUMP into drill failed"
