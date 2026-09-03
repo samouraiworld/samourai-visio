@@ -223,7 +223,7 @@ jobs:
           ready=0
           for _ in $(seq 1 30); do
             if docker compose exec -T postgresql \
-                 pg_isready -h 127.0.0.1 -U meet >/dev/null 2>&1; then
+                 pg_isready -h 127.0.0.1 -p 5432 -U meet >/dev/null 2>&1; then
               ready=1
               break
             fi
@@ -305,10 +305,14 @@ jobs:
           # failed" on a commit that touched only icons, then passed on a
           # re-run of the very same commit.
           #
-          # An init script holds that window open for a fixed 15s, so the race
-          # becomes a test with an answer instead of a coin flip.
+          # An init script holds that window open, so the race becomes a test
+          # with an answer instead of a coin flip. One value drives both the
+          # hold and the elapsed threshold below: as separate literals they
+          # could drift apart, and a threshold below the hold would pass a
+          # drill that never waited.
+          INIT_HOLD=20
           mkdir -p "$W/slowpg"
-          printf '#!/bin/sh\nsleep 15\n' > "$W/slowpg/00-slow-init.sh"
+          printf '#!/bin/sh\nsleep %s\n' "$INIT_HOLD" > "$W/slowpg/00-slow-init.sh"
           chmod +x "$W/slowpg/00-slow-init.sh"
           cat > "$W/slowpg/Dockerfile" <<'DOCKER'
           FROM postgres:16
@@ -316,17 +320,54 @@ jobs:
           DOCKER
           docker build -q -t visio-slow-postgres:selftest "$W/slowpg"
 
+          # First, structurally: inside the init window the two probes must
+          # DISAGREE. That disagreement is the whole reason the drill probes
+          # TCP, so assert it directly rather than inferring it from a clock.
+          # It also keeps this test honest — if upstream ever stops starting
+          # the temporary server socket-only, this goes red rather than
+          # quietly becoming a test that can no longer tell the two apart.
+          docker rm -f probe-check >/dev/null 2>&1 || true
+          docker run -d --name probe-check -e POSTGRES_PASSWORD=drill \
+            visio-slow-postgres:selftest >/dev/null
+          socket_ready=0
+          for _ in $(seq 1 30); do
+            if docker exec probe-check pg_isready -U postgres >/dev/null 2>&1; then
+              socket_ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$socket_ready" -ne 1 ]; then
+            echo "::error::socket probe never reported ready inside the init window"
+            docker rm -f probe-check >/dev/null 2>&1 || true
+            exit 1
+          fi
+          if docker exec probe-check pg_isready -h 127.0.0.1 -p 5432 -U postgres \
+               >/dev/null 2>&1; then
+            echo "::error::TCP probe answered during init, so the probes no longer"\
+                 "disagree and this test can no longer tell waiting from racing"
+            docker rm -f probe-check >/dev/null 2>&1 || true
+            exit 1
+          fi
+          echo "inside init: socket says ready, TCP does not — TCP is the strict probe"
+          docker rm -f probe-check >/dev/null 2>&1 || true
+          # That check would also pass vacuously if the TCP probe could never
+          # say yes at all — a typo'd flag reads the same as "not ready". The
+          # positive control is the drill run below: it polls the identical
+          # probe and would fail its own readiness timeout if the answer were
+          # always no. Both directions are therefore covered in this one step.
+
           start="$(date +%s)"
           DRILL_PG_IMAGE=visio-slow-postgres:selftest VISIO_DIR="$W" \
             "$GITHUB_WORKSPACE/scripts/restore-drill.sh" | tee /tmp/drill-slow.out
           elapsed=$(( $(date +%s) - start ))
           grep -q '^OK restored from local ' /tmp/drill-slow.out ||
             { echo "::error::drill did not survive a slow-starting Postgres"; exit 1; }
-          # Proof it WAITED rather than got lucky: it cannot have finished
-          # before the init window it had to sit through had even closed.
-          [ "$elapsed" -ge 15 ] || {
-            echo "::error::drill returned in ${elapsed}s, so it started work"\
-                 "before Postgres was really up"
+          # Corroborating the structural check above: the drill cannot have
+          # finished before the init window it had to sit through had closed.
+          [ "$elapsed" -ge "$INIT_HOLD" ] || {
+            echo "::error::drill returned in ${elapsed}s, under the ${INIT_HOLD}s"\
+                 "init hold, so it started work before Postgres was really up"
             exit 1
           }
           echo "drill waited ${elapsed}s for the real server"
