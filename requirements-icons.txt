@@ -4,7 +4,27 @@
 # plus the sdist, so a platform change fails loudly instead of quietly
 # resolving something else.
 #
-# Regenerate with: pip download Pillow==<version> --no-deps --no-binary :none:
+# Regenerate — one command per artefact, then hash the results:
+#
+#   pip download Pillow==<version> --no-deps --only-binary=:all: \
+#       --python-version 3.12 --platform manylinux_2_17_x86_64 -d .
+#   pip download Pillow==<version> --no-deps --only-binary=:all: \
+#       --python-version 3.12 --platform manylinux_2_28_x86_64 -d .
+#   pip download Pillow==<version> --no-deps --no-binary=:all: -d .
+#   pip hash *.whl *.tar.gz
+#
+# One `--platform` per invocation: passing both to a single command resolves
+# one best match and silently returns a single wheel.
+#
+# NOT `--no-binary :none:`. pip reads `:none:` as "empty the set of packages
+# for which binaries are disallowed" — so it *allows* binaries and downloads
+# one wheel for whatever machine is running, which on a laptop is a macOS ARM
+# wheel this runner can never use. That was the instruction here before, and
+# it would have produced the wrong file at the next version bump.
+#
+# The cp312 musllinux wheel is deliberately absent: this job runs on
+# ubuntu-latest, which is glibc. Adding it would widen what pip may accept
+# without widening what the job can run.
 Pillow==11.3.0 \
     --hash=sha256:67172f2944ebba3d4a7b54f2e95c786a3a50c21b88456329314caaa28cda70f6 \
     --hash=sha256:676b2815362456b5b3216b4fd5bd89d362100dc6f4945154ff172e206a22c024 \
