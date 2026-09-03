@@ -4,17 +4,28 @@
 # plus the sdist, so a platform change fails loudly instead of quietly
 # resolving something else.
 #
-# Regenerate — one command per artefact, then hash the results:
+# Regenerate — one command per artefact, into an EMPTY scratch directory:
 #
+#   d=$(mktemp -d)
 #   pip download Pillow==<version> --no-deps --only-binary=:all: \
-#       --python-version 3.12 --platform manylinux_2_17_x86_64 -d .
+#       --python-version 3.12 --platform manylinux_2_17_x86_64 -d "$d"
 #   pip download Pillow==<version> --no-deps --only-binary=:all: \
-#       --python-version 3.12 --platform manylinux_2_28_x86_64 -d .
-#   pip download Pillow==<version> --no-deps --no-binary=:all: -d .
-#   pip hash *.whl *.tar.gz
+#       --python-version 3.12 --platform manylinux_2_28_x86_64 -d "$d"
+#   pip download Pillow==<version> --no-deps --no-binary=:all: -d "$d"
+#   pip hash "$d"/*.whl "$d"/*.tar.gz
+#
+# Not `-d .`: neither `pillow-*.whl` nor the tarball is in .gitignore, so the
+# artefacts land untracked in the tree — and the glob would then hash whatever
+# an earlier bump left behind, pinning a digest nobody chose. An empty
+# directory per run is what makes the glob mean what it says.
 #
 # One `--platform` per invocation: passing both to a single command resolves
 # one best match and silently returns a single wheel.
+#
+# `--python-version` here and `python-version` in the workflow's
+# `setup-python` step are one decision in two places. Move them together: the
+# hashes name CPython 3.12 wheels, so a job on 3.13 finds nothing it can
+# install and `--require-hashes` fails the build rather than falling back.
 #
 # NOT `--no-binary :none:`. pip reads `:none:` as "empty the set of packages
 # for which binaries are disallowed" — so it *allows* binaries and downloads
