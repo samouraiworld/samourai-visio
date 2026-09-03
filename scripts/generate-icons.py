@@ -157,16 +157,37 @@ def same_pixels(a_path, b_path):
         return a.convert("RGBA").tobytes() == b.convert("RGBA").tobytes()
 
 
+def inspect(directory, names):
+    """Run every published-asset guard over a directory of icons."""
+    for name in names:
+        path = os.path.join(directory, name)
+        if name.endswith(".png"):
+            verify_png(path, name)
+        else:
+            verify_ico(path, name)
+
+
 def check_against(out):
-    """Every committed icon shows what a fresh run draws."""
+    """Every committed icon shows what a fresh run draws, and carries nothing else.
+
+    The pixel comparison alone is not enough, and shipping it alone was a hole:
+    a text or provenance chunk planted into a committed icon changes no pixel,
+    so the comparison passed and `--check` exited 0. An optimiser that re-saves
+    an asset with `tIME` or `iCCP` would have put metadata past a green
+    pipeline — the exact thing the chunk allowlist exists to stop.
+
+    So the committed files are inspected too, not only compared.
+    """
     with tempfile.TemporaryDirectory() as tmp:
         made = render(tmp)
+        inspect(tmp, made)
+        inspect(out, made)
         stale = [n for n in made
                  if not same_pixels(os.path.join(out, n), os.path.join(tmp, n))]
     if stale:
         raise SystemExit(
             "these committed icons do not match the generator: " + ", ".join(stale))
-    print(f"  all {len(made)} icons match a fresh run, pixel for pixel")
+    print(f"  all {len(made)} icons carry only image data and match a fresh run")
 
 
 def check_boundary():
