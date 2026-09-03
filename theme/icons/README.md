@@ -46,9 +46,12 @@ Pillow drops a requested size larger than the image it is saving from and says
 nothing; and that the boundary size renders the full mark and not the small
 one, because that comparison shipped inverted once and nothing noticed.
 
-Each of the three is mutation-tested: reverting the boundary, adding a `dpi=`,
-or saving the icon from its smallest frame each makes the generator exit
-non-zero with the reason.
+Each of the three was verified by mutation before merge — reverting the
+boundary, adding a `dpi=`, and saving the icon from its smallest frame each
+made the generator exit non-zero with the reason. That was a one-off exercise,
+not something this repository runs: nothing here re-proves it, and no Python
+linter runs in CI either, so a guard that stopped working would go unnoticed
+until someone repeated the exercise by hand.
 
 ## Regenerating
 

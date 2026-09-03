@@ -16,7 +16,7 @@ fewer — and the full mark returns at 48.
 import os
 import sys
 
-from PIL import Image, ImageChops, ImageDraw
+from PIL import Image, ImageDraw
 
 SS = 16
 GRID = 24.0
@@ -120,7 +120,8 @@ def check_boundary():
     if mark_for(FULL_MARK_FROM - 1) != "single":
         raise SystemExit(f"{FULL_MARK_FROM - 1}px must carry the single ring")
 
-    # Compared as bytes, not with ImageChops.difference().getbbox(). On two
+    # Compared as bytes. The obvious alternative, differencing the two images
+    # and asking for the bounding box of what changed, does not work here: on two
     # opaque RGBA images the difference has alpha 0 everywhere, so getbbox()
     # reports no difference for images that plainly differ — a comparison that
     # answers the wrong question, which is the mistake this whole file keeps
