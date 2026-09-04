@@ -13,6 +13,7 @@ import {
   clearBreakoutState,
   clearMatchingPendingHelpAcknowledgement,
   completeBreakoutTransition,
+  failBreakoutConnection,
 } from './breakout'
 
 describe('completeBreakoutTransition', () => {
@@ -53,6 +54,23 @@ describe('completeBreakoutTransition', () => {
     expect(breakoutStore.assignedRoomId).toBe('room-1')
     expect(breakoutStore.pendingMediaIntent).toBeNull()
     expect(breakoutStore.isTransitioning).toBe(false)
+  })
+
+  it('retains media consent and recall cleanup through connection failure', () => {
+    breakoutStore.clearAfterTransition = true
+    failBreakoutConnection(new Error('connection failed'))
+
+    expect(breakoutStore.isTransitioning).toBe(false)
+    expect(breakoutStore.transitionError).toBe('connection failed')
+    expect(breakoutStore.pendingMediaIntent).toEqual({
+      camera: false,
+      microphone: true,
+    })
+    expect(breakoutStore.clearAfterTransition).toBe(true)
+
+    completeBreakoutTransition()
+    expect(breakoutStore.activeSessionId).toBeNull()
+    expect(breakoutStore.pendingMediaIntent).toBeNull()
   })
 
   it('clears session state only after a closing return connects', () => {

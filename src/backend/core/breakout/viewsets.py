@@ -458,15 +458,17 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         caller_identity = self._caller_identity(request, session.room)
         if not caller_identity:
             return Response(status=status.HTTP_403_FORBIDDEN)
-        help_request = get_object_or_404(
-            BreakoutHelpRequest,
-            session=session,
-            requester_identity=caller_identity,
-            status=BreakoutHelpRequest.Status.OPEN,
-        )
-        help_request.status = BreakoutHelpRequest.Status.CANCELLED
-        help_request.cancelled_at = timezone.now()
-        help_request.save(update_fields=["status", "cancelled_at", "updated_at"])
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            help_request = get_object_or_404(
+                BreakoutHelpRequest.objects.select_for_update(),
+                session=session,
+                requester_identity=caller_identity,
+                status=BreakoutHelpRequest.Status.OPEN,
+            )
+            help_request.status = BreakoutHelpRequest.Status.CANCELLED
+            help_request.cancelled_at = timezone.now()
+            help_request.save(update_fields=["status", "cancelled_at", "updated_at"])
         return Response(BreakoutHelpRequestSerializer(help_request).data)
 
     @decorators.action(detail=True, methods=["post"], url_path="acknowledge-help")

@@ -2,9 +2,12 @@
 
 # pylint: disable=no-name-in-module
 
+import asyncio
 import json
 from logging import getLogger
 from typing import Dict, Optional
+
+from django.core.cache import cache
 
 from asgiref.sync import async_to_sync
 from livekit.api import (
@@ -13,6 +16,7 @@ from livekit.api import (
     TwirpError,
     UpdateRoomMetadataRequest,
 )
+from redis.exceptions import LockError
 
 from core import utils
 
@@ -31,8 +35,19 @@ class RoomManagement:
     """Service for managing LiveKit rooms."""
 
     @classmethod
+    def update_metadata(cls, room_name, metadata=None, remove_keys=None):
+        """Serialize metadata merges across all writers for this LiveKit room."""
+        try:
+            with cache.lock(
+                f"livekit-metadata:{room_name}", timeout=60, blocking_timeout=10
+            ):
+                return cls._update_metadata(room_name, metadata, remove_keys)
+        except LockError as error:
+            raise RoomManagementException("Room metadata is being updated") from error
+
+    @classmethod
     @async_to_sync
-    async def update_metadata(
+    async def _update_metadata(
         cls,
         room_name: str,
         metadata: Optional[Dict] = None,
@@ -51,7 +66,10 @@ class RoomManagement:
         lkapi = utils.create_livekit_client()
 
         try:
-            response = await lkapi.room.list_rooms(ListRoomsRequest(names=[room_name]))
+            response = await asyncio.wait_for(
+                lkapi.room.list_rooms(ListRoomsRequest(names=[room_name])),
+                timeout=utils.LIVEKIT_HTTP_TIMEOUT_SECONDS,
+            )
 
             if not response.rooms:
                 logger.warning(
@@ -67,15 +85,18 @@ class RoomManagement:
 
             updated_metadata = {**existing_metadata, **(metadata or {})}
 
-            await lkapi.room.update_room_metadata(
-                UpdateRoomMetadataRequest(
-                    room=room_name,
-                    metadata=json.dumps(updated_metadata),
-                )
+            await asyncio.wait_for(
+                lkapi.room.update_room_metadata(
+                    UpdateRoomMetadataRequest(
+                        room=room_name,
+                        metadata=json.dumps(updated_metadata),
+                    )
+                ),
+                timeout=utils.LIVEKIT_HTTP_TIMEOUT_SECONDS,
             )
 
-        except TwirpError as e:
-            if e.code == "not_found":
+        except (TwirpError, TimeoutError) as e:
+            if isinstance(e, TwirpError) and e.code == "not_found":
                 logger.warning(
                     "Room %s not found in LiveKit, skipping metadata update",
                     room_name,

@@ -51,6 +51,7 @@ import {
   clearBreakoutState,
   clearMatchingPendingHelpAcknowledgement,
   completeBreakoutTransition,
+  failBreakoutConnection,
   registerRoomSwapHandler,
 } from '@/features/breakout/stores/breakout'
 import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
@@ -441,13 +442,7 @@ export const Conference = ({
             backgroundColor: 'primaryDark.50 !important',
           })}
           onError={(e) => {
-            breakoutStore.pendingHelpAcknowledgement = null
-            if (breakoutStore.isTransitioning) {
-              breakoutStore.isTransitioning = false
-              breakoutStore.pendingMediaIntent = null
-              breakoutStore.clearAfterTransition = false
-              breakoutStore.transitionError = e.message
-            }
+            failBreakoutConnection(e)
             const failure = getMediaDeviceFailure(e)
             if (failure && failure !== MediaDeviceFailure.Other) return
 

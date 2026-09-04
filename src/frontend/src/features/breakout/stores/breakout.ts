@@ -152,6 +152,17 @@ export const completeBreakoutTransition = (): void => {
   breakoutStore.transitionTargetName = null
 }
 
+/** Record connection failure separately from token-request failure. */
+export const failBreakoutConnection = (error: Error): void => {
+  breakoutStore.pendingHelpAcknowledgement = null
+  if (breakoutStore.isTransitioning) {
+    breakoutStore.isTransitioning = false
+    // A later SignalConnected event must not reuse initial device preferences.
+    // Keep both intent and recall completion until the target actually connects.
+    breakoutStore.transitionError = error.message
+  }
+}
+
 /** Clear only the help target whose room connection has just completed. */
 export const clearMatchingPendingHelpAcknowledgement = (
   completed: Readonly<PendingHelpAcknowledgement>

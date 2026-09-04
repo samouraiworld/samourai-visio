@@ -28,7 +28,7 @@ export const useBreakoutRoomSwap = ({
   const beginTransition = useCallback(() => {
     breakoutStore.transitionError = null
     breakoutStore.isTransitioning = true
-    breakoutStore.pendingMediaIntent = captureMediaIntent(localParticipant)
+    breakoutStore.pendingMediaIntent ??= captureMediaIntent(localParticipant)
   }, [localParticipant])
 
   const applyConnection = useCallback(

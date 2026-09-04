@@ -1,7 +1,11 @@
 # pylint: disable=missing-class-docstring,missing-function-docstring,redefined-outer-name,unused-argument,unused-import,line-too-long,unused-variable
 """API integration tests for BreakoutSessionViewSet."""
 
+from threading import Event, Thread
+from time import monotonic, sleep
 from unittest import mock
+
+from django.db import connection, connections, transaction
 
 import pytest
 from rest_framework.test import APIClient
@@ -522,6 +526,63 @@ def test_participant_can_cancel_own_help_request():
     help_request.refresh_from_db()
     assert help_request.status == BreakoutHelpRequest.Status.CANCELLED
     assert help_request.cancelled_at is not None
+
+
+@pytest.mark.django_db(transaction=True)
+def test_cancel_cannot_overwrite_concurrent_acknowledgement():
+    """A waiting cancellation rechecks terminal state after the host commits."""
+    participant = UserFactory()
+    session = BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    breakout_room = BreakoutRoomFactory(session=session)
+    help_request = BreakoutHelpRequest.objects.create(
+        session=session, breakout_room=breakout_room, requester_identity=participant.sub
+    )
+    ready = Event()
+    result = {}
+
+    def cancel():
+        try:
+            client = APIClient()
+            client.force_authenticate(user=participant)
+            with connections["default"].cursor() as cursor:
+                cursor.execute("SELECT pg_backend_pid()")
+                result["pid"] = cursor.fetchone()[0]
+            ready.set()
+            result["response"] = client.post(
+                f"/api/v1.0/rooms/{session.room_id}/breakout-sessions/{session.id}/cancel-help/"
+            )
+        except Exception as error:  # noqa: BLE001  # pylint: disable=broad-exception-caught
+            result["error"] = error
+        finally:
+            connections.close_all()
+
+    worker = Thread(target=cancel)
+    with transaction.atomic():
+        BreakoutSession.objects.select_for_update().get(pk=session.pk)
+        help_request.status = BreakoutHelpRequest.Status.ACKNOWLEDGED
+        help_request.save(update_fields=["status"])
+        worker.start()
+        assert ready.wait(5)
+        deadline = monotonic() + 5
+        blocked = False
+        while monotonic() < deadline:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT pg_stat_clear_snapshot()")
+                cursor.execute(
+                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = %s",
+                    [result["pid"]],
+                )
+                blocked = cursor.fetchone() == ("Lock",)
+            if blocked:
+                break
+            sleep(0.01)
+        assert blocked, "Cancellation must overlap the uncommitted acknowledgement"
+    worker.join(5)
+    assert not worker.is_alive()
+    assert "error" not in result
+    assert result["response"].status_code == 404
+    help_request.refresh_from_db()
+    assert help_request.status == BreakoutHelpRequest.Status.ACKNOWLEDGED
 
 
 def test_manager_can_list_and_acknowledge_help_from_another_breakout():

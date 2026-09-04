@@ -11,6 +11,7 @@ from django.db import connections
 from django.utils import timezone
 
 import pytest
+from livekit.api import TwirpError
 
 from core import utils
 from core.breakout.models import (
@@ -1132,3 +1133,108 @@ def test_reconciliation_timeout_cancels_and_closes_livekit_client():
         BreakoutService._reconcile_livekit_participants({}, set(), ["room-1"])
 
     client.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize("failure_step", ["list", "remove"])
+@pytest.mark.parametrize("error_code", ["not_found", "unavailable"])
+def test_reconciliation_handles_disappearing_resources(failure_step, error_code):
+    """Empty-room expiry and disconnect races cannot block other evictions."""
+    error = TwirpError(
+        error_code,
+        "resource unavailable",
+        status=404 if error_code == "not_found" else 503,
+    )
+
+    async def list_participants(request):
+        if failure_step == "list" and request.room == "expired":
+            raise error
+        return SimpleNamespace(participants=[SimpleNamespace(identity="stale")])
+
+    async def remove_participant(request):
+        if failure_step == "remove" and request.room == "expired":
+            raise error
+
+    client = SimpleNamespace(
+        room=SimpleNamespace(
+            list_participants=mock.AsyncMock(side_effect=list_participants),
+            remove_participant=mock.AsyncMock(side_effect=remove_participant),
+        ),
+        aclose=mock.AsyncMock(),
+    )
+    with mock.patch(
+        "core.breakout.services.utils.create_livekit_client", return_value=client
+    ):
+        if error_code == "not_found":
+            BreakoutService._reconcile_livekit_participants(
+                {}, set(), ["expired", "occupied"]
+            )
+            assert any(
+                call.args[0].room == "occupied"
+                for call in client.room.remove_participant.await_args_list
+            )
+        else:
+            with pytest.raises(TwirpError):
+                BreakoutService._reconcile_livekit_participants(
+                    {}, set(), ["expired", "occupied"]
+                )
+    client.aclose.assert_awaited_once()
+
+
+@pytest.mark.parametrize("manager", [False, True])
+@mock.patch.object(BreakoutService, "_remove_participant")
+def test_webhook_rejects_expired_session_before_cleanup(mock_remove, service, manager):
+    """LiveKit refreshed credentials must not bypass the absolute end time."""
+    user = UserFactory()
+    room = RoomFactory(users=[(user, "owner" if manager else "member")])
+    session = BreakoutSessionFactory(
+        room=room,
+        status=BreakoutSession.Status.ACTIVE,
+        ends_at=timezone.now() - timedelta(seconds=1),
+    )
+    breakout_room = BreakoutRoomFactory(session=session)
+    if not manager:
+        BreakoutAssignmentFactory(
+            breakout_room=breakout_room, participant_identity=user.sub
+        )
+    assert (
+        service.enforce_breakout_participant_access(
+            breakout_room.livekit_room_name, user.sub
+        )
+        is False
+    )
+    mock_remove.assert_called_once_with(breakout_room.livekit_room_name, user.sub)
+
+
+@pytest.mark.parametrize("delete_fails", [False, True])
+def test_close_cancels_open_help_even_when_livekit_fails(service, delete_fails):
+    """Closure terminates pending assistance while retaining acknowledged history."""
+    session = BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    breakout_room = BreakoutRoomFactory(session=session)
+    pending = BreakoutHelpRequest.objects.create(
+        session=session, breakout_room=breakout_room, requester_identity="pending"
+    )
+    acknowledged = BreakoutHelpRequest.objects.create(
+        session=session,
+        breakout_room=breakout_room,
+        requester_identity="done",
+        status=BreakoutHelpRequest.Status.ACKNOWLEDGED,
+    )
+    with (
+        mock.patch("core.services.room_management.RoomManagement.update_metadata"),
+        mock.patch.object(BreakoutService, "_send_data_to_room"),
+        mock.patch.object(
+            BreakoutService,
+            "_delete_livekit_rooms",
+            side_effect=RuntimeError("offline") if delete_fails else None,
+        ),
+    ):
+        if delete_fails:
+            with pytest.raises(BreakoutUpstreamError):
+                service.close_session(session)
+        else:
+            service.close_session(session)
+    pending.refresh_from_db()
+    acknowledged.refresh_from_db()
+    assert pending.status == BreakoutHelpRequest.Status.CANCELLED
+    assert pending.cancelled_at is not None
+    assert acknowledged.status == BreakoutHelpRequest.Status.ACKNOWLEDGED

@@ -29,8 +29,10 @@ from livekit.api import (
     CreateRoomRequest,
     DeleteRoomRequest,
     ListParticipantsRequest,
+    ListParticipantsResponse,
     ListRoomsRequest,
     RoomParticipantIdentity,
+    TwirpError,
 )
 
 from core import utils
@@ -308,6 +310,13 @@ class BreakoutService:
                     ]
                 )
                 session.refresh_from_db()
+
+            cancelled_at = timezone.now()
+            session.help_requests.filter(status=BreakoutHelpRequest.Status.OPEN).update(
+                status=BreakoutHelpRequest.Status.CANCELLED,
+                cancelled_at=cancelled_at,
+                updated_at=cancelled_at,
+            )
 
         breakout_rooms = list(session.breakout_rooms.all())
         try:
@@ -978,15 +987,24 @@ class BreakoutService:
 
         async def list_participants(room_name):
             async with semaphore:
-                return await lkapi.room.list_participants(
-                    ListParticipantsRequest(room=room_name)
-                )
+                try:
+                    return await lkapi.room.list_participants(
+                        ListParticipantsRequest(room=room_name)
+                    )
+                except TwirpError as error:
+                    if error.code != "not_found":
+                        raise
+                    return ListParticipantsResponse()
 
         async def remove_participant(room_name, identity):
             async with semaphore:
-                await lkapi.room.remove_participant(
-                    RoomParticipantIdentity(room=room_name, identity=identity)
-                )
+                try:
+                    await lkapi.room.remove_participant(
+                        RoomParticipantIdentity(room=room_name, identity=identity)
+                    )
+                except TwirpError as error:
+                    if error.code != "not_found":
+                        raise
 
         try:
             async with asyncio.timeout(LIVEKIT_RECONCILIATION_TIMEOUT_SECONDS):
@@ -1018,7 +1036,14 @@ class BreakoutService:
             .first()
         )
         authorized = False
-        if breakout_room and breakout_room.session.is_active:
+        if (
+            breakout_room
+            and breakout_room.session.is_active
+            and (
+                breakout_room.session.ends_at is None
+                or breakout_room.session.ends_at > timezone.now()
+            )
+        ):
             authorized = BreakoutAssignment.objects.filter(
                 session=breakout_room.session,
                 breakout_room=breakout_room,
