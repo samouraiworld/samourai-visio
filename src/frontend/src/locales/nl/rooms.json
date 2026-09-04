@@ -807,6 +807,7 @@
     "heading": "Groepsruimtes",
     "setup": {
       "roomCount": "Aantal ruimtes",
+      "roomCountOption": "{{count}} ruimtes",
       "create": "Groepsruimtes aanmaken",
       "randomize": "Willekeurig indelen",
       "unassigned": "{{count}} niet toegewezen",
@@ -831,7 +832,12 @@
       "noParticipants": "Geen deelnemers toegewezen",
       "assignParticipants": "Deelnemers toewijzen",
       "unassignedOption": "Niet toegewezen",
-      "allAssigned": "Alle deelnemers toegewezen"
+      "allAssigned": "Alle deelnemers toegewezen",
+      "unassignParticipant": "Toewijzing van {{name}} verwijderen",
+      "assignParticipant": "{{name}} aan een ruimte toewijzen",
+      "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
+      "retrySynchronization": "Synchronisatie opnieuw proberen",
+      "synchronizing": "Breakoutruimtes worden gesynchroniseerd…"
     },
     "active": {
       "timeRemaining": "Resterende tijd",
@@ -846,7 +852,13 @@
       "leaveRoom": "Verlaten",
       "mainRoom": "Hoofdruimte",
       "assignTo": "Toewijzen aan...",
-      "noParticipants": "Geen deelnemers in deze ruimte"
+      "noParticipants": "Geen deelnemers in deze ruimte",
+      "statusUnknown": "Livestatus niet beschikbaar",
+      "sendBroadcast": "Aankondiging verzenden",
+      "reassignParticipant": "{{name}} naar een andere ruimte verplaatsen",
+      "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
+      "retrySynchronization": "Synchronisatie opnieuw proberen",
+      "closing": "Breakoutruimtes worden gesloten…"
     },
     "participant": {
       "currentRoom": "U bevindt zich in {{room}}",
@@ -855,11 +867,21 @@
       "returning": "Terugkeren naar de hoofdruimte…",
       "askForHelp": "Om hulp vragen",
       "askForHelpTooltip": "De host informeren dat u hulp nodig heeft",
-      "helpRequested": "Hulp aangevraagd"
+      "helpRequested": "Hulp aangevraagd",
+      "cancelHelp": "Hulpverzoek annuleren",
+      "returnAssigned": "Terug naar toegewezen ruimte",
+      "actionError": "De actie is mislukt. Probeer het opnieuw.",
+      "unknownRoom": "Groepsruimte"
+    },
+    "timer": {
+      "remaining": "Resterende tijd: {{time}}",
+      "elapsed": "Verstreken tijd: {{time}}",
+      "open": "{{time}} (open)"
     },
     "transition": {
       "movingTo": "Verplaatsen naar {{room}}…",
-      "returningToMain": "Terugkeren naar de hoofdruimte…"
+      "returningToMain": "Terugkeren naar de hoofdruimte…",
+      "unknownRoom": "een groepsruimte"
     },
     "helpAlert": {
       "title": "Hulp aangevraagd",

@@ -137,7 +137,7 @@ logs: ## display app-dev logs (follow mode)
 .PHONY: logs
 
 run-backend: ## start only the backend application and all needed services
-	@$(COMPOSE) up --force-recreate -d celery-dev --remove-orphans
+	@$(COMPOSE) up --force-recreate -d celery-dev celery-beat-dev --remove-orphans
 	@$(COMPOSE) up --force-recreate -d nginx
 	@$(COMPOSE) up -d livekit
 	@echo "Wait for postgresql to be up..."
@@ -252,6 +252,18 @@ test-back-parallel: ## run all back-end tests in parallel (pass extra pytest arg
 	@args="$(ARGS) $(filter-out $@,$(MAKECMDGOALS))" && \
 	bin/pytest -n auto $${args}
 .PHONY: test-back-parallel
+
+test-breakout: ## run breakout backend, frontend, type, and build acceptance gates
+	@$(MAKE) test-back ARGS="core/breakout/tests core/tests/services/test_lobby.py core/tests/rooms/test_api_rooms_lobby.py"
+	cd $(PATH_FRONT) && npm test
+	cd $(PATH_FRONT) && npm run typecheck
+	cd $(PATH_FRONT) && npm run test:typecheck-guard
+	cd $(PATH_FRONT) && npm run build
+.PHONY: test-breakout
+
+test-breakout-helm: ## prove breakout Helm runtime invariants
+	./src/helm/meet/tests/test-breakout-runtime.sh
+.PHONY: test-breakout-helm
 
 test-summary: ## run summary tests (pass extra pytest args via ARGS)
 	@args="$(ARGS) $(filter-out $@,$(MAKECMDGOALS))" && \

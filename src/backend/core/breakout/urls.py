@@ -33,6 +33,11 @@ urlpatterns = [
         breakout_detail_viewset,
         name="breakout-session-detail",
     ),
+    path(
+        "<uuid:pk>/retry/",
+        viewsets.BreakoutSessionViewSet.as_view({"post": "retry"}),
+        name="breakout-session-retry",
+    ),
     # Live status
     path(
         "<uuid:pk>/status/",
@@ -62,6 +67,26 @@ urlpatterns = [
         "<uuid:pk>/request-help/",
         viewsets.BreakoutSessionViewSet.as_view({"post": "request_help"}),
         name="breakout-session-request-help",
+    ),
+    path(
+        "<uuid:pk>/cancel-help/",
+        viewsets.BreakoutSessionViewSet.as_view({"post": "cancel_help"}),
+        name="breakout-session-cancel-help",
+    ),
+    path(
+        "<uuid:pk>/help-requests/",
+        viewsets.BreakoutSessionViewSet.as_view({"get": "help_requests"}),
+        name="breakout-session-help-requests",
+    ),
+    path(
+        "<uuid:pk>/acknowledge-help/",
+        viewsets.BreakoutSessionViewSet.as_view({"post": "acknowledge_help"}),
+        name="breakout-session-acknowledge-help",
+    ),
+    path(
+        "<uuid:pk>/current-assignment/",
+        viewsets.BreakoutSessionViewSet.as_view({"get": "current_assignment"}),
+        name="breakout-session-current-assignment",
     ),
     # Join a specific breakout room
     path(

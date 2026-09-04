@@ -2,12 +2,6 @@
  * Constants for the breakout rooms feature.
  */
 
-/** Data message types sent via LiveKit. */
-export const BreakoutMessageType = {
-  ACTIVATE: 'breakout:activate',
-  RECALL: 'breakout:recall',
-} as const
-
 /** Default values. */
 export const BREAKOUT_DEFAULTS = {
   MIN_ROOMS: 2,
@@ -23,5 +17,4 @@ export const BREAKOUT_DEFAULTS = {
 /** sessionStorage keys for breakout state persistence. */
 export const STORAGE_KEYS = {
   BREAKOUT_STATE: 'meet_breakout_state',
-  ANON_PARTICIPANT_ID: 'meet_anon_participant_id',
 } as const

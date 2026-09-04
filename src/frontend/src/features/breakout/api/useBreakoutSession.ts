@@ -10,9 +10,12 @@ const fetchBreakoutSessions = (roomId: string): Promise<BreakoutSession[]> => {
   return fetchApi<BreakoutSession[]>(`/rooms/${roomId}/breakout-sessions/`)
 }
 
+export const breakoutSessionKey = (roomId?: string) =>
+  ['breakout-session', roomId] as const
+
 export const useBreakoutSession = (roomId: string | undefined) => {
   return useQuery({
-    queryKey: ['breakout-session', roomId],
+    queryKey: breakoutSessionKey(roomId),
     queryFn: () => fetchBreakoutSessions(roomId!),
     enabled: !!roomId,
     refetchInterval: 10000,

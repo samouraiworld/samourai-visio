@@ -10,25 +10,17 @@ interface JoinParams {
   roomId: string
   sessionId: string
   breakoutRoomId: string
-  username?: string
-  participantId?: string
 }
 
 const joinBreakoutRoom = ({
   roomId,
   sessionId,
   breakoutRoomId,
-  username,
-  participantId,
 }: JoinParams): Promise<BreakoutLiveKitConnection> => {
   return fetchApi<BreakoutLiveKitConnection>(
     `/rooms/${roomId}/breakout-sessions/${sessionId}/rooms/${breakoutRoomId}/join/`,
     {
       method: 'POST',
-      body: JSON.stringify({
-        username: username ?? '',
-        participant_id: participantId ?? '',
-      }),
     }
   )
 }

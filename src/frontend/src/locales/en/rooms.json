@@ -807,6 +807,7 @@
     "heading": "Breakout Rooms",
     "setup": {
       "roomCount": "Number of rooms",
+      "roomCountOption": "{{count}} rooms",
       "create": "Create Breakout Rooms",
       "randomize": "Assign all randomly",
       "unassigned": "{{count}} unassigned",
@@ -831,7 +832,12 @@
       "noParticipants": "No participants assigned",
       "assignParticipants": "Assign participants",
       "unassignedOption": "Unassigned",
-      "allAssigned": "All participants assigned"
+      "allAssigned": "All participants assigned",
+      "unassignParticipant": "Unassign {{name}}",
+      "assignParticipant": "Assign {{name}} to a room",
+      "syncFailed": "Room synchronization failed.",
+      "retrySynchronization": "Retry synchronization",
+      "synchronizing": "Synchronizing breakout rooms…"
     },
     "active": {
       "timeRemaining": "Time remaining",
@@ -846,7 +852,13 @@
       "leaveRoom": "Leave",
       "mainRoom": "Main Room",
       "assignTo": "Assign to...",
-      "noParticipants": "No participants in this room"
+      "noParticipants": "No participants in this room",
+      "statusUnknown": "Live status unavailable",
+      "sendBroadcast": "Send announcement",
+      "reassignParticipant": "Move {{name}} to another room",
+      "syncFailed": "Room synchronization failed.",
+      "retrySynchronization": "Retry synchronization",
+      "closing": "Closing breakout rooms…"
     },
     "participant": {
       "currentRoom": "You are in {{room}}",
@@ -855,11 +867,21 @@
       "returning": "Returning to main room…",
       "askForHelp": "Ask for Help",
       "askForHelpTooltip": "Notify the host you need assistance",
-      "helpRequested": "Help requested"
+      "helpRequested": "Help requested",
+      "cancelHelp": "Cancel help request",
+      "returnAssigned": "Return to assigned room",
+      "actionError": "The action failed. Please try again.",
+      "unknownRoom": "Breakout room"
+    },
+    "timer": {
+      "remaining": "Time remaining: {{time}}",
+      "elapsed": "Elapsed time: {{time}}",
+      "open": "{{time}} (open)"
     },
     "transition": {
       "movingTo": "Moving to {{room}}…",
-      "returningToMain": "Returning to main room…"
+      "returningToMain": "Returning to main room…",
+      "unknownRoom": "breakout room"
     },
     "helpAlert": {
       "title": "Help Requested",

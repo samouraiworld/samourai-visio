@@ -9,18 +9,21 @@ import { RiLayoutGridLine } from '@remixicon/react'
 import { layoutStore } from '@/stores/layout'
 import { MenuItem } from 'react-aria-components'
 import { menuRecipe } from '@/primitives/menuRecipe'
-import { useIsAdminOrOwner } from '@/features/rooms/livekit/hooks/useIsAdminOrOwner'
+import { useConfig } from '@/api/useConfig'
+import { useRoomData } from '@/features/rooms/livekit/hooks/useRoomData'
+import { canUseBreakoutRooms } from '../utils/featureGate'
 
 export const BreakoutMenuItem = () => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout' })
-  const isAdminOrOwner = useIsAdminOrOwner()
-  const isDevOrLocalhost =
-    typeof window !== 'undefined' &&
-    (window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1' ||
-      window.location.hostname.includes('nip.io'))
+  const room = useRoomData()
+  const { data: config } = useConfig()
 
-  if (!isAdminOrOwner && !isDevOrLocalhost) {
+  if (
+    !canUseBreakoutRooms(
+      config?.breakout_rooms?.is_enabled,
+      room?.is_administrable ?? false
+    )
+  ) {
     return null
   }
 

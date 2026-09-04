@@ -1,14 +1,16 @@
 """Lobby Service"""
 
 import logging
-import uuid
+import secrets
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 from django.conf import settings
+from django.core import signing
 from django.core.cache import cache
+from django.utils.crypto import salted_hmac
 
 from core import models, utils
 
@@ -86,18 +88,109 @@ class LobbyService:
         """Generate cache key for participant(s) data."""
         return f"{settings.LOBBY_KEY_PREFIX}_{room_id!s}_{participant_id}"
 
-    @staticmethod
-    def _get_or_create_participant_id(request) -> str:
-        """Extract unique participant identifier from the request."""
-        return request.COOKIES.get(settings.LOBBY_COOKIE_NAME, str(uuid.uuid4()))
+    GUEST_COOKIE_SALT = "meet.guest-capability.v1"
+    GUEST_IDENTITY_SALT = "meet.guest-identity.v1"
+    _REQUEST_COOKIE_ATTRIBUTE = "_meet_guest_capability_cookie"
 
-    @staticmethod
-    def prepare_response(response, participant_id):
-        """Set participant cookie if needed."""
-        if not response.cookies.get(settings.LOBBY_COOKIE_NAME):
+    @classmethod
+    def _get_guest_cookie_name(cls, room_id: UUID) -> str:
+        """Return the isolated browser capability name for one parent room."""
+        return f"{settings.LOBBY_COOKIE_NAME}_{room_id.hex}"
+
+    @classmethod
+    def _new_guest_cookie(cls, room_id: UUID) -> str:
+        """Issue a signed, opaque capability bound to one parent room."""
+        return signing.dumps(
+            {
+                "v": 1,
+                "room_id": str(room_id),
+                "capability": secrets.token_urlsafe(32),
+            },
+            salt=cls.GUEST_COOKIE_SALT,
+            compress=True,
+        )
+
+    @classmethod
+    def _read_guest_capability(cls, cookie_value: str, room_id: UUID) -> Optional[str]:
+        """Validate and decode a capability for exactly one parent room."""
+        if not cookie_value:
+            return None
+        try:
+            payload = signing.loads(
+                cookie_value,
+                salt=cls.GUEST_COOKIE_SALT,
+                max_age=settings.SESSION_COOKIE_AGE,
+            )
+        except (signing.BadSignature, signing.SignatureExpired, TypeError, ValueError):
+            return None
+        if (
+            not isinstance(payload, dict)
+            or payload.get("v") != 1
+            or payload.get("room_id") != str(room_id)
+        ):
+            return None
+        capability = payload.get("capability")
+        return capability if isinstance(capability, str) and capability else None
+
+    @classmethod
+    def _derive_guest_identity(cls, room_id: UUID, capability: str) -> str:
+        """Derive a public, room-scoped identity without exposing the capability."""
+        digest = salted_hmac(
+            cls.GUEST_IDENTITY_SALT,
+            f"{room_id}:{capability}",
+        ).hexdigest()
+        return f"guest_{digest}"
+
+    @classmethod
+    def _get_or_create_participant_id(cls, request, room_id: UUID) -> str:
+        """Resolve a server-bound guest identity for a parent room."""
+        cookie_name = cls._get_guest_cookie_name(room_id)
+        cookie_value = request.COOKIES.get(cookie_name, "")
+        capability = cls._read_guest_capability(cookie_value, room_id)
+        if capability is None:
+            cookie_value = cls._new_guest_cookie(room_id)
+            capability = cls._read_guest_capability(cookie_value, room_id)
+        setattr(request, cls._REQUEST_COOKIE_ATTRIBUTE, (cookie_name, cookie_value))
+        return cls._derive_guest_identity(room_id, capability)
+
+    @classmethod
+    def get_participant_id(cls, request, room_id: UUID) -> Optional[str]:
+        """Resolve an existing signed guest identity without issuing a new one."""
+        cookie_name = cls._get_guest_cookie_name(room_id)
+        cookie_value = request.COOKIES.get(cookie_name, "")
+        capability = cls._read_guest_capability(cookie_value, room_id)
+        if capability is None:
+            return None
+        setattr(request, cls._REQUEST_COOKIE_ATTRIBUTE, (cookie_name, cookie_value))
+        return cls._derive_guest_identity(room_id, capability)
+
+    @classmethod
+    def prepare_response(cls, response, participant_id, request=None):
+        """Set the signed capability cookie without exposing it in API data."""
+        del participant_id  # Public participant IDs are never browser credentials.
+        cookie_details = (
+            getattr(request, cls._REQUEST_COOKIE_ATTRIBUTE, None) if request else None
+        )
+        if cookie_details:
+            cookie_name, cookie_value = cookie_details  # pylint: disable=unpacking-non-sequence
+            response.set_cookie(
+                key=cookie_name,
+                value=cookie_value,
+                max_age=settings.SESSION_COOKIE_AGE,
+                httponly=True,
+                secure=True,
+                samesite="Lax",
+            )
+
+        # Keep the historical base cookie only as a non-authoritative throttle
+        # identifier. Breakout and lobby authorization never read it.
+        if not response.cookies.get(settings.LOBBY_COOKIE_NAME) and not (
+            request and request.COOKIES.get(settings.LOBBY_COOKIE_NAME)
+        ):
             response.set_cookie(
                 key=settings.LOBBY_COOKIE_NAME,
-                value=participant_id,
+                value=secrets.token_urlsafe(32),
+                max_age=settings.SESSION_COOKIE_AGE,
                 httponly=True,
                 secure=True,
                 samesite="Lax",
@@ -149,7 +242,7 @@ class LobbyService:
         5. If denied, do nothing.
         """
 
-        participant_id = self._get_or_create_participant_id(request)
+        participant_id = self._get_or_create_participant_id(request, room.id)
         participant = self._get_participant(room.id, participant_id)
 
         room_id = str(room.id)

@@ -1,22 +1,17 @@
-/**
- * Watch LiveKit room metadata for breakout state changes.
- *
- * Room metadata is the SOURCE OF TRUTH for breakout state.
- * Data messages are just push optimizations — this watcher
- * handles the case where a data message was missed.
- */
-
-import { useEffect, useRef } from 'react'
-import { useLocalParticipant, useRoomInfo } from '@livekit/components-react'
+import { useEffect, useMemo, useRef } from 'react'
+import { useRoomInfo } from '@livekit/components-react'
 import { useSnapshot } from 'valtio'
+import type { BreakoutMetadata } from '../api/types'
+import { useCurrentBreakoutAssignment } from '../api/useCurrentBreakoutAssignment'
 import { breakoutStore, clearBreakoutState } from '../stores/breakout'
 import { useBreakoutRoomSwap } from './useBreakoutRoomSwap'
-import type { BreakoutMetadata } from '../api/types'
 
 interface UseBreakoutMetadataWatcherParams {
   currentRoomSlug: string
-  setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
-  /** The main room's UUID (used to verify we're watching the right room). */
+  setActiveRoomConnection: (connection: {
+    token: string
+    roomName: string
+  }) => void
   mainRoomId: string
 }
 
@@ -26,129 +21,93 @@ export const useBreakoutMetadataWatcher = ({
   mainRoomId,
 }: UseBreakoutMetadataWatcherParams) => {
   const roomInfo = useRoomInfo()
-  const { localParticipant } = useLocalParticipant()
-  const { moveToBreakoutRoom, returnToMainRoom } = useBreakoutRoomSwap({
-    currentRoomSlug,
-    setActiveRoomConnection,
-  })
-  const snap = useSnapshot(breakoutStore)
-  const hasTriggeredRef = useRef(false)
+  const snapshot = useSnapshot(breakoutStore)
+  const transitionRevision = useRef<number | null>(null)
+  const { moveToBreakoutRoom, returnToMainRoom, returnToMainRoomAfterClose } =
+    useBreakoutRoomSwap({ currentRoomSlug, setActiveRoomConnection })
+
+  const metadata = useMemo(() => {
+    if (!roomInfo?.metadata) return null
+    try {
+      return (JSON.parse(roomInfo.metadata) as { breakout?: BreakoutMetadata })
+        .breakout
+    } catch {
+      return null
+    }
+  }, [roomInfo?.metadata])
+
+  const sessionId =
+    metadata?.session_id ?? snapshot.activeSessionId ?? undefined
+  const { data: assignmentState, refetch: refetchAssignment } =
+    useCurrentBreakoutAssignment(mainRoomId, sessionId)
 
   useEffect(() => {
-    if (!roomInfo?.metadata) return
+    if (!metadata) return
+    breakoutStore.activeSessionId = metadata.session_id
+    breakoutStore.revisionHint = Math.max(
+      breakoutStore.revisionHint,
+      metadata.revision
+    )
+  }, [metadata])
 
-    let meta: { breakout?: BreakoutMetadata }
-    try {
-      meta = JSON.parse(roomInfo.metadata)
-    } catch {
+  useEffect(() => {
+    if (snapshot.revisionHint > (assignmentState?.revision ?? -1)) {
+      void refetchAssignment()
+    }
+  }, [assignmentState?.revision, refetchAssignment, snapshot.revisionHint])
+
+  useEffect(() => {
+    const state = assignmentState
+    if (!state || breakoutStore.isTransitioning) return
+
+    breakoutStore.activeSessionId = state.session_id
+    breakoutStore.revisionHint = Math.max(
+      breakoutStore.revisionHint,
+      state.revision
+    )
+
+    if (state.status === 'closing' || state.status === 'closed') {
+      if (breakoutStore.currentBreakoutRoomLkName) {
+        void returnToMainRoomAfterClose().catch(() => undefined)
+      } else {
+        clearBreakoutState()
+      }
       return
     }
 
-    if (!meta.breakout) return
+    if (state.status !== 'active' || breakoutStore.isModeratorVisiting) return
 
-    const breakout = meta.breakout
-    // Use the LiveKit participant's identity — this is exactly user.sub
-    // (set by generate_token on the backend), which matches assignment keys.
-    const myIdentity = localParticipant?.identity
-
-    const isCurrentlyInMainRoom =
-      !roomInfo?.name || !roomInfo.name.startsWith('breakout_')
-
-    // ── Activation or Page-Refresh Reconnection: move to assigned breakout room ──
-    if (
-      breakout.status === 'active' &&
-      (isCurrentlyInMainRoom || !breakoutStore.currentBreakoutRoomLkName) &&
-      !breakoutStore.isTransitioning &&
-      !hasTriggeredRef.current
-    ) {
-      const myAssignment = myIdentity
-        ? breakout.assignments[myIdentity]
-        : undefined
-      if (myAssignment) {
-        hasTriggeredRef.current = true
-
-        // Store session info
-        breakoutStore.session = {
-          id: breakout.session_id,
-          status: 'active',
-          duration_seconds: breakout.duration_seconds ?? null,
-          started_at: breakout.started_at ?? null,
-          closed_at: null,
-          created_at: '',
-          breakout_rooms: breakout.rooms.map((r) => ({
-            ...r,
-            assignments: [],
-          })),
-        }
-
-        const targetRoom = breakout.rooms.find(
-          (r) => r.id === myAssignment.breakout_room_id
-        )
-        moveToBreakoutRoom(
-          myAssignment.breakout_room_id,
-          breakout.session_id,
-          mainRoomId,
-          targetRoom?.name,
-          localParticipant?.identity
-        ).catch(() => {
-          hasTriggeredRef.current = false
-        })
-      }
+    const assignment = state.assignment
+    if (!assignment) {
+      breakoutStore.assignedRoomId = null
+      if (breakoutStore.currentBreakoutRoomLkName) void returnToMainRoom()
+      return
     }
 
-    // ── In-flight reassignment: move to new room if host reassigns while active ──
-    if (
-      breakout.status === 'active' &&
-      breakoutStore.currentBreakoutRoomLkName &&
-      !breakoutStore.isTransitioning &&
-      myIdentity
-    ) {
-      const myAssignment = breakout.assignments[myIdentity]
-      const currentAssignedId = breakoutStore.assignedRoomId
+    breakoutStore.assignedRoomId = assignment.breakout_room_id
+    const isAlreadyThere =
+      breakoutStore.currentBreakoutRoomLkName === assignment.livekit_room_name
+    const isPausedHere =
+      !breakoutStore.currentBreakoutRoomLkName &&
+      breakoutStore.pausedAssignmentRevision === state.revision
+    const alreadyTransitioned = transitionRevision.current === state.revision
 
-      if (myAssignment && myAssignment.breakout_room_id !== currentAssignedId) {
-        const targetRoom = breakout.rooms.find(
-          (r) => r.id === myAssignment.breakout_room_id
-        )
-        moveToBreakoutRoom(
-          myAssignment.breakout_room_id,
-          breakout.session_id,
-          mainRoomId,
-          targetRoom?.name,
-          localParticipant?.identity
-        ).catch((err) => {
-          console.error('Failed to move to reassigned breakout room:', err)
-        })
-      } else if (!myAssignment && currentAssignedId) {
-        returnToMainRoom()
-      }
-    }
-
-    // ── Closed: return to main room and clear state ──
-    if (
-      breakout.status === 'closed' &&
-      (breakoutStore.currentBreakoutRoomLkName || !isCurrentlyInMainRoom) &&
-      !breakoutStore.isTransitioning
-    ) {
-      returnToMainRoom()
-      clearBreakoutState()
+    if (!isAlreadyThere && !isPausedHere && !alreadyTransitioned) {
+      transitionRevision.current = state.revision
+      void moveToBreakoutRoom(
+        assignment.breakout_room_id,
+        state.session_id,
+        mainRoomId,
+        assignment.breakout_room_name
+      ).catch(() => {
+        transitionRevision.current = null
+      })
     }
   }, [
-    roomInfo?.metadata,
-    roomInfo?.name,
-    localParticipant?.identity,
+    assignmentState,
     mainRoomId,
     moveToBreakoutRoom,
     returnToMainRoom,
+    returnToMainRoomAfterClose,
   ])
-
-  // Reset trigger ref whenever the session ID changes (including null → id,
-  // id → null, and old-id → new-id for back-to-back sessions).
-  const prevSessionIdRef = useRef<string | null | undefined>(undefined)
-  useEffect(() => {
-    if (snap.activeSessionId !== prevSessionIdRef.current) {
-      hasTriggeredRef.current = false
-      prevSessionIdRef.current = snap.activeSessionId
-    }
-  }, [snap.activeSessionId])
 }

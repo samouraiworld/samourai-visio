@@ -136,6 +136,18 @@ jobs:
       - name: Lint code with pylint
         run: uv run --no-sync --no-build pylint meet demo core
 
+  test-breakout-helm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Test breakout runtime invariants
+        run: ./src/helm/meet/tests/test-breakout-runtime.sh
+
   lint-agents:
     runs-on: ubuntu-latest
     permissions:
@@ -352,6 +364,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: cd src/frontend/ && npm ci --ignore-scripts
 
@@ -360,6 +377,18 @@ jobs:
 
       - name: Check format
         run: cd src/frontend/ && npm run check
+
+      - name: Check types
+        run: cd src/frontend/ && npm run typecheck
+
+      - name: Prove the typecheck gate rejects a type mutation
+        run: cd src/frontend/ && npm run test:typecheck-guard
+
+      - name: Run frontend tests
+        run: cd src/frontend/ && npm test
+
+      - name: Build frontend
+        run: cd src/frontend/ && npm run build
 
   lint-sdk:
     runs-on: ubuntu-latest

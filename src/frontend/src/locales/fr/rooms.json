@@ -807,6 +807,7 @@
     "heading": "Salles de sous-groupe",
     "setup": {
       "roomCount": "Nombre de salles",
+      "roomCountOption": "{{count}} salles",
       "create": "Créer les salles de sous-groupe",
       "randomize": "Répartir aléatoirement",
       "unassigned": "{{count}} non assigné(s)",
@@ -831,7 +832,12 @@
       "noParticipants": "Aucun participant assigné",
       "assignParticipants": "Assigner les participants",
       "unassignedOption": "Non assigné",
-      "allAssigned": "Tous les participants sont assignés"
+      "allAssigned": "Tous les participants sont assignés",
+      "unassignParticipant": "Retirer l’affectation de {{name}}",
+      "assignParticipant": "Affecter {{name}} à une salle",
+      "syncFailed": "La synchronisation des salles a échoué.",
+      "retrySynchronization": "Réessayer la synchronisation",
+      "synchronizing": "Synchronisation des salles en cours…"
     },
     "active": {
       "timeRemaining": "Temps restant",
@@ -846,7 +852,13 @@
       "leaveRoom": "Quitter",
       "mainRoom": "Salle principale",
       "assignTo": "Attribuer à...",
-      "noParticipants": "Aucun participant dans cette salle"
+      "noParticipants": "Aucun participant dans cette salle",
+      "statusUnknown": "Statut en direct indisponible",
+      "sendBroadcast": "Envoyer l’annonce",
+      "reassignParticipant": "Déplacer {{name}} vers une autre salle",
+      "syncFailed": "La synchronisation des salles a échoué.",
+      "retrySynchronization": "Réessayer la synchronisation",
+      "closing": "Fermeture des salles de sous-groupe…"
     },
     "participant": {
       "currentRoom": "Vous êtes dans {{room}}",
@@ -855,11 +867,21 @@
       "returning": "Retour à la salle principale…",
       "askForHelp": "Demander de l'aide",
       "askForHelpTooltip": "Avertir l'hôte que vous avez besoin d'aide",
-      "helpRequested": "Aide demandée"
+      "helpRequested": "Aide demandée",
+      "cancelHelp": "Annuler la demande d'aide",
+      "returnAssigned": "Retourner dans la salle attribuée",
+      "actionError": "L'action a échoué. Veuillez réessayer.",
+      "unknownRoom": "Salle de sous-groupe"
+    },
+    "timer": {
+      "remaining": "Temps restant : {{time}}",
+      "elapsed": "Temps écoulé : {{time}}",
+      "open": "{{time}} (sans limite)"
     },
     "transition": {
       "movingTo": "Déplacement vers {{room}}…",
-      "returningToMain": "Retour à la salle principale…"
+      "returningToMain": "Retour à la salle principale…",
+      "unknownRoom": "une salle de sous-groupe"
     },
     "helpAlert": {
       "title": "Aide demandée",

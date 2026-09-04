@@ -24,6 +24,12 @@ class FeatureFlag:
     def flag_is_active(cls, flag_name):
         """Check if a feature flag is active."""
 
+        if flag_name == "breakout_rooms":
+            return bool(
+                getattr(settings, "MEET_BREAKOUT_ROOMS_ENABLED", False)
+                and getattr(settings, "CELERY_ENABLED", False)
+            )
+
         setting_name = cls.FLAGS.get(flag_name)
 
         if setting_name is None:

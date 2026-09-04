@@ -5,6 +5,8 @@
 import { useMutation } from '@tanstack/react-query'
 import { fetchApi } from '@/api/fetchApi'
 import type { BreakoutSession } from './types'
+import { queryClient } from '@/api/queryClient'
+import { breakoutSessionKey } from './useBreakoutSession'
 
 interface UpdateParams {
   roomId: string
@@ -29,5 +31,11 @@ const updateBreakoutSession = ({
 export const useUpdateBreakoutSession = () => {
   return useMutation({
     mutationFn: updateBreakoutSession,
+    onSuccess: (session, variables) => {
+      queryClient.setQueryData(
+        breakoutSessionKey(variables.roomId),
+        session.status === 'closed' ? [] : [session]
+      )
+    },
   })
 }

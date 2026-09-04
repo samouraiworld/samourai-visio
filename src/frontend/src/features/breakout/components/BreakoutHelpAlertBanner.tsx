@@ -3,10 +3,9 @@
  * clicks 'Ask for Help'.
  */
 
-import { useEffect } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
-import { useTranslation, Trans } from 'react-i18next'
+import { useTranslation } from 'react-i18next'
 import {
   RiAlarmWarningLine,
   RiCloseLine,
@@ -28,31 +27,29 @@ export const BreakoutHelpAlertBanner = ({
 }: BreakoutHelpAlertBannerProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.helpAlert' })
 
-  // Auto-dismiss after 20 seconds
-  useEffect(() => {
-    const timer = setTimeout(onDismiss, 20000)
-    return () => clearTimeout(timer)
-  }, [onDismiss])
-
   return (
     <div
       className={css({
         position: 'absolute',
-        top: '8rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        bottom: 'room-control-bar',
+        insetInline: 0,
+        marginInline: 'auto',
         display: 'flex',
         alignItems: 'center',
-        gap: '0.875rem',
-        padding: '0.75rem 1.25rem',
-        borderRadius: '0.625rem',
-        backgroundColor: 'rgba(217, 83, 79, 0.95)', // Urgent red/coral
-        color: 'white',
-        boxShadow: '0 8px 28px rgba(0, 0, 0, 0.45)',
-        backdropFilter: 'blur(8px)',
+        flexWrap: 'wrap',
+        gap: 0.75,
+        paddingBlock: 0.75,
+        paddingInline: 1.25,
+        borderRadius: '8',
+        backgroundColor: 'danger',
+        color: 'danger.text',
+        boxShadow: 'box',
         zIndex: 110,
-        maxWidth: '92vw',
-        border: '1px solid rgba(255, 255, 255, 0.25)',
+        width: 'full',
+        maxWidth: 'room-side-panel',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'danger.subtle',
       })}
       role="alert"
       aria-live="assertive"
@@ -61,7 +58,7 @@ export const BreakoutHelpAlertBanner = ({
       <div className={css({ display: 'flex', flexDirection: 'column' })}>
         <span
           className={css({
-            fontSize: '0.75rem',
+            fontSize: 12,
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             fontWeight: '700',
@@ -70,18 +67,8 @@ export const BreakoutHelpAlertBanner = ({
         >
           {t('title')}
         </span>
-        <span className={css({ fontSize: '0.875rem', fontWeight: '500' })}>
-          <Trans
-            i18nKey="breakout.helpAlert.body"
-            t={t}
-            values={{ participantName, roomName }}
-            components={{
-              strong: <strong />,
-            }}
-          >
-            <strong>{participantName}</strong> in <strong>{roomName}</strong> is
-            asking for help
-          </Trans>
+        <span className={css({ fontSize: 14, fontWeight: '500' })}>
+          {t('body', { participantName, roomName })}
         </span>
       </div>
 
@@ -89,8 +76,8 @@ export const BreakoutHelpAlertBanner = ({
         className={css({
           display: 'flex',
           alignItems: 'center',
-          gap: '0.5rem',
-          marginLeft: '0.5rem',
+          gap: 0.5,
+          marginLeft: 0.5,
         })}
       >
         <Button
@@ -98,28 +85,28 @@ export const BreakoutHelpAlertBanner = ({
           size="sm"
           onPress={onJoinRoom}
           className={css({
-            backgroundColor: 'white',
-            color: '#c9302c',
+            backgroundColor: 'danger.text',
+            color: 'danger',
             fontWeight: '700',
-            _hover: { backgroundColor: 'rgba(255, 255, 255, 0.9)' },
+            _hover: { backgroundColor: 'danger.subtle' },
           })}
         >
           <RiLoginBoxLine size={15} />
-          <span style={{ marginLeft: '0.25rem' }}>{t('joinRoom')}</span>
+          <span className={css({ marginLeft: 0.25 })}>{t('joinRoom')}</span>
         </Button>
 
         <button
           onClick={onDismiss}
           aria-label={t('dismiss')}
           className={css({
-            padding: '0.25rem',
-            borderRadius: '999px',
+            padding: 0.25,
+            borderRadius: 'full',
             backgroundColor: 'transparent',
             border: 'none',
-            color: 'white',
+            color: 'danger.text',
             cursor: 'pointer',
             opacity: 0.8,
-            _hover: { opacity: 1, backgroundColor: 'rgba(255, 255, 255, 0.2)' },
+            _hover: { opacity: 1, backgroundColor: 'danger.hover' },
           })}
         >
           <RiCloseLine size={18} />

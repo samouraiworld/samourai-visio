@@ -3,7 +3,12 @@
 
 from rest_framework import serializers
 
-from .models import BreakoutAssignment, BreakoutRoom, BreakoutSession
+from .models import (
+    BreakoutAssignment,
+    BreakoutHelpRequest,
+    BreakoutRoom,
+    BreakoutSession,
+)
 
 
 class BreakoutAssignmentSerializer(serializers.ModelSerializer):
@@ -38,11 +43,23 @@ class BreakoutSessionSerializer(serializers.ModelSerializer):
             "status",
             "duration_seconds",
             "started_at",
+            "ends_at",
             "closed_at",
+            "revision",
+            "effect_error",
             "created_at",
             "breakout_rooms",
         ]
-        read_only_fields = ["id", "status", "started_at", "closed_at", "created_at"]
+        read_only_fields = [
+            "id",
+            "status",
+            "started_at",
+            "ends_at",
+            "closed_at",
+            "revision",
+            "effect_error",
+            "created_at",
+        ]
 
 
 class CreateBreakoutSessionSerializer(serializers.Serializer):
@@ -73,6 +90,13 @@ class UpdateBreakoutSessionSerializer(serializers.Serializer):
     )
 
 
+class BreakoutParticipantSerializer(serializers.Serializer):
+    """Validate a participant selected by a manager."""
+
+    identity = serializers.CharField(max_length=255)
+    name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+
+
 class BulkAssignSerializer(serializers.Serializer):
     """Input serializer for bulk assigning participants.
 
@@ -89,11 +113,10 @@ class BulkAssignSerializer(serializers.Serializer):
         }
     """
 
+    revision = serializers.IntegerField(min_value=0)
     assignments = serializers.DictField(
         child=serializers.ListField(
-            child=serializers.DictField(
-                child=serializers.CharField(max_length=255),
-            ),
+            child=BreakoutParticipantSerializer(),
         ),
     )
 
@@ -123,15 +146,19 @@ class BulkAssignSerializer(serializers.Serializer):
         return value
 
 
-class JoinBreakoutRoomSerializer(serializers.Serializer):
-    """Input serializer for joining a breakout room."""
+class RandomizeAssignmentsSerializer(serializers.Serializer):
+    """Validate participants before random distribution."""
 
-    username = serializers.CharField(required=False, default="", allow_blank=True)
-    participant_id = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        help_text="Stable identity for anonymous participants (from sessionStorage).",
+    revision = serializers.IntegerField(min_value=0)
+    participants = serializers.ListField(
+        child=BreakoutParticipantSerializer(),
+        min_length=1,
+        max_length=1000,
     )
+
+
+class JoinBreakoutRoomSerializer(serializers.Serializer):
+    """Join accepts no identity-bearing client input."""
 
 
 class BreakoutRoomStatusSerializer(serializers.Serializer):
@@ -141,7 +168,8 @@ class BreakoutRoomStatusSerializer(serializers.Serializer):
     name = serializers.CharField()
     livekit_room_name = serializers.CharField()
     order = serializers.IntegerField()
-    participant_count = serializers.IntegerField()
+    participant_count = serializers.IntegerField(allow_null=True)
+    connection_status = serializers.ChoiceField(choices=["available", "unknown"])
     participants = serializers.ListField(
         child=serializers.DictField(child=serializers.CharField())
     )
@@ -152,8 +180,10 @@ class BreakoutSessionStatusSerializer(serializers.Serializer):
 
     session_id = serializers.UUIDField()
     status = serializers.CharField()
-    started_at = serializers.DateTimeField()
+    started_at = serializers.DateTimeField(allow_null=True)
+    ends_at = serializers.DateTimeField(allow_null=True)
     duration_seconds = serializers.IntegerField(allow_null=True)
+    main_room = serializers.DictField()
     rooms = BreakoutRoomStatusSerializer(many=True)
 
 
@@ -161,3 +191,27 @@ class BroadcastMessageSerializer(serializers.Serializer):
     """Input serializer for broadcasting an announcement to all breakout rooms."""
 
     message = serializers.CharField(max_length=500, min_length=1)
+
+
+class BreakoutHelpRequestSerializer(serializers.ModelSerializer):
+    """Serialize authoritative help state for participants and managers."""
+
+    breakout_room_name = serializers.CharField(
+        source="breakout_room.name", read_only=True
+    )
+
+    class Meta:
+        model = BreakoutHelpRequest
+        fields = [
+            "id",
+            "session",
+            "breakout_room",
+            "breakout_room_name",
+            "requester_name",
+            "assignment_revision",
+            "status",
+            "created_at",
+            "cancelled_at",
+            "acknowledged_at",
+        ]
+        read_only_fields = fields

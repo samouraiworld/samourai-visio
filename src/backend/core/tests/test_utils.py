@@ -3,6 +3,7 @@ Test utils functions
 """
 
 # pylint: disable=W0621
+import asyncio
 import json
 from unittest import mock
 
@@ -15,6 +16,7 @@ from livekit.api import TwirpError
 
 from core.factories import UserFactory
 from core.utils import (
+    LIVEKIT_HTTP_TIMEOUT_SECONDS,
     NotificationError,
     create_livekit_client,
     generate_token,
@@ -124,22 +126,33 @@ def test_create_livekit_client_ssl_enabled(
 
 
 @mock.patch("core.utils.aiohttp.ClientSession")
-@mock.patch("asyncio.get_running_loop")
 @mock.patch("core.utils.LiveKitAPI")
 def test_create_livekit_client_ssl_disabled(
-    mock_livekit_api, mock_get_running_loop, mock_client_session, settings
+    mock_livekit_api, mock_client_session, settings
 ):
     """Test LiveKitAPI client creation with SSL verification disabled."""
-    mock_get_running_loop.return_value = mock.MagicMock()
     mock_session_instance = mock.MagicMock()
+    mock_session_instance.close = mock.AsyncMock()
     mock_client_session.return_value = mock_session_instance
+    mock_client = mock.MagicMock()
+    mock_client.aclose = mock.AsyncMock()
+    mock_livekit_api.return_value = mock_client
     settings.LIVEKIT_VERIFY_SSL = False
 
-    create_livekit_client()
+    async def create_and_close_client():
+        client = create_livekit_client()
+        await client.aclose()
+        return client
+
+    asyncio.run(create_and_close_client())
 
     mock_livekit_api.assert_called_once_with(
         **settings.LIVEKIT_CONFIGURATION, session=mock_session_instance
     )
+    _, session_kwargs = mock_client_session.call_args
+    assert session_kwargs["timeout"].total == LIVEKIT_HTTP_TIMEOUT_SECONDS
+    mock_client.aclose.assert_awaited_once()
+    mock_session_instance.close.assert_awaited_once()
 
 
 @mock.patch("asyncio.get_running_loop")

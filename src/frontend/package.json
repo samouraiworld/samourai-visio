@@ -7,6 +7,9 @@
     "dev": "panda codegen && vite",
     "build": "panda codegen && tsc -b && vite build",
     "build:debug": "VITE_ANALYZE=true npm run build -- --debug",
+    "typecheck": "panda codegen && tsc -b",
+    "test:typecheck-guard": "node scripts/self-test-typecheck.mjs",
+    "test": "vitest run",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --fix",
     "preview": "vite preview",
@@ -71,6 +74,7 @@
     "typescript-eslint": "8.60.1",
     "vite": "8.0.14",
     "vite-plugin-static-copy": "4.1.1",
-    "vite-plugin-svgr": "5.2.0"
+    "vite-plugin-svgr": "5.2.0",
+    "vitest": "^5.0.0"
   }
 }

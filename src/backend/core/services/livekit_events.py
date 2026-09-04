@@ -12,6 +12,7 @@ from django.conf import settings
 from livekit import api
 
 from core import models
+from core.breakout.services import BreakoutService
 from core.recording.services.metadata_collector import (
     MetadataCollectorException,
     MetadataCollectorService,
@@ -30,11 +31,6 @@ from .room_management import (
     RoomNotFoundException,
 )
 from .sip_management import SIPException, SIPManagement
-
-try:
-    from core.breakout.services import BreakoutService
-except ImportError:
-    BreakoutService = None
 
 logger = getLogger(__name__)
 
@@ -105,6 +101,7 @@ class LiveKitEventsService:
             "egress_ended": self._handle_egress_ended,
             "room_started": self._handle_room_started,
             "room_finished": self._handle_room_finished,
+            "participant_joined": self._handle_participant_joined,
             "participant_left": self._handle_participant_left,
         }
 
@@ -152,7 +149,23 @@ class LiveKitEventsService:
             )
             return
 
-        if self._filter_regex and not self._filter_regex.search(room_name):
+        if self._is_breakout_room(room_name) and data.event in {
+            LiveKitWebhookEventType.ROOM_STARTED.value,
+            LiveKitWebhookEventType.ROOM_FINISHED.value,
+        }:
+            logger.info(
+                "Acknowledging lifecycle webhook for breakout room '%s'.",
+                room_name,
+            )
+            return
+
+        # Breakout participant admission is a security boundary and must not be
+        # disabled by a parent-room naming filter.
+        if (
+            not self._is_breakout_room(room_name)
+            and self._filter_regex
+            and not self._filter_regex.search(room_name)
+        ):
             logger.info("Filtered webhook event for room '%s'", room_name)
             return
 
@@ -246,6 +259,11 @@ class LiveKitEventsService:
         """Return True for ephemeral rooms created by the connection test endpoint."""
         return room_name.startswith(settings.CONNECTION_TEST_ROOM_PREFIX)
 
+    @staticmethod
+    def _is_breakout_room(room_name: str) -> bool:
+        """Return True for namespaced ephemeral breakout rooms."""
+        return room_name.startswith("breakout_")
+
     def _handle_room_started(self, data):
         """Handle 'room_started' event."""
 
@@ -300,16 +318,6 @@ class LiveKitEventsService:
                 f"Failed to clear room cache for room {room_id}"
             ) from e
 
-        # Auto-close any active breakout sessions when the main room finishes
-        if BreakoutService is not None:
-            try:
-                BreakoutService().close_sessions_for_room(room_id)
-            except Exception:  # noqa: BLE001 # pylint: disable=broad-exception-caught
-                logger.warning(
-                    "Failed to close breakout sessions for room %s",
-                    room_id,
-                )
-
     def _handle_participant_left(self, data):
         """Handle 'participant_left': invalidate the presence cache.
 
@@ -329,3 +337,20 @@ class LiveKitEventsService:
         if not identity:
             return
         self.presence_cache.clear(data.room.name, identity)
+
+    def _handle_participant_joined(self, data):
+        """Reject cached breakout-room grants after an assignment changes."""
+        if not self._is_breakout_room(data.room.name):
+            return
+        identity = data.participant.identity
+        if not identity:
+            return
+
+        try:
+            BreakoutService().enforce_breakout_participant_access(
+                data.room.name, identity
+            )
+        except Exception as error:
+            raise ActionFailedError(
+                "Failed to enforce breakout participant assignment"
+            ) from error

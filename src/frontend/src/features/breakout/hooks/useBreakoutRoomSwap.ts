@@ -1,26 +1,12 @@
-/**
- * Core hook: disconnect from current LiveKit room and connect to another.
- *
- * Uses the in-component room swap pattern: updates shared state that
- * triggers the Conference component to remount `<LiveKitRoom>` with a
- * new key/token, instead of navigating to a new URL.
- *
- * The `setActiveRoomConnection` callback must be provided by the
- * Conference component.
- */
-
 import { useCallback } from 'react'
 import { useLocalParticipant } from '@livekit/components-react'
-import {
-  breakoutStore,
-  clearBreakoutState,
-  triggerRoomSwap,
-} from '../stores/breakout'
-import { fetchRoom } from '@/features/rooms/api/fetchRoom'
-import { fetchApi } from '@/api/fetchApi'
-import type { BreakoutLiveKitConnection } from '../api/types'
 import { useSnapshot } from 'valtio'
+import { fetchApi } from '@/api/fetchApi'
+import { requestEntry } from '@/features/rooms/api/requestEntry'
 import { userStore } from '@/stores/user'
+import type { BreakoutLiveKitConnection } from '../api/types'
+import { breakoutStore, triggerRoomSwap } from '../stores/breakout'
+import { captureMediaIntent } from '../utils/mediaIntent'
 
 interface RoomConnection {
   token: string
@@ -28,10 +14,8 @@ interface RoomConnection {
 }
 
 interface UseBreakoutRoomSwapParams {
-  /** The slug of the current main room. */
   currentRoomSlug?: string
-  /** Callback to update the active LiveKit connection in Conference. */
-  setActiveRoomConnection?: (conn: RoomConnection) => void
+  setActiveRoomConnection?: (connection: RoomConnection) => void
 }
 
 export const useBreakoutRoomSwap = ({
@@ -41,122 +25,112 @@ export const useBreakoutRoomSwap = ({
   const { username } = useSnapshot(userStore)
   const { localParticipant } = useLocalParticipant()
 
+  const beginTransition = useCallback(() => {
+    breakoutStore.transitionError = null
+    breakoutStore.isTransitioning = true
+    breakoutStore.pendingMediaIntent = captureMediaIntent(localParticipant)
+  }, [localParticipant])
+
+  const applyConnection = useCallback(
+    (connection: RoomConnection) => {
+      if (setActiveRoomConnection) setActiveRoomConnection(connection)
+      else triggerRoomSwap(connection)
+    },
+    [setActiveRoomConnection]
+  )
+
+  const failTransition = useCallback((error: unknown) => {
+    breakoutStore.isTransitioning = false
+    breakoutStore.pendingMediaIntent = null
+    breakoutStore.clearAfterTransition = false
+    breakoutStore.transitionError =
+      error instanceof Error ? error.message : 'room_transition_failed'
+  }, [])
+
   const moveToBreakoutRoom = useCallback(
     async (
       breakoutRoomId: string,
       sessionId: string,
       roomId: string,
       roomDisplayName?: string,
-      participantIdentity?: string
+      isModeratorVisit = false
     ) => {
-      breakoutStore.isTransitioning = true
+      beginTransition()
       breakoutStore.transitionTargetName = roomDisplayName ?? null
-
       try {
-        const resolvedIdentity =
-          participantIdentity ||
-          localParticipant?.identity ||
-          (typeof window !== 'undefined'
-            ? sessionStorage.getItem('meet_lk_participant_identity') ||
-              sessionStorage.getItem('meet_anon_participant_id') ||
-              undefined
-            : undefined)
-
-        if (localParticipant?.identity && typeof window !== 'undefined') {
-          sessionStorage.setItem(
-            'meet_lk_participant_identity',
-            localParticipant.identity
-          )
-        }
-
-        // Request token for the breakout room
         const response = await fetchApi<BreakoutLiveKitConnection>(
           `/rooms/${roomId}/breakout-sessions/${sessionId}/rooms/${breakoutRoomId}/join/`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              username: username ?? '',
-              participant_id: resolvedIdentity,
-            }),
-          }
+          { method: 'POST' }
         )
 
-        // Update store state
         breakoutStore.activeSessionId = sessionId
-        breakoutStore.assignedRoomId = breakoutRoomId
-        breakoutStore.mainRoomSlug = currentRoomSlug ?? null
-        breakoutStore.currentBreakoutRoomLkName = response.livekit.room
+        breakoutStore.isModeratorVisiting = isModeratorVisit
+        if (!isModeratorVisit) {
+          breakoutStore.assignedRoomId = breakoutRoomId
+          breakoutStore.pausedAssignmentRevision = null
+        }
+        breakoutStore.mainRoomSlug =
+          currentRoomSlug ?? breakoutStore.mainRoomSlug
         breakoutStore.activeConnection = response.livekit
-
-        // Trigger LiveKitRoom remount via key change
-        const conn = {
+        applyConnection({
           token: response.livekit.token,
           roomName: response.livekit.room,
-        }
-        if (setActiveRoomConnection) {
-          setActiveRoomConnection(conn)
-        } else {
-          triggerRoomSwap(conn)
-        }
+        })
+        return response.livekit.room
       } catch (error) {
-        console.error('Failed to move to breakout room:', error)
-        breakoutStore.isTransitioning = false
+        failTransition(error)
         throw error
       }
-
-      // Delay clearing the transitioning flag to ensure LiveKitRoom
-      // has started connecting (prevents onDisconnected race)
-      setTimeout(() => {
-        breakoutStore.isTransitioning = false
-      }, 2000)
     },
-    [
-      currentRoomSlug,
-      localParticipant?.identity,
-      setActiveRoomConnection,
-      username,
-    ]
+    [applyConnection, beginTransition, currentRoomSlug, failTransition]
   )
 
-  const returnToMainRoom = useCallback(async () => {
-    const mainSlug = breakoutStore.mainRoomSlug
-    if (!mainSlug) return
+  const transitionToMainRoom = useCallback(
+    async (clearOnConnect: boolean) => {
+      const mainSlug = breakoutStore.mainRoomSlug
+      if (!mainSlug) return
 
-    breakoutStore.isTransitioning = true
+      beginTransition()
+      breakoutStore.clearAfterTransition = clearOnConnect
+      breakoutStore.transitionTargetName = null
+      try {
+        const response = await requestEntry({
+          roomId: mainSlug,
+          username: username ?? '',
+        })
+        if (!response.livekit) {
+          throw new Error(`main_room_${response.status}`)
+        }
 
-    try {
-      // Fetch fresh token for the main room
-      const data = await fetchRoom({
-        roomId: mainSlug,
-        username: username ?? '',
-      })
-
-      if (!data?.livekit) {
-        throw new Error('Failed to get main room token')
+        if (!breakoutStore.isModeratorVisiting) {
+          breakoutStore.pausedAssignmentRevision = breakoutStore.revisionHint
+        }
+        breakoutStore.isModeratorVisiting = false
+        breakoutStore.activeConnection = response.livekit
+        applyConnection({
+          token: response.livekit.token,
+          roomName: response.livekit.room,
+        })
+      } catch (error) {
+        failTransition(error)
+        throw error
       }
+    },
+    [applyConnection, beginTransition, failTransition, username]
+  )
 
-      // Trigger LiveKitRoom remount with main room token
-      const mainConn = {
-        token: data.livekit.token,
-        roomName: data.livekit.room,
-      }
-      if (setActiveRoomConnection) {
-        setActiveRoomConnection(mainConn)
-      } else {
-        triggerRoomSwap(mainConn)
-      }
+  const returnToMainRoom = useCallback(
+    () => transitionToMainRoom(false),
+    [transitionToMainRoom]
+  )
+  const returnToMainRoomAfterClose = useCallback(
+    () => transitionToMainRoom(true),
+    [transitionToMainRoom]
+  )
 
-      // Clear breakout state after remount is triggered
-      // Delay slightly so LiveKitRoom's onDisconnected doesn't fire first
-      setTimeout(() => {
-        clearBreakoutState()
-      }, 2000)
-    } catch (error) {
-      console.error('Failed to return to main room:', error)
-      breakoutStore.isTransitioning = false
-      throw error
-    }
-  }, [setActiveRoomConnection, username])
-
-  return { moveToBreakoutRoom, returnToMainRoom }
+  return {
+    moveToBreakoutRoom,
+    returnToMainRoom,
+    returnToMainRoomAfterClose,
+  }
 }

@@ -18,10 +18,13 @@ export interface BreakoutRoom {
 
 export interface BreakoutSession {
   id: string
-  status: 'configuring' | 'active' | 'closed'
+  status: 'configuring' | 'activating' | 'active' | 'closing' | 'closed'
   duration_seconds: number | null
   started_at: string | null
+  ends_at: string | null
   closed_at: string | null
+  revision: number
+  effect_error: string
   created_at: string
   breakout_rooms: BreakoutRoom[]
 }
@@ -31,7 +34,8 @@ export interface BreakoutRoomStatus {
   name: string
   livekit_room_name: string
   order: number
-  participant_count: number
+  participant_count: number | null
+  connection_status: 'available' | 'unknown'
   participants: { identity: string; name: string }[]
 }
 
@@ -39,7 +43,13 @@ export interface BreakoutSessionStatus {
   session_id: string
   status: string
   started_at: string | null
+  ends_at: string | null
   duration_seconds: number | null
+  main_room: {
+    participant_count: number | null
+    connection_status: 'available' | 'unknown'
+    participants: { identity: string; name: string }[]
+  }
   rooms: BreakoutRoomStatus[]
 }
 
@@ -54,21 +64,37 @@ export interface BreakoutLiveKitConnection {
 /** Structure embedded in LiveKit room metadata for breakout state. */
 export interface BreakoutMetadata {
   session_id: string
-  status: 'active' | 'closed'
+  status: 'active' | 'closing' | 'closed'
   started_at?: string
+  ends_at?: string | null
   duration_seconds?: number | null
-  assignments: Record<
-    string,
-    {
-      breakout_room_id: string
-      breakout_room_name: string
-      livekit_room_name: string
-    }
-  >
-  rooms: {
-    id: string
-    name: string
+  revision: number
+}
+
+export interface BreakoutCurrentAssignment {
+  session_id: string
+  revision: number
+  status: BreakoutSession['status']
+  started_at: string | null
+  ends_at: string | null
+  duration_seconds: number | null
+  assignment: {
+    breakout_room_id: string
+    breakout_room_name: string
     livekit_room_name: string
-    order: number
-  }[]
+  } | null
+  help_request: BreakoutHelpRequest | null
+}
+
+export interface BreakoutHelpRequest {
+  id: string
+  session: string
+  breakout_room: string
+  breakout_room_name: string
+  requester_name: string
+  assignment_revision: number
+  status: 'open' | 'cancelled' | 'acknowledged'
+  created_at: string
+  cancelled_at: string | null
+  acknowledged_at: string | null
 }

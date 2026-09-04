@@ -1,4 +1,4 @@
-# pylint: disable=too-many-arguments,too-many-positional-arguments,broad-exception-caught,too-many-lines,no-name-in-module
+# pylint: disable=too-many-arguments,too-many-positional-arguments,broad-exception-caught,too-many-lines,no-name-in-module,protected-access,too-many-branches
 """Business logic for the breakout rooms feature.
 
 All LiveKit room lifecycle, participant assignment, token generation,
@@ -7,14 +7,21 @@ delegate to this service rather than calling LiveKit directly.
 """
 
 import asyncio
+import hashlib
 import random
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import timedelta
+from functools import wraps
 from logging import getLogger
 from typing import Dict, List, Optional
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
-from django.db import transaction
+from django.core.cache import cache
+from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.utils import timezone
 
 from asgiref.sync import async_to_sync
@@ -22,15 +29,19 @@ from livekit.api import (
     CreateRoomRequest,
     DeleteRoomRequest,
     ListParticipantsRequest,
+    ListRoomsRequest,
+    RoomParticipantIdentity,
 )
 
 from core import utils
-from core.services.room_management import (
-    RoomManagement,
-    RoomManagementException,
-)
+from core.services.room_management import RoomManagement, RoomNotFoundException
 
-from .models import BreakoutAssignment, BreakoutRoom, BreakoutSession
+from .models import (
+    BreakoutAssignment,
+    BreakoutHelpRequest,
+    BreakoutRoom,
+    BreakoutSession,
+)
 
 logger = getLogger(__name__)
 
@@ -39,7 +50,31 @@ logger = getLogger(__name__)
 MAX_ROOMS_PER_SESSION = 10
 MIN_ROOMS_PER_SESSION = 2
 EMPTY_TIMEOUT_SECONDS = 300  # LiveKit auto-destroys rooms after 5 min empty
-GRACE_PERIOD_SECONDS = 300  # Auto-close stale sessions after this grace period
+BREAKOUT_TOKEN_TTL_SECONDS = 60
+MAX_PARTICIPANTS_PER_SESSION = 1000
+HELP_REQUEST_COOLDOWN_SECONDS = 15
+CLEANUP_LOCK_SECONDS = 300
+EFFECT_RETRY_AFTER_SECONDS = 120
+EFFECT_LOCK_TIMEOUT_SECONDS = 300
+EFFECT_LOCK_WAIT_SECONDS = 10
+LIVEKIT_RECONCILIATION_CONCURRENCY = 10
+LIVEKIT_RECONCILIATION_TIMEOUT_SECONDS = 30
+LIVEKIT_LIFECYCLE_TIMEOUT_SECONDS = 30
+
+
+def serialize_room_effects(method):
+    """Serialize durable state changes and LiveKit effects for one parent room."""
+
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        target = args[0] if args else kwargs.get("room") or kwargs.get("session")
+        if target is None:
+            raise TypeError("A room or breakout session is required.")
+        room_id = getattr(target, "room_id", None) or target.pk
+        with self._room_effect_lock(room_id):
+            return method(self, *args, **kwargs)
+
+    return wrapped
 
 
 class BreakoutServiceError(Exception):
@@ -54,11 +89,20 @@ class InvalidSessionStateError(BreakoutServiceError):
     """Raised when a state transition is invalid."""
 
 
+class BreakoutUpstreamError(BreakoutServiceError):
+    """Raised when a required LiveKit effect did not complete."""
+
+
+class HelpRequestRateLimitedError(BreakoutServiceError):
+    """Raised when help requests are submitted faster than the allowed rate."""
+
+
 class BreakoutService:
     """Orchestrates breakout session lifecycle."""
 
     # ── Session CRUD ───────────────────────────────────────────────────
 
+    @serialize_room_effects
     def create_session(
         self,
         room,
@@ -77,44 +121,57 @@ class BreakoutService:
         """
         num_rooms = max(MIN_ROOMS_PER_SESSION, min(num_rooms, MAX_ROOMS_PER_SESSION))
 
-        with transaction.atomic():
-            # Enforce one-active-session-per-room at service level (DB constraint is backup)
-            if BreakoutSession.objects.filter(
-                room=room,
-                status__in=[
-                    BreakoutSession.Status.CONFIGURING,
-                    BreakoutSession.Status.ACTIVE,
-                ],
-            ).exists():
-                raise SessionAlreadyActiveError(
-                    "This room already has an active or configuring breakout session."
+        try:
+            with transaction.atomic():
+                type(room).objects.select_for_update().get(pk=room.pk)
+                if BreakoutSession.objects.filter(
+                    room=room,
+                    status__in=[
+                        BreakoutSession.Status.CONFIGURING,
+                        BreakoutSession.Status.ACTIVATING,
+                        BreakoutSession.Status.ACTIVE,
+                        BreakoutSession.Status.CLOSING,
+                    ],
+                ).exists():
+                    raise SessionAlreadyActiveError(
+                        "This room already has an active or configuring breakout session."
+                    )
+
+                session = BreakoutSession.objects.create(
+                    room=room,
+                    created_by=created_by,
+                    duration_seconds=duration_seconds,
                 )
 
-            session = BreakoutSession.objects.create(
-                room=room,
-                created_by=created_by,
-                duration_seconds=duration_seconds,
-            )
+                breakout_rooms = []
+                for i in range(num_rooms):
+                    display_name = (
+                        room_names[i]
+                        if room_names and i < len(room_names)
+                        else f"Room {i + 1}"
+                    )
+                    lk_name = BreakoutRoom.generate_livekit_room_name(session.id, i)
 
-            breakout_rooms = []
-            for i in range(num_rooms):
-                display_name = (
-                    room_names[i]
-                    if room_names and i < len(room_names)
-                    else f"Room {i + 1}"
-                )
-                lk_name = BreakoutRoom.generate_livekit_room_name(session.id, i)
+                    breakout_rooms.append(
+                        BreakoutRoom.objects.create(
+                            session=session,
+                            name=display_name,
+                            livekit_room_name=lk_name,
+                            order=i,
+                        )
+                    )
+        except IntegrityError as error:
+            raise SessionAlreadyActiveError(
+                "This room already has an active or configuring breakout session."
+            ) from error
 
-                br = BreakoutRoom.objects.create(
-                    session=session,
-                    name=display_name,
-                    livekit_room_name=lk_name,
-                    order=i,
-                )
-                breakout_rooms.append(br)
-
-            # Pre-create LiveKit rooms inside atomic transaction
+        try:
             self._create_livekit_rooms([br.livekit_room_name for br in breakout_rooms])
+        except Exception as error:
+            self._record_effect_error(session, error)
+            raise BreakoutUpstreamError(
+                "Breakout rooms could not be created; the operation can be retried."
+            ) from error
 
         logger.info(
             "Created breakout session %s with %d rooms for room %s",
@@ -125,6 +182,7 @@ class BreakoutService:
 
         return session
 
+    @serialize_room_effects
     def activate_session(self, session: BreakoutSession) -> BreakoutSession:
         """Transition a session from CONFIGURING → ACTIVE.
 
@@ -135,58 +193,80 @@ class BreakoutService:
         Raises:
             InvalidSessionStateError: if session is not in CONFIGURING status.
         """
-        if not session.is_configuring:
-            raise InvalidSessionStateError(
-                f"Cannot activate session in '{session.status}' status."
-            )
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            if session.status not in [
+                BreakoutSession.Status.CONFIGURING,
+                BreakoutSession.Status.ACTIVATING,
+            ]:
+                raise InvalidSessionStateError(
+                    f"Cannot activate session in '{session.status}' status."
+                )
+            if (
+                session.status == BreakoutSession.Status.ACTIVATING
+                and not session.effect_error
+                and session.updated_at
+                > timezone.now() - timedelta(seconds=EFFECT_RETRY_AFTER_SECONDS)
+            ):
+                raise InvalidSessionStateError(
+                    "Breakout activation is already in progress."
+                )
+            if session.status == BreakoutSession.Status.CONFIGURING:
+                session.status = BreakoutSession.Status.ACTIVATING
+                session.started_at = timezone.now()
+                session.ends_at = (
+                    session.started_at + timedelta(seconds=session.duration_seconds)
+                    if session.duration_seconds
+                    else None
+                )
+                session.revision += 1
+                session.effect_error = ""
+                session.save(
+                    update_fields=[
+                        "status",
+                        "started_at",
+                        "ends_at",
+                        "revision",
+                        "effect_error",
+                        "updated_at",
+                    ]
+                )
+                session.refresh_from_db()
 
-        session.status = BreakoutSession.Status.ACTIVE
-        session.started_at = timezone.now()
-        session.save(update_fields=["status", "started_at", "updated_at"])
-
-        # Build assignment map for metadata
-        assignments = self._build_assignment_map(session)
-
-        # Update main room metadata (SOURCE OF TRUTH)
-        breakout_metadata = {
-            "breakout": {
-                "session_id": str(session.id),
-                "status": "active",
-                "started_at": session.started_at.isoformat(),
-                "duration_seconds": session.duration_seconds,
-                "assignments": assignments,
-                "rooms": [
-                    {
-                        "id": str(br.id),
-                        "name": br.name,
-                        "livekit_room_name": br.livekit_room_name,
-                        "order": br.order,
-                    }
-                    for br in session.breakout_rooms.all()
-                ],
-            }
-        }
-
+        breakout_metadata = {"breakout": self._build_breakout_metadata(session)}
         try:
             RoomManagement().update_metadata(
                 room_name=str(session.room_id),
                 metadata=breakout_metadata,
             )
-        except RoomManagementException:
-            logger.exception(
-                "Failed to update main room metadata for breakout session %s",
-                session.id,
-            )
+        except Exception as error:
+            self._record_effect_error(session, error)
+            raise BreakoutUpstreamError(
+                "Breakout activation could not be synchronized; retry activation."
+            ) from error
 
-        # Send push data message (SPEED OPTIMIZATION — not source of truth)
-        self._send_data_to_room(
+        self._try_send_data_to_room(
             room_name=str(session.room_id),
-            data={"type": "breakout:activate", **breakout_metadata["breakout"]},
+            data={"type": "breakout:revision", **breakout_metadata["breakout"]},
         )
+
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            if (
+                session.status != BreakoutSession.Status.ACTIVATING
+                or session.revision != breakout_metadata["breakout"]["revision"]
+            ):
+                raise InvalidSessionStateError(
+                    "Breakout activation was superseded by a newer operation."
+                )
+            session.status = BreakoutSession.Status.ACTIVE
+            session.effect_error = ""
+            session.save(update_fields=["status", "effect_error", "updated_at"])
 
         logger.info("Activated breakout session %s", session.id)
         return session
 
+    @serialize_room_effects
     def close_session(self, session: BreakoutSession) -> BreakoutSession:
         """Close a session: recall all participants and destroy breakout rooms.
 
@@ -195,44 +275,97 @@ class BreakoutService:
         3. Deletes LiveKit breakout rooms (force-disconnects participants).
         4. Updates session status to CLOSED.
         """
-        if session.is_closed:
-            return session
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            if session.is_closed:
+                return session
+            if session.status not in [
+                BreakoutSession.Status.CONFIGURING,
+                BreakoutSession.Status.ACTIVATING,
+                BreakoutSession.Status.ACTIVE,
+                BreakoutSession.Status.CLOSING,
+            ]:
+                raise InvalidSessionStateError(
+                    f"Cannot close session in '{session.status}' status."
+                )
+            if (
+                session.status == BreakoutSession.Status.CLOSING
+                and not session.effect_error
+                and session.updated_at
+                > timezone.now() - timedelta(seconds=EFFECT_RETRY_AFTER_SECONDS)
+            ):
+                raise InvalidSessionStateError("Breakout close is already in progress.")
+            if session.status != BreakoutSession.Status.CLOSING:
+                session.status = BreakoutSession.Status.CLOSING
+                session.revision += 1
+                session.effect_error = ""
+                session.save(
+                    update_fields=[
+                        "status",
+                        "revision",
+                        "effect_error",
+                        "updated_at",
+                    ]
+                )
+                session.refresh_from_db()
 
-        session.status = BreakoutSession.Status.CLOSED
-        session.closed_at = timezone.now()
-        session.save(update_fields=["status", "closed_at", "updated_at"])
-
-        # Send recall to all breakout rooms
-        breakout_rooms = session.breakout_rooms.all()
-        for br in breakout_rooms:
-            self._send_data_to_room(
-                room_name=br.livekit_room_name,
-                data={"type": "breakout:recall", "main_room": str(session.room_id)},
-            )
-
-        # Clear breakout metadata from main room
+        breakout_rooms = list(session.breakout_rooms.all())
         try:
-            RoomManagement().update_metadata(
-                room_name=str(session.room_id),
-                remove_keys=["breakout"],
+            # Removing the authoritative parent-room metadata is required and
+            # idempotent. Do it before deleting ephemeral rooms so a retry can
+            # never be blocked by an advisory message to an already-gone room.
+            try:
+                RoomManagement().update_metadata(
+                    room_name=str(session.room_id),
+                    remove_keys=["breakout"],
+                )
+            except RoomNotFoundException:
+                logger.info(
+                    "Parent LiveKit room %s is already absent during breakout close",
+                    session.room_id,
+                )
+            self._try_send_data_to_rooms(
+                [room.livekit_room_name for room in breakout_rooms],
+                {
+                    "type": "breakout:recall",
+                    "main_room": str(session.room_id),
+                    "session_id": str(session.id),
+                    "revision": session.revision,
+                },
             )
-        except RoomManagementException:
-            logger.exception(
-                "Failed to clear breakout metadata for room %s", session.room_id
+            self._delete_livekit_rooms(
+                [breakout_room.livekit_room_name for breakout_room in breakout_rooms]
             )
+        except Exception as error:
+            self._record_effect_error(session, error)
+            raise BreakoutUpstreamError(
+                "Breakout close could not be completed; retry close."
+            ) from error
 
-        # Destroy LiveKit rooms (forces disconnect for any remaining participants)
-        self._delete_livekit_rooms([br.livekit_room_name for br in breakout_rooms])
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            if session.status != BreakoutSession.Status.CLOSING:
+                raise InvalidSessionStateError(
+                    "Breakout close was superseded by a newer operation."
+                )
+            session.status = BreakoutSession.Status.CLOSED
+            session.closed_at = timezone.now()
+            session.effect_error = ""
+            session.save(
+                update_fields=["status", "closed_at", "effect_error", "updated_at"]
+            )
 
         logger.info("Closed breakout session %s", session.id)
         return session
 
     # ── Assignments ────────────────────────────────────────────────────
 
-    def assign_participants(
+    @serialize_room_effects
+    def assign_participants(  # noqa: PLR0912
         self,
         session: BreakoutSession,
         assignments: Dict[str, Dict],
+        expected_revision: Optional[int] = None,
     ) -> None:
         """Bulk assign participants to breakout rooms.
 
@@ -244,13 +377,8 @@ class BreakoutService:
         Raises:
             BreakoutServiceError: if a participant is assigned to multiple rooms.
         """
-        if session.is_closed:
-            raise InvalidSessionStateError(
-                "Cannot assign participants to a closed session."
-            )
-
         # Normalize and validate no duplicate identities across rooms
-        all_identities = []
+        all_identities = set()
         normalized_assignments = {}
         for room_id, participants in assignments.items():
             normalized_list = []
@@ -271,11 +399,29 @@ class BreakoutService:
                     raise BreakoutServiceError(
                         f"Participant '{identity}' is assigned to multiple rooms."
                     )
-                all_identities.append(identity)
+                all_identities.add(identity)
                 normalized_list.append({"identity": identity, "name": name})
             normalized_assignments[room_id] = normalized_list
 
+        if len(all_identities) > MAX_PARTICIPANTS_PER_SESSION:
+            raise BreakoutServiceError(
+                "The assignment payload exceeds the participant limit."
+            )
+
         with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            if expected_revision is not None and session.revision != expected_revision:
+                raise InvalidSessionStateError(
+                    "Breakout session changed; refresh assignments and try again."
+                )
+            if session.status in [
+                BreakoutSession.Status.CLOSING,
+                BreakoutSession.Status.CLOSED,
+            ]:
+                raise InvalidSessionStateError(
+                    "Cannot assign participants while a session is closing or closed."
+                )
+
             # Prefetch all rooms in one query, then validate IDs.
             # A single unknown ID must abort the whole operation and leave
             # existing assignments intact (Bug 3 fix — N-queries → 1 query).
@@ -288,17 +434,16 @@ class BreakoutService:
                     )
                 resolved_rooms[room_id_str] = session_rooms[room_id_str]
 
-            # Clear and rebuild atomically
-            BreakoutAssignment.objects.filter(
-                breakout_room__session=session,
-            ).delete()
+            BreakoutAssignment.objects.filter(session=session).delete()
 
+            new_assignment_by_identity = {}
             for room_id_str, participants in normalized_assignments.items():
                 breakout_room = resolved_rooms[room_id_str]
 
                 BreakoutAssignment.objects.bulk_create(
                     [
                         BreakoutAssignment(
+                            session=session,
                             breakout_room=breakout_room,
                             participant_identity=p["identity"],
                             participant_name=p["name"],
@@ -306,10 +451,30 @@ class BreakoutService:
                         for p in participants
                     ]
                 )
+                for participant in participants:
+                    new_assignment_by_identity[participant["identity"]] = (
+                        breakout_room,
+                        participant["name"],
+                    )
+            session.revision += 1
+            session.effect_error = ""
+            session.save(update_fields=["revision", "effect_error", "updated_at"])
+            session.refresh_from_db()
 
-        # If session is active, update metadata with new assignments
+            self._reconcile_open_help_requests(session, new_assignment_by_identity)
+
+        # If session is active, evict old connections and publish a bounded revision.
         if session.is_active:
-            self._update_assignment_metadata(session)
+            try:
+                # Reconcile the durable assignment first. Parent-room metadata can
+                # legitimately be absent once everyone has moved to breakouts.
+                self._reconcile_livekit_assignments(session)
+                self._publish_revision(session)
+            except Exception as error:
+                self._record_effect_error(session, error)
+                raise BreakoutUpstreamError(
+                    "Assignments were saved but LiveKit reconciliation failed; retry."
+                ) from error
 
         logger.info(
             "Assigned %d participants across breakout rooms for session %s",
@@ -321,6 +486,7 @@ class BreakoutService:
         self,
         session: BreakoutSession,
         participants: List[Dict[str, str]],
+        expected_revision: Optional[int] = None,
     ) -> Dict[str, List]:
         """Distribute participants evenly across rooms and persist assignments.
 
@@ -338,7 +504,9 @@ class BreakoutService:
             target_room = rooms[i % len(rooms)]
             assignments[str(target_room.id)].append(participant)
 
-        self.assign_participants(session, assignments)
+        self.assign_participants(
+            session, assignments, expected_revision=expected_revision
+        )
         return assignments
 
     # ── Live Status ────────────────────────────────────────────────────
@@ -347,6 +515,35 @@ class BreakoutService:
         """Query LiveKit for participant counts in each breakout room."""
         rooms = list(session.breakout_rooms.all())
         return self._fetch_live_status(rooms)
+
+    @async_to_sync
+    async def get_main_room_status(self, session: BreakoutSession) -> Dict:
+        """Return authoritative parent-room presence or an unknown state."""
+        lkapi = utils.create_livekit_client()
+        try:
+            response = await lkapi.room.list_participants(
+                ListParticipantsRequest(room=str(session.room_id))
+            )
+            participants = [
+                {"identity": participant.identity, "name": participant.name}
+                for participant in response.participants
+            ]
+            return {
+                "participant_count": len(participants),
+                "participants": participants,
+                "connection_status": "available",
+            }
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to list participants for main room %s", session.room_id
+            )
+            return {
+                "participant_count": None,
+                "participants": [],
+                "connection_status": "unknown",
+            }
+        finally:
+            await lkapi.aclose()
 
     @async_to_sync
     async def _fetch_live_status(self, rooms: List[BreakoutRoom]) -> List[Dict]:
@@ -362,20 +559,25 @@ class BreakoutService:
                     {"identity": p.identity, "name": p.name}
                     for p in response.participants
                 ]
+                connection_status = "available"
             except Exception:  # noqa: BLE001
                 logger.warning(
                     "Failed to list participants for breakout room %s",
                     br.livekit_room_name,
                 )
                 participants = []
+                connection_status = "unknown"
 
             return {
                 "id": str(br.id),
                 "name": br.name,
                 "livekit_room_name": br.livekit_room_name,
                 "order": br.order,
-                "participant_count": len(participants),
+                "participant_count": (
+                    len(participants) if connection_status == "available" else None
+                ),
                 "participants": participants,
+                "connection_status": connection_status,
             }
 
         try:
@@ -391,8 +593,8 @@ class BreakoutService:
         self,
         breakout_room: BreakoutRoom,
         user=None,
-        username: Optional[str] = None,
-        participant_id: Optional[str] = None,
+        identity: Optional[str] = None,
+        display_name: Optional[str] = None,
     ) -> Dict:
         """Generate a LiveKit token for a breakout room.
 
@@ -401,19 +603,29 @@ class BreakoutService:
         if user is None:
             user = AnonymousUser()
 
-        ttl = None
-        if breakout_room.session.duration_seconds:
-            ttl = timedelta(
-                seconds=breakout_room.session.duration_seconds + GRACE_PERIOD_SECONDS
+        if not identity:
+            raise BreakoutServiceError("Participant identity could not be determined.")
+
+        ttl_seconds = BREAKOUT_TOKEN_TTL_SECONDS
+        if breakout_room.session.ends_at:
+            remaining = int(
+                (breakout_room.session.ends_at - timezone.now()).total_seconds()
             )
+            if remaining <= 0:
+                raise InvalidSessionStateError("Breakout session has ended.")
+            ttl_seconds = min(ttl_seconds, remaining)
 
         token = utils.generate_token(
             room=breakout_room.livekit_room_name,
             user=user,
-            username=username,
+            username=display_name,
             role="member",  # No admin in breakout rooms
-            participant_id=participant_id,
-            ttl=ttl,
+            participant_id=identity,
+            ttl=timedelta(seconds=ttl_seconds),
+            can_publish_data=True,
+            sources=breakout_room.session.room.configuration.get(
+                "can_publish_sources", None
+            ),
         )
 
         configuration = settings.LIVEKIT_CONFIGURATION
@@ -426,145 +638,401 @@ class BreakoutService:
     # ── Cleanup ────────────────────────────────────────────────────────
 
     def cleanup_stale_sessions(self) -> int:
-        """Auto-close sessions that exceeded their duration + grace period.
+        """Auto-close sessions at their absolute deadline and retry failed closes.
 
-        Returns the number of sessions closed.
+        Returns the number of sessions reconciled.
         """
         now = timezone.now()
-        stale_sessions = BreakoutSession.objects.filter(
-            status=BreakoutSession.Status.ACTIVE,
-            started_at__isnull=False,
-        )
-
-        closed_count = 0
-        for session in stale_sessions:
-            duration = session.duration_seconds or 0
-            deadline = session.started_at + timedelta(
-                seconds=duration + GRACE_PERIOD_SECONDS
+        retry_before = now - timedelta(seconds=EFFECT_RETRY_AFTER_SECONDS)
+        candidate_ids = BreakoutSession.objects.filter(
+            Q(
+                status=BreakoutSession.Status.ACTIVE,
+                ends_at__isnull=False,
+                ends_at__lte=now,
             )
-            if now > deadline:
-                logger.info(
-                    "Auto-closing stale breakout session %s (started %s, duration %ds)",
-                    session.id,
-                    session.started_at,
-                    duration,
-                )
-                self.close_session(session)
-                closed_count += 1
+            | Q(
+                status=BreakoutSession.Status.CLOSING,
+                effect_error__gt="",
+            )
+            | Q(
+                status=BreakoutSession.Status.CLOSING,
+                updated_at__lte=retry_before,
+            )
+            | Q(
+                status=BreakoutSession.Status.ACTIVATING,
+                effect_error__gt="",
+            )
+            | Q(
+                status=BreakoutSession.Status.ACTIVATING,
+                updated_at__lte=retry_before,
+            )
+            | Q(
+                status=BreakoutSession.Status.ACTIVE,
+                effect_error__gt="",
+            )
+        ).values_list("id", flat=True)
 
-        return closed_count
+        reconciled_count = 0
+        for session_id in candidate_ids:
+            lock_key = f"breakout-cleanup:{session_id}"
+            if not cache.add(lock_key, "1", timeout=CLEANUP_LOCK_SECONDS):
+                continue
+            try:
+                session = BreakoutSession.objects.get(pk=session_id)
+                logger.info("Reconciling breakout session %s", session.id)
+                if session.status == BreakoutSession.Status.ACTIVATING:
+                    self.activate_session(session)
+                elif session.status == BreakoutSession.Status.ACTIVE:
+                    if session.ends_at is not None and session.ends_at <= now:
+                        self.close_session(session)
+                    else:
+                        self.retry_session(session)
+                else:
+                    self.close_session(session)
+                reconciled_count += 1
+            except (
+                BreakoutSession.DoesNotExist,
+                BreakoutUpstreamError,
+                InvalidSessionStateError,
+            ):
+                logger.warning("Breakout session %s remains retryable", session_id)
+            finally:
+                cache.delete(lock_key)
 
-    def close_sessions_for_room(self, room_id) -> int:
-        """Close all active/configuring breakout sessions for a room.
+        return reconciled_count
 
-        Called when the main room's LiveKit room finishes (all participants left).
-        """
-        sessions = BreakoutSession.objects.filter(
-            room_id=room_id,
-            status__in=[
-                BreakoutSession.Status.CONFIGURING,
-                BreakoutSession.Status.ACTIVE,
-            ],
+    def retry_session(self, session: BreakoutSession) -> BreakoutSession:
+        """Retry the required effect for a session in a recoverable state."""
+        session.refresh_from_db()
+        if (
+            session.status == BreakoutSession.Status.CONFIGURING
+            and session.effect_error
+        ):
+            with self._room_effect_lock(session.room_id):
+                session.refresh_from_db()
+                if not (
+                    session.status == BreakoutSession.Status.CONFIGURING
+                    and session.effect_error
+                ):
+                    raise InvalidSessionStateError(
+                        "Breakout creation retry was superseded by a newer operation."
+                    )
+                try:
+                    self._create_livekit_rooms(
+                        list(
+                            session.breakout_rooms.values_list(
+                                "livekit_room_name", flat=True
+                            )
+                        )
+                    )
+                except Exception as error:
+                    self._record_effect_error(session, error)
+                    raise BreakoutUpstreamError(
+                        "Breakout rooms could not be created; retry later."
+                    ) from error
+                session.effect_error = ""
+                session.save(update_fields=["effect_error", "updated_at"])
+                return session
+        if session.status == BreakoutSession.Status.ACTIVATING:
+            return self.activate_session(session)
+        if session.status == BreakoutSession.Status.CLOSING:
+            return self.close_session(session)
+        if session.status == BreakoutSession.Status.ACTIVE and session.effect_error:
+            with self._room_effect_lock(session.room_id):
+                session.refresh_from_db()
+                if not (
+                    session.status == BreakoutSession.Status.ACTIVE
+                    and session.effect_error
+                ):
+                    raise InvalidSessionStateError(
+                        "Breakout reconciliation retry was superseded."
+                    )
+                try:
+                    self._reconcile_livekit_assignments(session)
+                    self._publish_revision(session)
+                except Exception as error:
+                    self._record_effect_error(session, error)
+                    raise BreakoutUpstreamError(
+                        "Breakout assignments could not be reconciled; retry later."
+                    ) from error
+                session.effect_error = ""
+                session.save(update_fields=["effect_error", "updated_at"])
+                return session
+        raise InvalidSessionStateError(
+            f"Session in '{session.status}' status has no retryable effect."
         )
-
-        closed_count = 0
-        for session in sessions:
-            self.close_session(session)
-            closed_count += 1
-
-        return closed_count
 
     # ── Private Helpers ────────────────────────────────────────────────
 
-    def _build_assignment_map(self, session: BreakoutSession) -> Dict:
-        """Build a participant_identity → room info mapping for metadata."""
-        assignments = {}
-        for br in session.breakout_rooms.prefetch_related("assignments").all():
-            for a in br.assignments.all():
-                assignments[a.participant_identity] = {
-                    "breakout_room_id": str(br.id),
-                    "breakout_room_name": br.name,
-                    "livekit_room_name": br.livekit_room_name,
-                }
-        return assignments
+    @staticmethod
+    @contextmanager
+    def _room_effect_lock(room_id):
+        """Hold the cross-worker lock that orders DB state and LiveKit effects."""
+        lock = cache.lock(
+            f"breakout-effects:{room_id}",
+            timeout=EFFECT_LOCK_TIMEOUT_SECONDS,
+            blocking_timeout=EFFECT_LOCK_WAIT_SECONDS,
+        )
+        if not lock.acquire(blocking=True):
+            raise InvalidSessionStateError(
+                "Another breakout room operation is still in progress."
+            )
+        try:
+            yield
+        finally:
+            try:
+                lock.release()
+            except Exception:
+                logger.exception(
+                    "Breakout effect lock %s could not be released", room_id
+                )
 
-    def _build_breakout_metadata(
-        self, session: BreakoutSession, assignments: dict
-    ) -> dict:
-        """Build the complete breakout blob for LiveKit room metadata.
-
-        Always includes session_id, status, started_at, duration_seconds, rooms,
-        and assignments so that a top-level merge in RoomManagement.update_metadata
-        never silently drops fields that useBreakoutMetadataWatcher gates on.
-        """
+    def _build_breakout_metadata(self, session: BreakoutSession) -> dict:
+        """Build bounded, non-sensitive shared metadata."""
         return {
             "session_id": str(session.id),
-            "status": session.status,
+            "status": (
+                BreakoutSession.Status.ACTIVE
+                if session.status == BreakoutSession.Status.ACTIVATING
+                else session.status
+            ),
             "started_at": (
                 session.started_at.isoformat() if session.started_at else None
             ),
+            "ends_at": session.ends_at.isoformat() if session.ends_at else None,
             "duration_seconds": session.duration_seconds,
-            "rooms": [
-                {
-                    "id": str(br.id),
-                    "name": br.name,
-                    "livekit_room_name": br.livekit_room_name,
-                    "order": br.order,
-                }
-                for br in session.breakout_rooms.order_by("order")
-            ],
-            "assignments": assignments,
+            "revision": session.revision,
         }
 
-    def _update_assignment_metadata(self, session: BreakoutSession) -> None:
-        """Push the full breakout blob to main room metadata after an assignment change.
-
-        Publishes the complete blob (not just assignments) so that the top-level
-        merge in RoomManagement.update_metadata never clobbers status, session_id,
-        rooms, or timing fields that the frontend watcher relies on.
-        """
-        assignments = self._build_assignment_map(session)
-        full_breakout = self._build_breakout_metadata(session, assignments)
+    def _publish_revision(self, session: BreakoutSession) -> None:
+        """Publish only a revision hint; clients fetch scoped state from the API."""
+        summary = self._build_breakout_metadata(session)
         try:
             RoomManagement().update_metadata(
                 room_name=str(session.room_id),
-                metadata={"breakout": full_breakout},
+                metadata={"breakout": summary},
             )
-        except RoomManagementException:
-            logger.exception(
-                "Failed to update assignment metadata for session %s", session.id
+        except RoomNotFoundException:
+            logger.info(
+                "Parent LiveKit room %s is absent; clients will poll breakout revision",
+                session.room_id,
             )
+        payload = {"type": "breakout:revision", **summary}
+        self._try_send_data_to_rooms(
+            [str(session.room_id)]
+            + list(session.breakout_rooms.values_list("livekit_room_name", flat=True)),
+            payload,
+        )
+
+    @staticmethod
+    def _reconcile_open_help_requests(
+        session: BreakoutSession,
+        assignments: Dict[str, tuple[BreakoutRoom, str]],
+    ) -> None:
+        """Move open help with its requester, or cancel it when unassigned."""
+        open_help_requests = list(
+            BreakoutHelpRequest.objects.select_for_update().filter(
+                session=session,
+                status=BreakoutHelpRequest.Status.OPEN,
+            )
+        )
+        cancelled_at = timezone.now()
+        for help_request in open_help_requests:
+            new_assignment = assignments.get(help_request.requester_identity)
+            if new_assignment is None:
+                help_request.status = BreakoutHelpRequest.Status.CANCELLED
+                help_request.cancelled_at = cancelled_at
+                help_request.save(
+                    update_fields=["status", "cancelled_at", "updated_at"]
+                )
+                continue
+            breakout_room, participant_name = new_assignment
+            help_request.breakout_room = breakout_room
+            help_request.requester_name = participant_name
+            help_request.assignment_revision = session.revision
+            help_request.save(
+                update_fields=[
+                    "breakout_room",
+                    "requester_name",
+                    "assignment_revision",
+                    "updated_at",
+                ]
+            )
+
+    @staticmethod
+    def _record_effect_error(session: BreakoutSession, error: Exception) -> None:
+        """Persist a bounded retryable effect error for operator visibility."""
+        effect_error = str(error)[:2000] or error.__class__.__name__
+        updated = BreakoutSession.objects.filter(
+            pk=session.pk,
+            status=session.status,
+            revision=session.revision,
+        ).update(effect_error=effect_error, updated_at=timezone.now())
+        if updated:
+            session.effect_error = effect_error
 
     @async_to_sync
     async def _create_livekit_rooms(self, room_names: List[str]) -> None:
         """Create LiveKit rooms with empty_timeout for auto-cleanup."""
         lkapi = utils.create_livekit_client()
+        created = []
         try:
-            for name in room_names:
-                try:
+            async with asyncio.timeout(LIVEKIT_LIFECYCLE_TIMEOUT_SECONDS):
+                response = await lkapi.room.list_rooms(
+                    ListRoomsRequest(names=room_names)
+                )
+                existing = {room.name for room in response.rooms}
+
+                async def create_room(name):
                     await lkapi.room.create_room(
                         CreateRoomRequest(
                             name=name,
                             empty_timeout=EMPTY_TIMEOUT_SECONDS,
                         )
                     )
-                except Exception:
-                    logger.exception("Failed to create LiveKit room %s", name)
+                    created.append(name)
+
+                await asyncio.gather(
+                    *[create_room(name) for name in room_names if name not in existing]
+                )
+        except Exception:
+            results = await asyncio.gather(
+                *[
+                    lkapi.room.delete_room(DeleteRoomRequest(room=name))
+                    for name in created
+                ],
+                return_exceptions=True,
+            )
+            for name, result in zip(created, results, strict=True):
+                if isinstance(result, Exception):
+                    logger.error("Failed to compensate LiveKit room %s", name)
+            raise
         finally:
             await lkapi.aclose()
 
     @async_to_sync
     async def _delete_livekit_rooms(self, room_names: List[str]) -> None:
-        """Delete LiveKit rooms, force-disconnecting any remaining participants."""
+        """Idempotently delete LiveKit rooms and disconnect their participants."""
         lkapi = utils.create_livekit_client()
         try:
-            for name in room_names:
-                try:
-                    await lkapi.room.delete_room(DeleteRoomRequest(room=name))
-                except Exception:  # noqa: BLE001
-                    logger.warning("Failed to delete LiveKit room %s", name)
+            async with asyncio.timeout(LIVEKIT_LIFECYCLE_TIMEOUT_SECONDS):
+                response = await lkapi.room.list_rooms(
+                    ListRoomsRequest(names=room_names)
+                )
+                existing = {room.name for room in response.rooms}
+                await asyncio.gather(
+                    *[
+                        lkapi.room.delete_room(DeleteRoomRequest(room=name))
+                        for name in room_names
+                        if name in existing
+                    ]
+                )
         finally:
             await lkapi.aclose()
+
+    @async_to_sync
+    async def _remove_participant(self, room_name: str, identity: str) -> None:
+        """Remove an identity from its previous LiveKit room if still connected."""
+        lkapi = utils.create_livekit_client()
+        try:
+            participants = await lkapi.room.list_participants(
+                ListParticipantsRequest(room=room_name)
+            )
+            if any(
+                participant.identity == identity
+                for participant in participants.participants
+            ):
+                await lkapi.room.remove_participant(
+                    RoomParticipantIdentity(room=room_name, identity=identity)
+                )
+        finally:
+            await lkapi.aclose()
+
+    def _reconcile_livekit_assignments(self, session: BreakoutSession) -> None:
+        """Evict participants connected to a non-authoritative breakout room."""
+        authoritative_rooms = dict(
+            session.assignments.values_list(
+                "participant_identity", "breakout_room__livekit_room_name"
+            )
+        )
+        manager_identities = set(
+            session.room.accesses.filter(
+                role__in=["administrator", "owner"]
+            ).values_list("user__sub", flat=True)
+        )
+        rooms = list(session.breakout_rooms.values_list("livekit_room_name", flat=True))
+        self._reconcile_livekit_participants(
+            authoritative_rooms, manager_identities, rooms
+        )
+
+    @staticmethod
+    @async_to_sync
+    async def _reconcile_livekit_participants(
+        authoritative_rooms: Dict[str, str],
+        manager_identities: set[str],
+        rooms: List[str],
+    ) -> None:
+        """Apply an authorization snapshot with bounded LiveKit concurrency."""
+        lkapi = utils.create_livekit_client()
+        semaphore = asyncio.Semaphore(LIVEKIT_RECONCILIATION_CONCURRENCY)
+
+        async def list_participants(room_name):
+            async with semaphore:
+                return await lkapi.room.list_participants(
+                    ListParticipantsRequest(room=room_name)
+                )
+
+        async def remove_participant(room_name, identity):
+            async with semaphore:
+                await lkapi.room.remove_participant(
+                    RoomParticipantIdentity(room=room_name, identity=identity)
+                )
+
+        try:
+            async with asyncio.timeout(LIVEKIT_RECONCILIATION_TIMEOUT_SECONDS):
+                responses = await asyncio.gather(
+                    *[list_participants(room_name) for room_name in rooms]
+                )
+                removals = [
+                    remove_participant(room_name, participant.identity)
+                    for room_name, response in zip(rooms, responses, strict=True)
+                    for participant in response.participants
+                    if participant.identity not in manager_identities
+                    and authoritative_rooms.get(participant.identity) != room_name
+                ]
+                await asyncio.gather(*removals)
+        finally:
+            await lkapi.aclose()
+
+    def enforce_breakout_participant_access(
+        self, room_name: str, identity: str
+    ) -> bool:
+        """Enforce the current assignment when LiveKit accepts a participant.
+
+        Join JWTs cannot be revoked after issuance. The authenticated LiveKit
+        webhook is therefore the post-admission guard for cached tokens.
+        """
+        breakout_room = (
+            BreakoutRoom.objects.select_related("session__room")
+            .filter(livekit_room_name=room_name)
+            .first()
+        )
+        authorized = False
+        if breakout_room and breakout_room.session.is_active:
+            authorized = BreakoutAssignment.objects.filter(
+                session=breakout_room.session,
+                breakout_room=breakout_room,
+                participant_identity=identity,
+            ).exists()
+            if not authorized:
+                user = get_user_model().objects.filter(sub=identity).first()
+                authorized = bool(
+                    user and breakout_room.session.room.is_administrator_or_owner(user)
+                )
+
+        if not authorized:
+            self._remove_participant(room_name, identity)
+        return authorized
 
     def broadcast_message(self, session: BreakoutSession, message: str) -> int:
         """Broadcast an announcement message to all breakout rooms and the parent room.
@@ -581,11 +1049,15 @@ class BreakoutService:
         }
 
         rooms = list(session.breakout_rooms.all())
-        for br in rooms:
-            self._send_data_to_room(br.livekit_room_name, payload)
-
-        # Also send to parent main room
-        self._send_data_to_room(str(session.room_id), payload)
+        try:
+            self._send_data_to_rooms(
+                [br.livekit_room_name for br in rooms] + [str(session.room_id)],
+                payload,
+            )
+        except Exception as error:
+            raise BreakoutUpstreamError(
+                "The announcement could not be delivered; retry it."
+            ) from error
 
         logger.info(
             "Broadcast announcement sent to %d breakout rooms for session %s",
@@ -594,35 +1066,108 @@ class BreakoutService:
         )
         return len(rooms)
 
-    def send_help_request(
+    def create_help_request(
         self,
         session: BreakoutSession,
-        breakout_room_id: Optional[str],
-        participant_name: str,
-    ) -> str:
-        """Send an assistance alert from a breakout room to the main room."""
-        room_name = "Breakout Room"
-        if breakout_room_id:
-            try:
-                br = session.breakout_rooms.get(id=breakout_room_id)
-                room_name = br.name
-            except BreakoutRoom.DoesNotExist:
-                pass
+        identity: str,
+    ) -> tuple[BreakoutHelpRequest, bool]:
+        """Create or return the caller's single authoritative open request."""
+        identity_digest = hashlib.sha256(identity.encode()).hexdigest()
+        rate_key = f"breakout-help:{session.id}:{identity_digest}"
+        try:
+            with transaction.atomic():
+                session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+                if not session.is_active:
+                    raise InvalidSessionStateError(
+                        "Breakout session is no longer active."
+                    )
+                assignment = BreakoutAssignment.objects.select_related(
+                    "breakout_room"
+                ).get(
+                    session=session,
+                    participant_identity=identity,
+                )
+                existing = BreakoutHelpRequest.objects.filter(
+                    session=session,
+                    requester_identity=identity,
+                    status=BreakoutHelpRequest.Status.OPEN,
+                ).first()
+                if existing:
+                    return existing, False
+                if not cache.add(rate_key, "1", timeout=HELP_REQUEST_COOLDOWN_SECONDS):
+                    raise HelpRequestRateLimitedError(
+                        "Please wait before requesting help again."
+                    )
+                help_request, created = BreakoutHelpRequest.objects.get_or_create(
+                    session=session,
+                    requester_identity=identity,
+                    status=BreakoutHelpRequest.Status.OPEN,
+                    defaults={
+                        "breakout_room": assignment.breakout_room,
+                        "requester_name": assignment.participant_name,
+                        "assignment_revision": session.revision,
+                    },
+                )
+        except IntegrityError:
+            help_request = BreakoutHelpRequest.objects.get(
+                session=session,
+                requester_identity=identity,
+                status=BreakoutHelpRequest.Status.OPEN,
+            )
+            created = False
 
-        payload = {
-            "type": "breakout:help_request",
-            "breakout_room_id": str(breakout_room_id) if breakout_room_id else "",
-            "room_name": room_name,
-            "participant_name": participant_name,
-            "session_id": str(session.id),
-        }
-
-        self._send_data_to_room(str(session.room_id), payload)
-        return room_name
+        if created:
+            payload = {
+                "type": "breakout:help_revision",
+                "session_id": str(session.id),
+                "help_request_id": str(help_request.id),
+                "revision": session.revision,
+            }
+            self._try_send_data_to_rooms(
+                [str(session.room_id)]
+                + [
+                    breakout_room.livekit_room_name
+                    for breakout_room in session.breakout_rooms.all()
+                ],
+                payload,
+            )
+        return help_request, created
 
     def _send_data_to_room(self, room_name: str, data: dict) -> None:
         """Send a reliable data message to all participants in a room."""
+        utils.notify_participants(room_name, data)
+
+    def _send_data_to_rooms(self, room_names: List[str], data: dict) -> None:
+        """Deliver required messages concurrently within each request timeout."""
+        if not room_names:
+            return
+        with ThreadPoolExecutor(
+            max_workers=min(len(room_names), MAX_ROOMS_PER_SESSION + 1)
+        ) as executor:
+            futures = [
+                executor.submit(self._send_data_to_room, room_name, data)
+                for room_name in room_names
+            ]
+            errors = [error for future in futures if (error := future.exception())]
+        if errors:
+            raise errors[0]
+
+    def _try_send_data_to_room(self, room_name: str, data: dict) -> None:
+        """Send an advisory message without making durable state depend on it."""
         try:
-            utils.notify_participants(room_name, data)
+            self._send_data_to_room(room_name, data)
         except Exception:  # noqa: BLE001
-            logger.warning("Failed to send data message to room %s", room_name)
+            logger.warning("Breakout data hint could not be sent to room %s", room_name)
+
+    def _try_send_data_to_rooms(self, room_names: List[str], data: dict) -> None:
+        """Deliver advisory hints concurrently within each request timeout."""
+        if not room_names:
+            return
+        with ThreadPoolExecutor(
+            max_workers=min(len(room_names), MAX_ROOMS_PER_SESSION + 1)
+        ) as executor:
+            list(
+                executor.map(
+                    lambda name: self._try_send_data_to_room(name, data), room_names
+                )
+            )

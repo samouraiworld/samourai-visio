@@ -7,6 +7,7 @@ handled entirely by LiveKit.
 """
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -24,7 +25,9 @@ class BreakoutSession(BaseModel):
         """Status choices for breakout session."""
 
         CONFIGURING = "configuring", _("Configuring")
+        ACTIVATING = "activating", _("Activating")
         ACTIVE = "active", _("Active")
+        CLOSING = "closing", _("Closing")
         CLOSED = "closed", _("Closed")
 
     room = models.ForeignKey(
@@ -62,11 +65,28 @@ class BreakoutSession(BaseModel):
         verbose_name=_("started at"),
         help_text=_("Timestamp when the session was activated."),
     )
+    ends_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("ends at"),
+        help_text=_("Absolute timer boundary for a timed breakout session."),
+    )
     closed_at = models.DateTimeField(
         null=True,
         blank=True,
         verbose_name=_("closed at"),
         help_text=_("Timestamp when the session was closed."),
+    )
+    revision = models.PositiveBigIntegerField(
+        default=0,
+        verbose_name=_("revision"),
+        help_text=_("Monotonic revision for participant-visible session changes."),
+    )
+    effect_error = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("effect error"),
+        help_text=_("Latest retryable LiveKit reconciliation error."),
     )
 
     class Meta:
@@ -78,7 +98,9 @@ class BreakoutSession(BaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["room"],
-                condition=models.Q(status__in=["configuring", "active"]),
+                condition=models.Q(
+                    status__in=["configuring", "activating", "active", "closing"]
+                ),
                 name="one_active_session_per_room",
             ),
         ]
@@ -158,13 +180,17 @@ class BreakoutRoom(BaseModel):
 class BreakoutAssignment(BaseModel):
     """Junction model: one participant → one breakout room per session.
 
-    Uses ``participant_identity`` (the LiveKit identity, i.e. ``user.sub``
-    for authenticated users or a stable session-scoped UUID for anonymous
-    participants) as the link.
+    Uses the server-issued LiveKit ``participant_identity`` as the link.
 
-    Uniqueness within a session is enforced at the service layer and via
-    a partial unique index when the DB supports it.
+    Uniqueness within a session is enforced by the database.
     """
+
+    session = models.ForeignKey(
+        BreakoutSession,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        verbose_name=_("breakout session"),
+    )
 
     breakout_room = models.ForeignKey(
         BreakoutRoom,
@@ -176,7 +202,7 @@ class BreakoutAssignment(BaseModel):
         max_length=255,
         db_index=True,
         verbose_name=_("participant identity"),
-        help_text=_("LiveKit identity (user.sub or stable anonymous UUID)."),
+        help_text=_("Server-issued LiveKit participant identity."),
     )
     participant_name = models.CharField(
         max_length=255,
@@ -192,6 +218,90 @@ class BreakoutAssignment(BaseModel):
         ordering = ("created_at",)
         verbose_name = _("Breakout Assignment")
         verbose_name_plural = _("Breakout Assignments")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "participant_identity"],
+                name="one_breakout_assignment_per_participant",
+            )
+        ]
 
     def __str__(self):
         return f"{self.participant_name or self.participant_identity} → {self.breakout_room.name}"
+
+    def clean(self):
+        """Reject assignments whose room belongs to another session."""
+        super().clean()
+        session_id = getattr(self, "session_id", None)
+        if self.breakout_room_id and session_id:
+            room_session_id = self.breakout_room.session_id
+            if room_session_id != session_id:
+                raise ValidationError(
+                    {"breakout_room": _("Breakout room must belong to the session.")}
+                )
+
+    def save(self, *args, **kwargs):
+        """Populate the denormalized session key and enforce room ownership."""
+        if self.breakout_room_id and not getattr(self, "session_id", None):
+            self.session = self.breakout_room.session
+        self.clean()
+        return super().save(*args, **kwargs)
+
+
+class BreakoutHelpRequest(BaseModel):
+    """Durable participant request for manager assistance."""
+
+    class Status(models.TextChoices):
+        """Help-request lifecycle states."""
+
+        OPEN = "open", _("Open")
+        CANCELLED = "cancelled", _("Cancelled")
+        ACKNOWLEDGED = "acknowledged", _("Acknowledged")
+
+    session = models.ForeignKey(
+        BreakoutSession,
+        on_delete=models.CASCADE,
+        related_name="help_requests",
+        verbose_name=_("breakout session"),
+    )
+    breakout_room = models.ForeignKey(
+        BreakoutRoom,
+        on_delete=models.CASCADE,
+        related_name="help_requests",
+        verbose_name=_("breakout room"),
+    )
+    requester_identity = models.CharField(max_length=255, db_index=True)
+    requester_name = models.CharField(max_length=255, blank=True, default="")
+    assignment_revision = models.PositiveBigIntegerField(default=0)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.OPEN,
+    )
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        app_label = "core"
+        db_table = "meet_breakout_help_request"
+        ordering = ("created_at",)
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "requester_identity"],
+                condition=models.Q(status="open"),
+                name="one_open_help_request_per_participant",
+            )
+        ]
+
+    def clean(self):
+        """Reject requests whose breakout room belongs to another session."""
+        super().clean()
+        if self.breakout_room_id and self.session_id:
+            if self.breakout_room.session_id != self.session_id:
+                raise ValidationError(
+                    {"breakout_room": _("Breakout room must belong to the session.")}
+                )
+
+    def save(self, *args, **kwargs):
+        """Enforce session ownership for individually persisted requests."""
+        self.clean()
+        return super().save(*args, **kwargs)

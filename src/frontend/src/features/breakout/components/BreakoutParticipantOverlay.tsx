@@ -2,16 +2,17 @@
  * Overlay shown to participants when they are in a breakout room.
  *
  * Displays: current room name, timer, 'Ask for Help' button, and 'Return to Main Room' button.
- * Minimal design — floating non-obstructive bar with WCAG AA compliant high contrast.
+ * Uses the shared semantic color tokens for consistent contrast and theming.
  */
 
-import { useState } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
 import { useTranslation } from 'react-i18next'
 import { useSnapshot } from 'valtio'
 import { breakoutStore } from '../stores/breakout'
 import { useRequestBreakoutHelp } from '../api/useRequestBreakoutHelp'
+import { useCancelBreakoutHelp } from '../api/useCancelBreakoutHelp'
+import { useCurrentBreakoutAssignment } from '../api/useCurrentBreakoutAssignment'
 import { BreakoutTimer } from './BreakoutTimer'
 import { BreakoutRecallBanner } from './BreakoutRecallBanner'
 import {
@@ -22,135 +23,161 @@ import {
 
 interface BreakoutParticipantOverlayProps {
   onReturnToMain: () => void
+  onReturnToAssigned: () => void
 }
 
 export const BreakoutParticipantOverlay = ({
   onReturnToMain,
+  onReturnToAssigned,
 }: BreakoutParticipantOverlayProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.participant' })
   const snap = useSnapshot(breakoutStore)
-  const [helpSent, setHelpSent] = useState(false)
-
-  const { mutateAsync: sendHelpRequest, isPending: isSendingHelp } =
-    useRequestBreakoutHelp()
+  const sessionId = snap.activeSessionId ?? undefined
+  const roomId = snap.mainRoomId || snap.mainRoomSlug || undefined
+  const { data: assignmentState } = useCurrentBreakoutAssignment(
+    roomId,
+    sessionId
+  )
+  const {
+    mutateAsync: sendHelpRequest,
+    isPending: isSendingHelp,
+    isError: didHelpFail,
+  } = useRequestBreakoutHelp()
+  const {
+    mutateAsync: cancelHelpRequest,
+    isPending: isCancellingHelp,
+    isError: didCancelFail,
+  } = useCancelBreakoutHelp()
 
   // Find the display name of the current breakout room with fallback to transitionTargetName
   const roomName =
-    snap.session?.breakout_rooms.find(
-      (r) => r.livekit_room_name === snap.currentBreakoutRoomLkName
-    )?.name ??
+    assignmentState?.assignment?.breakout_room_name ??
     snap.transitionTargetName ??
-    'Breakout Room'
+    t('unknownRoom')
+  const helpOpen = !!assignmentState?.help_request
+  const isInBreakout = !!snap.currentBreakoutRoomLkName
 
   const handleAskForHelp = async () => {
-    const sessionId = snap.activeSessionId
-    const roomId = snap.mainRoomId || snap.mainRoomSlug
-    const breakoutRoomId = snap.assignedRoomId
-    if (!sessionId || !roomId || !breakoutRoomId) return
+    if (!sessionId || !roomId) return
 
-    try {
-      await sendHelpRequest({
-        roomId,
-        sessionId,
-        breakoutRoomId,
-      })
-      setHelpSent(true)
-      setTimeout(() => setHelpSent(false), 30000)
-    } catch (err) {
-      console.error('Failed to request breakout help:', err)
-    }
+    await sendHelpRequest({ roomId, sessionId })
+  }
+
+  const handleCancelHelp = async () => {
+    if (!sessionId || !roomId) return
+    await cancelHelpRequest({ roomId, sessionId })
   }
 
   return (
     <>
-      <BreakoutRecallBanner onRecall={onReturnToMain} />
+      <BreakoutRecallBanner
+        onRecall={onReturnToMain}
+        timing={assignmentState}
+      />
       <div
         className={css({
           position: 'absolute',
-          top: '0.75rem',
-          left: '50%',
-          transform: 'translateX(-50%)',
+          top: 0.75,
+          insetInline: 0,
+          marginInline: 'auto',
           display: 'flex',
           alignItems: 'center',
-          gap: '0.625rem',
-          padding: '0.5rem 1rem',
-          borderRadius: '999px',
-          backgroundColor: 'rgba(0, 0, 0, 0.75)',
-          backdropFilter: 'blur(8px)',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 0.625,
+          paddingBlock: 0.5,
+          paddingInline: 1,
+          borderRadius: '8',
+          backgroundColor: 'greyscale.950',
           zIndex: 50,
           pointerEvents: 'auto',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
+          width: 'full',
+          maxWidth: 'room-side-panel',
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'control.subtle',
         })}
       >
         <span
           className={css({
-            color: 'white',
-            fontSize: '0.875rem',
+            color: 'primary.text',
+            fontSize: 14,
             fontWeight: '600',
           })}
         >
           {t('currentRoom', { room: roomName })}
         </span>
 
-        <BreakoutTimer variant="overlay" />
+        <BreakoutTimer variant="overlay" timing={assignmentState} />
 
-        {/* Ask for Help Button — WCAG AA crisp white high contrast */}
+        {/* Ask for Help Button */}
         <Button
           variant="secondaryText"
           size="sm"
-          isDisabled={isSendingHelp || helpSent}
-          onPress={handleAskForHelp}
-          aria-label={t('askForHelp') ?? 'Ask for Help'}
-          tooltip={
-            t('askForHelpTooltip') ?? 'Notify the host you need assistance'
-          }
+          isDisabled={isSendingHelp || isCancellingHelp}
+          onPress={helpOpen ? handleCancelHelp : handleAskForHelp}
+          aria-label={helpOpen ? t('cancelHelp') : t('askForHelp')}
+          tooltip={helpOpen ? t('cancelHelp') : t('askForHelpTooltip')}
           className={css({
-            color: 'white !important',
-            _hover: { backgroundColor: 'rgba(255, 255, 255, 0.15) !important' },
+            color: 'primary.text !important',
+            _hover: { backgroundColor: 'primary.hover !important' },
           })}
         >
-          {helpSent ? (
-            <RiCheckLine size={15} color="white" />
-          ) : (
-            <RiQuestionLine size={15} color="white" />
-          )}
+          {helpOpen ? <RiCheckLine size={15} /> : <RiQuestionLine size={15} />}
           <span
             className={css({
-              fontSize: '0.8125rem',
-              marginLeft: '0.25rem',
-              color: 'white !important',
+              fontSize: 12,
+              marginLeft: 0.25,
+              color: 'primary.text !important',
             })}
           >
-            {helpSent
-              ? (t('helpRequested') ?? 'Help requested')
-              : (t('askForHelp') ?? 'Ask for Help')}
+            {helpOpen ? t('cancelHelp') : t('askForHelp')}
           </span>
         </Button>
 
-        {/* Return to Main Room Button — WCAG AA crisp white high contrast */}
+        {/* Return to Main Room Button */}
         <Button
           variant="secondaryText"
           size="sm"
-          onPress={onReturnToMain}
-          aria-label={t('returnButton')}
-          tooltip={t('returnButton')}
+          onPress={isInBreakout ? onReturnToMain : onReturnToAssigned}
+          aria-label={isInBreakout ? t('returnButton') : t('returnAssigned')}
+          tooltip={isInBreakout ? t('returnButton') : t('returnAssigned')}
           className={css({
-            color: 'white !important',
-            _hover: { backgroundColor: 'rgba(255, 255, 255, 0.15) !important' },
+            color: 'primary.text !important',
+            _hover: { backgroundColor: 'primary.hover !important' },
           })}
         >
-          <RiArrowGoBackLine size={15} color="white" />
+          <RiArrowGoBackLine size={15} />
           <span
             className={css({
-              fontSize: '0.8125rem',
-              marginLeft: '0.25rem',
-              color: 'white !important',
+              fontSize: 12,
+              marginLeft: 0.25,
+              color: 'primary.text !important',
             })}
           >
-            {t('returnButton')}
+            {isInBreakout ? t('returnButton') : t('returnAssigned')}
           </span>
         </Button>
       </div>
+      {(didHelpFail || didCancelFail || snap.transitionError) && (
+        <div
+          role="alert"
+          className={css({
+            position: 'absolute',
+            top: 4,
+            insetInline: 0,
+            marginInline: 'auto',
+            width: 'fit',
+            maxWidth: 'full',
+            padding: 0.5,
+            borderRadius: '8',
+            backgroundColor: 'danger',
+            color: 'danger.text',
+          })}
+        >
+          {t('actionError')}
+        </div>
+      )}
     </>
   )
 }

@@ -6,30 +6,41 @@ All endpoints return 404 when the feature flag is disabled.
 
 from logging import getLogger
 
-from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 
 from rest_framework import decorators, status, viewsets
 from rest_framework.response import Response
 
 from core import models as core_models
+from core.api.feature_flag import FeatureFlag
+from core.services.lobby import LobbyService
 
-from .models import BreakoutRoom, BreakoutSession
+from .models import (
+    BreakoutAssignment,
+    BreakoutHelpRequest,
+    BreakoutRoom,
+    BreakoutSession,
+)
 from .serializers import (
+    BreakoutHelpRequestSerializer,
     BreakoutSessionSerializer,
     BreakoutSessionStatusSerializer,
     BroadcastMessageSerializer,
     BulkAssignSerializer,
     CreateBreakoutSessionSerializer,
     JoinBreakoutRoomSerializer,
+    RandomizeAssignmentsSerializer,
     UpdateBreakoutSessionSerializer,
 )
 from .services import (
     BreakoutService,
     BreakoutServiceError,
+    BreakoutUpstreamError,
+    HelpRequestRateLimitedError,
     InvalidSessionStateError,
     SessionAlreadyActiveError,
 )
@@ -39,7 +50,7 @@ logger = getLogger(__name__)
 
 def _check_feature_flag():
     """Raise Http404 if the breakout rooms feature flag is disabled."""
-    if not getattr(settings, "MEET_BREAKOUT_ROOMS_ENABLED", False):
+    if not FeatureFlag.flag_is_active("breakout_rooms"):
         raise Http404
 
 
@@ -66,6 +77,13 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
 
     def _can_manage(self, room, user):
         return room.is_administrator_or_owner(user)
+
+    @staticmethod
+    def _caller_identity(request, room):
+        """Resolve identity only from authenticated or signed server state."""
+        if request.user and request.user.is_authenticated:
+            return str(request.user.sub)
+        return LobbyService.get_participant_id(request, room.id)
 
     def _get_session(self, room_id, session_id):
         """Resolve a breakout session within a room."""
@@ -104,12 +122,21 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 {"detail": str(e)},
                 status=status.HTTP_409_CONFLICT,
             )
+        except BreakoutUpstreamError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except InvalidSessionStateError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
         except BreakoutServiceError as e:
             return Response(
                 {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
         session = BreakoutSession.objects.prefetch_related(
             "breakout_rooms__assignments"
         ).get(pk=session.pk)
@@ -146,7 +173,9 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             room=room,
             status__in=[
                 BreakoutSession.Status.CONFIGURING,
+                BreakoutSession.Status.ACTIVATING,
                 BreakoutSession.Status.ACTIVE,
+                BreakoutSession.Status.CLOSING,
             ],
         ).prefetch_related("breakout_rooms__assignments")
 
@@ -180,10 +209,32 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except BreakoutUpstreamError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         session = BreakoutSession.objects.prefetch_related(
             "breakout_rooms__assignments"
         ).get(pk=session.pk)
+        return Response(BreakoutSessionSerializer(session).data)
+
+    @decorators.action(detail=True, methods=["post"], url_path="retry")
+    def retry(self, request, room_id=None, pk=None):
+        """Retry a failed LiveKit effect without duplicating domain state."""
+        session = self._get_session(room_id, pk)
+        if not self._can_manage(session.room, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        try:
+            session = BreakoutService().retry_session(session)
+        except InvalidSessionStateError as error:
+            return Response({"detail": str(error)}, status=status.HTTP_409_CONFLICT)
+        except BreakoutUpstreamError as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
         return Response(BreakoutSessionSerializer(session).data)
 
     # ── GET /rooms/{room_id}/breakout-sessions/{sid}/status/ ──────────
@@ -199,13 +250,16 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        rooms_status = BreakoutService().get_live_status(session)
+        service = BreakoutService()
+        rooms_status = service.get_live_status(session)
 
         data = {
             "session_id": str(session.id),
             "status": session.status,
             "started_at": session.started_at,
+            "ends_at": session.ends_at,
             "duration_seconds": session.duration_seconds,
+            "main_room": service.get_main_room_status(session),
             "rooms": rooms_status,
         }
 
@@ -232,6 +286,17 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             BreakoutService().assign_participants(
                 session,
                 serializer.validated_data["assignments"],
+                expected_revision=serializer.validated_data["revision"],
+            )
+        except BreakoutUpstreamError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except InvalidSessionStateError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_409_CONFLICT,
             )
         except BreakoutServiceError as e:
             return Response(
@@ -258,15 +323,25 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        participants = request.data.get("participants", [])
-        if not participants:
-            return Response(
-                {"detail": "No participants provided."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        serializer = RandomizeAssignmentsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
 
         try:
-            BreakoutService().randomize_assignments(session, participants)
+            BreakoutService().randomize_assignments(
+                session,
+                serializer.validated_data["participants"],
+                expected_revision=serializer.validated_data["revision"],
+            )
+        except BreakoutUpstreamError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        except InvalidSessionStateError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_409_CONFLICT,
+            )
         except BreakoutServiceError as e:
             return Response(
                 {"detail": str(e)},
@@ -304,6 +379,11 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 {"detail": str(e)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except BreakoutUpstreamError as e:
+            return Response(
+                {"detail": str(e)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         return Response(
             {
@@ -317,7 +397,7 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
 
     @decorators.action(detail=True, methods=["post"], url_path="request-help")
     def request_help(self, request, room_id=None, pk=None):
-        """Send an assistance beacon from a breakout room to the host."""
+        """Create the caller's durable assistance request."""
         session = self._get_session(room_id, pk)
         if not session.is_active:
             return Response(
@@ -325,64 +405,158 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        breakout_room_id = request.data.get("breakout_room_id")
-        if not breakout_room_id:
-            return Response(
-                {"detail": "breakout_room_id is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        breakout_room = get_object_or_404(
-            BreakoutRoom,
-            pk=breakout_room_id,
-            session=session,
-        )
-
-        participant_id = str(request.data.get("participant_id") or "").strip()
-        if request.user.is_authenticated and hasattr(request.user, "sub"):
-            caller_identity = str(request.user.sub)
-        else:
-            caller_identity = participant_id
-
-        # Validate caller is assigned to this room or is manager
-        is_assigned = (
-            breakout_room.assignments.filter(
-                participant_identity=caller_identity
-            ).exists()
-            if caller_identity
-            else False
-        )
-        if not is_assigned and not self._can_manage(session.room, request.user):
+        caller_identity = self._caller_identity(request, session.room)
+        if not caller_identity:
             return Response(
                 {"detail": "You are not a participant in this breakout room."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # Rate limiting: 15-second cooldown per caller/IP/room
-        client_ip = request.META.get("HTTP_X_FORWARDED_FOR", "").split(",")[
-            0
-        ].strip() or request.META.get("REMOTE_ADDR", "")
-        cache_key = (
-            f"breakout_help_cooldown_{session.id}_"
-            f"{breakout_room.id}_{client_ip}_{caller_identity}"
-        )
-        if cache.get(cache_key):
+        try:
+            help_request, created = BreakoutService().create_help_request(
+                session=session,
+                identity=caller_identity,
+            )
+        except BreakoutAssignment.DoesNotExist:
             return Response(
-                {"detail": "Please wait before requesting help again."},
+                {"detail": "You are not a participant in this breakout room."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        except InvalidSessionStateError as error:
+            return Response(
+                {"detail": str(error)},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except HelpRequestRateLimitedError as error:
+            return Response(
+                {"detail": str(error)},
                 status=status.HTTP_429_TOO_MANY_REQUESTS,
             )
-        cache.set(cache_key, True, timeout=15)
-
-        raw_name = request.data.get("participant_name")
-        clean_name = str(raw_name).strip()[:64] if raw_name else "A participant"
-
-        BreakoutService().send_help_request(
-            session=session,
-            breakout_room_id=breakout_room.id,
-            participant_name=clean_name,
+        return Response(
+            BreakoutHelpRequestSerializer(help_request).data,
+            status=(status.HTTP_201_CREATED if created else status.HTTP_200_OK),
         )
 
-        return Response({"status": "help_requested"}, status=status.HTTP_200_OK)
+    @decorators.action(detail=True, methods=["get"], url_path="help-requests")
+    def help_requests(self, request, room_id=None, pk=None):
+        """List durable open help requests for an authorized manager."""
+        session = self._get_session(room_id, pk)
+        if not self._can_manage(session.room, request.user):
+            return Response(
+                {"detail": "You must be an administrator or owner of the room."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        requests = session.help_requests.filter(
+            status=BreakoutHelpRequest.Status.OPEN
+        ).select_related("breakout_room")
+        return Response(BreakoutHelpRequestSerializer(requests, many=True).data)
+
+    @decorators.action(detail=True, methods=["post"], url_path="cancel-help")
+    def cancel_help(self, request, room_id=None, pk=None):
+        """Cancel the caller's open help request."""
+        session = self._get_session(room_id, pk)
+        caller_identity = self._caller_identity(request, session.room)
+        if not caller_identity:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        help_request = get_object_or_404(
+            BreakoutHelpRequest,
+            session=session,
+            requester_identity=caller_identity,
+            status=BreakoutHelpRequest.Status.OPEN,
+        )
+        help_request.status = BreakoutHelpRequest.Status.CANCELLED
+        help_request.cancelled_at = timezone.now()
+        help_request.save(update_fields=["status", "cancelled_at", "updated_at"])
+        return Response(BreakoutHelpRequestSerializer(help_request).data)
+
+    @decorators.action(detail=True, methods=["post"], url_path="acknowledge-help")
+    def acknowledge_help(self, request, room_id=None, pk=None):
+        """Acknowledge one help request as a manager."""
+        session = self._get_session(room_id, pk)
+        if not self._can_manage(session.room, request.user):
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        expected_room_id = request.data.get("expected_breakout_room_id")
+        try:
+            expected_revision = int(request.data["expected_assignment_revision"])
+        except (KeyError, TypeError, ValueError):
+            return Response(
+                {"detail": "The expected help assignment is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not expected_room_id:
+            return Response(
+                {"detail": "The expected help assignment is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        with transaction.atomic():
+            session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
+            help_request = get_object_or_404(
+                BreakoutHelpRequest.objects.select_for_update(),
+                pk=request.data.get("help_request_id"),
+                session=session,
+                status=BreakoutHelpRequest.Status.OPEN,
+            )
+            if (
+                not session.is_active
+                or str(help_request.breakout_room_id) != str(expected_room_id)
+                or help_request.assignment_revision != expected_revision
+            ):
+                return Response(
+                    {"detail": "The help request assignment has changed."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+            help_request.status = BreakoutHelpRequest.Status.ACKNOWLEDGED
+            help_request.acknowledged_at = timezone.now()
+            help_request.save(update_fields=["status", "acknowledged_at", "updated_at"])
+        return Response(BreakoutHelpRequestSerializer(help_request).data)
+
+    @decorators.action(detail=True, methods=["get"], url_path="current-assignment")
+    def current_assignment(self, request, room_id=None, pk=None):
+        """Return only the caller's current assignment and session revision."""
+        session = self._get_session(room_id, pk)
+        caller_identity = self._caller_identity(request, session.room)
+        if not caller_identity:
+            return Response(status=status.HTTP_403_FORBIDDEN)
+        assignment = (
+            BreakoutAssignment.objects.filter(
+                session=session,
+                participant_identity=caller_identity,
+            )
+            .select_related("breakout_room")
+            .first()
+        )
+        assignment_data = None
+        if assignment:
+            assignment_data = {
+                "breakout_room_id": str(assignment.breakout_room_id),
+                "breakout_room_name": assignment.breakout_room.name,
+                "livekit_room_name": assignment.breakout_room.livekit_room_name,
+            }
+        open_help_request = (
+            BreakoutHelpRequest.objects.filter(
+                session=session,
+                requester_identity=caller_identity,
+                status=BreakoutHelpRequest.Status.OPEN,
+            )
+            .select_related("breakout_room")
+            .first()
+        )
+        return Response(
+            {
+                "session_id": str(session.id),
+                "revision": session.revision,
+                "status": session.status,
+                "started_at": session.started_at,
+                "ends_at": session.ends_at,
+                "duration_seconds": session.duration_seconds,
+                "assignment": assignment_data,
+                "help_request": (
+                    BreakoutHelpRequestSerializer(open_help_request).data
+                    if open_help_request
+                    else None
+                ),
+            }
+        )
 
     # ── POST .../breakout-sessions/{sid}/rooms/{rid}/join/ ────────────
 
@@ -410,41 +584,40 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             session=session,
         )
 
-        serializer = JoinBreakoutRoomSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        # Resolve participant identity
-        participant_id = serializer.validated_data.get("participant_id")
-        username = serializer.validated_data.get("username")
-        if request.user.is_anonymous:
-            identity = participant_id or username or "guest"
-        else:
-            identity = str(request.user.sub)
-
+        JoinBreakoutRoomSerializer(data=request.data).is_valid(raise_exception=True)
+        identity = self._caller_identity(request, session.room)
         if not identity:
-            return Response(
-                {"detail": "Participant identity could not be determined."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # Check assignment (moderator/admin/owner can join any room)
-        is_admin = self._can_manage(session.room, request.user)
-        if (
-            not is_admin
-            and not breakout_room.assignments.filter(
-                participant_identity=identity,
-            ).exists()
-        ):
             return Response(
                 {"detail": "You are not assigned to this breakout room."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        livekit_data = BreakoutService().generate_breakout_token(
+        # Check assignment (moderator/admin/owner can join any room)
+        is_admin = self._can_manage(session.room, request.user)
+        assignment = BreakoutAssignment.objects.filter(
+            session=session,
             breakout_room=breakout_room,
-            user=request.user,
-            username=serializer.validated_data.get("username"),
-            participant_id=participant_id,
+            participant_identity=identity,
+        ).first()
+        if not is_admin and assignment is None:
+            return Response(
+                {"detail": "You are not assigned to this breakout room."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        display_name = (
+            assignment.participant_name
+            if assignment
+            else (request.user.full_name or str(request.user))
         )
+        try:
+            livekit_data = BreakoutService().generate_breakout_token(
+                breakout_room=breakout_room,
+                user=request.user,
+                identity=identity,
+                display_name=display_name,
+            )
+        except InvalidSessionStateError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
 
         return Response({"livekit": livekit_data})

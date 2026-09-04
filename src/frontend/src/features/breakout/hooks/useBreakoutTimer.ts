@@ -1,73 +1,51 @@
-/**
- * Client-side timer for active breakout sessions.
- *
- * Supports both:
- * 1. Countdown mode (when duration_seconds is set).
- * 2. Elapsed mode (when session has no time limit).
- *
- * Updates the breakout store every second.
- */
-
 import { useEffect, useRef, useState } from 'react'
-import { useSnapshot } from 'valtio'
-import { breakoutStore } from '../stores/breakout'
 
-export const useBreakoutTimer = () => {
-  const snap = useSnapshot(breakoutStore)
+export interface BreakoutTiming {
+  status: string
+  started_at: string | null
+  ends_at: string | null
+  duration_seconds?: number | null
+}
+
+export const useBreakoutTimer = (timing?: BreakoutTiming | null) => {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [remaining, setRemaining] = useState(0)
   const [elapsed, setElapsed] = useState(0)
-
-  const session = snap.session
-  const isActive = session?.status === 'active'
-  const hasDuration =
-    !!session?.duration_seconds && session.duration_seconds > 0
+  const isActive = timing?.status === 'active' || timing?.status === 'closing'
+  const hasDuration = !!timing?.ends_at
 
   useEffect(() => {
-    if (!session || session.status !== 'active') {
-      breakoutStore.timer = { remaining: 0, total: 0 }
+    if (!timing || !isActive) {
+      setRemaining(0)
       setElapsed(0)
       return
     }
 
-    const startedAt = session.started_at
-      ? new Date(session.started_at).getTime()
+    const startedAt = timing.started_at
+      ? new Date(timing.started_at).getTime()
       : Date.now()
+    const endsAt = timing.ends_at ? new Date(timing.ends_at).getTime() : null
 
-    if (hasDuration && session.duration_seconds) {
-      const total = session.duration_seconds
-      breakoutStore.timer.total = total
-
-      const tick = () => {
-        const passed = Math.floor((Date.now() - startedAt) / 1000)
-        const rem = Math.max(0, total - passed)
-        breakoutStore.timer.remaining = rem
+    const tick = () => {
+      const now = Date.now()
+      setElapsed(Math.max(0, Math.floor((now - startedAt) / 1000)))
+      if (endsAt !== null) {
+        setRemaining(Math.max(0, Math.ceil((endsAt - now) / 1000)))
       }
-
-      tick()
-      intervalRef.current = setInterval(tick, 1000)
-    } else {
-      // Unlimited / elapsed mode
-      breakoutStore.timer = { remaining: 0, total: 0 }
-
-      const tick = () => {
-        setElapsed(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)))
-      }
-
-      tick()
-      intervalRef.current = setInterval(tick, 1000)
     }
 
+    tick()
+    intervalRef.current = setInterval(tick, 1000)
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current)
     }
-  }, [session, hasDuration])
+  }, [isActive, timing])
 
   return {
-    remaining: snap.timer.remaining,
-    total: snap.timer.total,
+    remaining,
     elapsed,
     hasTimer: isActive,
     isCountdown: hasDuration,
-    isExpired: hasDuration && snap.timer.total > 0 && snap.timer.remaining <= 0,
+    isExpired: hasDuration && remaining <= 0,
   }
 }

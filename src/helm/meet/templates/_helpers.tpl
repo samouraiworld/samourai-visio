@@ -185,6 +185,15 @@ Requires top level scope
 {{- end }}
 
 {{/*
+Full name for the Celery Beat scheduler
+
+Requires top level scope
+*/}}
+{{- define "meet.celeryBeat.fullname" -}}
+{{ include "meet.fullname" . }}-celery-beat
+{{- end }}
+
+{{/*
 Full name for the Celery Transcribe
 
 Requires top level scope

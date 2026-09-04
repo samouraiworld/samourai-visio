@@ -20,10 +20,12 @@ import { useParticipants } from '@livekit/components-react'
 import { breakoutStore, clearBreakoutState } from '../stores/breakout'
 import { useBreakoutStatus } from '../api/useBreakoutStatus'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
+import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
 import { useBroadcastMessage } from '../api/useBroadcastMessage'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useBreakoutRoomSwap } from '../hooks/useBreakoutRoomSwap'
 import { BreakoutTimer } from './BreakoutTimer'
+import type { BreakoutSession } from '../api/types'
 import {
   RiStopFill,
   RiGroupLine,
@@ -36,6 +38,7 @@ import {
 
 interface BreakoutActiveViewProps {
   roomUuid: string
+  session: BreakoutSession
 }
 
 const getInitials = (name: string): string => {
@@ -47,10 +50,13 @@ const getInitials = (name: string): string => {
   return name.slice(0, 2).toUpperCase()
 }
 
-export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
+export const BreakoutActiveView = ({
+  roomUuid,
+  session,
+}: BreakoutActiveViewProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.active' })
   const snap = useSnapshot(breakoutStore)
-  const sessionId = snap.session?.id
+  const sessionId = session.id
 
   const [broadcastText, setBroadcastText] = useState('')
   const [broadcastSuccess, setBroadcastSuccess] = useState(false)
@@ -66,6 +72,8 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
 
   const { mutateAsync: updateSession, isPending: isClosing } =
     useUpdateBreakoutSession()
+  const { mutateAsync: retrySession, isPending: isRetrying } =
+    useRetryBreakoutSession()
 
   const { mutateAsync: sendBroadcast, isPending: isBroadcasting } =
     useBroadcastMessage()
@@ -73,9 +81,10 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
   const { mutateAsync: assignParticipants, isPending: isReassigning } =
     useAssignParticipants()
 
-  const { moveToBreakoutRoom, returnToMainRoom } = useBreakoutRoomSwap({
-    currentRoomSlug: snap.mainRoomSlug || '',
-  })
+  const { moveToBreakoutRoom, returnToMainRoom, returnToMainRoomAfterClose } =
+    useBreakoutRoomSwap({
+      currentRoomSlug: snap.mainRoomSlug || '',
+    })
 
   const handleCloseAll = useCallback(async () => {
     if (!sessionId) return
@@ -87,7 +96,8 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
     })
 
     if (snap.currentBreakoutRoomLkName) {
-      await returnToMainRoom()
+      await returnToMainRoomAfterClose()
+      return
     }
     clearBreakoutState()
   }, [
@@ -95,8 +105,12 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
     roomUuid,
     updateSession,
     snap.currentBreakoutRoomLkName,
-    returnToMainRoom,
+    returnToMainRoomAfterClose,
   ])
+
+  const handleRetry = useCallback(async () => {
+    await retrySession({ roomId: roomUuid, sessionId })
+  }, [retrySession, roomUuid, sessionId])
 
   const handleSendBroadcast = useCallback(async () => {
     if (!sessionId || !broadcastText.trim()) return
@@ -119,14 +133,14 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
       participantName: string,
       targetRoomId: string | null
     ) => {
-      if (!sessionId || !snap.session) return
+      if (!sessionId) return
 
       const newAssignments: Record<
         string,
         { identity: string; name: string }[]
       > = {}
 
-      for (const room of snap.session.breakout_rooms) {
+      for (const room of session.breakout_rooms) {
         newAssignments[room.id] = room.assignments
           .filter((a) => a.participant_identity !== participantIdentity)
           .map((a) => ({
@@ -142,24 +156,26 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
         })
       }
 
-      const result = await assignParticipants({
+      await assignParticipants({
         roomId: roomUuid,
         sessionId,
+        revision: session.revision,
         assignments: newAssignments,
       })
-
-      breakoutStore.session = result
     },
-    [sessionId, snap.session, roomUuid, assignParticipants]
+    [sessionId, session, roomUuid, assignParticipants]
   )
 
-  const rooms = snap.session?.breakout_rooms ?? []
+  const rooms = session.breakout_rooms
 
   // Map of active participants reported by LiveKit status endpoint
   const statusRoomMap = useMemo(() => {
     const map = new Map<
       string,
-      { count: number; participants: { identity: string; name: string }[] }
+      {
+        count: number | null
+        participants: { identity: string; name: string }[]
+      }
     >()
     if (statusData?.rooms) {
       for (const r of statusData.rooms) {
@@ -172,47 +188,104 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
     return map
   }, [statusData])
 
-  // Set of identities assigned to any breakout room
-  const assignedIdentities = useMemo(() => {
-    const set = new Set<string>()
-    if (snap.session) {
-      for (const r of snap.session.breakout_rooms) {
-        for (const a of r.assignments) {
-          set.add(a.participant_identity)
-        }
-      }
-    }
-    return set
-  }, [snap.session])
+  const localIdentity = liveParticipants.find(
+    (participant) => participant.isLocal
+  )?.identity
 
-  // Attendees currently unassigned or in main room
+  // Actual main-room presence is reported by the backend, independent of assignment.
   const mainRoomAttendees = useMemo(() => {
-    return liveParticipants.filter(
-      (p) => !assignedIdentities.has(p.identity) && !p.isLocal
+    return (statusData?.main_room.participants ?? []).filter(
+      (participant) => participant.identity !== localIdentity
     )
-  }, [liveParticipants, assignedIdentities])
+  }, [localIdentity, statusData?.main_room.participants])
+
+  if (session.status === 'closing') {
+    return (
+      <div
+        className={css({
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 0.75,
+          padding: 0.75,
+          flex: 1,
+        })}
+      >
+        {session.effect_error ? (
+          <div
+            role="alert"
+            className={css({
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 0.5,
+              padding: 0.75,
+              borderRadius: '8',
+              backgroundColor: 'danger.subtle',
+              color: 'danger.subtle-text',
+            })}
+          >
+            <span>{t('syncFailed')}</span>
+            <Button
+              variant="secondaryText"
+              size="sm"
+              isDisabled={isRetrying}
+              onPress={handleRetry}
+            >
+              {t('retrySynchronization')}
+            </Button>
+          </div>
+        ) : (
+          <div role="status">{t('closing')}</div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div
       className={css({
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.875rem',
-        padding: '0.875rem',
+        gap: 0.75,
+        padding: 0.75,
         overflowY: 'auto',
         flex: 1,
       })}
     >
+      {session.effect_error && (
+        <div
+          role="alert"
+          className={css({
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 0.5,
+            padding: 0.75,
+            borderRadius: '8',
+            backgroundColor: 'danger.subtle',
+            color: 'danger.subtle-text',
+          })}
+        >
+          <span>{t('syncFailed')}</span>
+          <Button
+            variant="secondaryText"
+            size="sm"
+            isDisabled={isRetrying}
+            onPress={handleRetry}
+          >
+            {t('retrySynchronization')}
+          </Button>
+        </div>
+      )}
+
       {/* Timer Header */}
       <div
         className={css({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '0.5rem',
+          padding: 0.5,
         })}
       >
-        <BreakoutTimer />
+        <BreakoutTimer timing={session} />
       </div>
 
       {/* Broadcast Announcement Bar */}
@@ -220,11 +293,12 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
         className={css({
           display: 'flex',
           flexDirection: 'column',
-          gap: '0.5rem',
-          padding: '0.75rem',
-          borderRadius: '0.5rem',
-          backgroundColor: 'rgba(255, 255, 255, 0.04)',
-          border: '1px solid',
+          gap: 0.5,
+          padding: 0.75,
+          borderRadius: '8',
+          backgroundColor: 'box.bg',
+          borderWidth: 1,
+          borderStyle: 'solid',
           borderColor: 'box.border',
         })}
       >
@@ -232,15 +306,15 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
           className={css({
             display: 'flex',
             alignItems: 'center',
-            gap: '0.375rem',
-            fontSize: '0.8125rem',
+            gap: 0.375,
+            fontSize: 12,
             fontWeight: '600',
           })}
         >
           <RiMegaphoneLine size={16} />
-          <span>{t('broadcastTitle') ?? 'Broadcast Announcement'}</span>
+          <span>{t('broadcastTitle')}</span>
         </div>
-        <div className={css({ display: 'flex', gap: '0.5rem' })}>
+        <div className={css({ display: 'flex', gap: 0.5, flexWrap: 'wrap' })}>
           <input
             type="text"
             value={broadcastText}
@@ -248,18 +322,19 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleSendBroadcast()
             }}
-            placeholder={
-              t('broadcastPlaceholder') ?? 'Type announcement to all rooms...'
-            }
+            placeholder={t('broadcastPlaceholder')}
             className={css({
               flex: 1,
-              padding: '0.375rem 0.625rem',
-              borderRadius: '0.375rem',
-              border: '1px solid',
+              paddingBlock: 0.375,
+              paddingInline: 0.625,
+              borderRadius: '6',
+              borderWidth: 1,
+              borderStyle: 'solid',
               borderColor: 'box.border',
               backgroundColor: 'box.bg',
               color: 'box.text',
-              fontSize: '0.8125rem',
+              fontSize: 12,
+              minWidth: 0,
             })}
           />
           <Button
@@ -267,7 +342,7 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
             size="sm"
             isDisabled={isBroadcasting || !broadcastText.trim()}
             onPress={handleSendBroadcast}
-            aria-label="Send broadcast"
+            aria-label={t('sendBroadcast')}
           >
             <RiSendPlaneFill size={14} />
           </Button>
@@ -275,12 +350,12 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
         {broadcastSuccess && (
           <span
             className={css({
-              fontSize: '0.75rem',
+              fontSize: 12,
               color: 'success',
               fontWeight: '500',
             })}
           >
-            {t('broadcastSent') ?? 'Announcement sent to all rooms!'}
+            {t('broadcastSent')}
           </span>
         )}
       </div>
@@ -288,18 +363,19 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
       {/* Main Room Card */}
       <div
         className={css({
-          padding: '0.75rem',
-          borderRadius: '0.5rem',
-          border: '1px solid',
+          padding: 0.75,
+          borderRadius: '8',
+          borderWidth: 1,
+          borderStyle: 'solid',
           borderColor: !snap.currentBreakoutRoomLkName
             ? 'primary'
             : 'box.border',
           backgroundColor: !snap.currentBreakoutRoomLkName
-            ? 'rgba(0, 0, 145, 0.06)'
-            : 'rgba(255, 255, 255, 0.02)',
+            ? 'primary.subtle'
+            : 'box.bg',
           display: 'flex',
           flexDirection: 'column',
-          gap: '0.5rem',
+          gap: 0.5,
         })}
       >
         <div
@@ -313,39 +389,43 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
             className={css({
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              gap: 0.5,
             })}
           >
             <RiHome4Line size={16} />
-            <span className={css({ fontWeight: '600', fontSize: '0.875rem' })}>
-              {t('mainRoom') ?? 'Main Room'}
+            <span className={css({ fontWeight: '600', fontSize: 14 })}>
+              {t('mainRoom')}
             </span>
             {!snap.currentBreakoutRoomLkName && (
               <span
                 className={css({
-                  fontSize: '0.6875rem',
-                  padding: '0.125rem 0.375rem',
-                  borderRadius: '999px',
+                  fontSize: 10,
+                  paddingBlock: 0.125,
+                  paddingInline: 0.375,
+                  borderRadius: 'full',
                   backgroundColor: 'primary',
-                  color: 'white',
+                  color: 'primary.text',
                   fontWeight: '600',
                 })}
               >
-                {t('youAreHere') ?? 'You are here'}
+                {t('youAreHere')}
               </span>
             )}
           </div>
           <span
             className={css({
-              fontSize: '0.75rem',
-              color: 'rgba(255, 255, 255, 0.6)',
-              backgroundColor: 'rgba(255, 255, 255, 0.08)',
-              padding: '0.125rem 0.375rem',
-              borderRadius: '999px',
+              fontSize: 12,
+              color: 'control.text',
+              backgroundColor: 'control',
+              paddingBlock: 0.125,
+              paddingInline: 0.375,
+              borderRadius: 'full',
             })}
           >
-            {mainRoomAttendees.length +
-              (snap.currentBreakoutRoomLkName ? 0 : 1)}
+            {statusData?.main_room.participant_count === null ||
+            statusData?.main_room.participant_count === undefined
+              ? t('statusUnknown')
+              : statusData.main_room.participant_count}
           </span>
         </div>
 
@@ -355,10 +435,12 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
             className={css({
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.375rem',
-              marginTop: '0.25rem',
-              borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-              paddingTop: '0.375rem',
+              gap: 0.375,
+              marginTop: 0.25,
+              borderTopWidth: 1,
+              borderTopStyle: 'solid',
+              borderTopColor: 'box.border',
+              paddingTop: 0.375,
             })}
           >
             {mainRoomAttendees.map((p) => (
@@ -368,26 +450,26 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  fontSize: '0.75rem',
+                  fontSize: 12,
                 })}
               >
                 <div
                   className={css({
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.375rem',
+                    gap: 0.375,
                   })}
                 >
                   <span
                     className={css({
-                      width: '18px',
-                      height: '18px',
-                      borderRadius: '999px',
-                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      width: 1.25,
+                      height: 1.25,
+                      borderRadius: 'full',
+                      backgroundColor: 'control',
                       display: 'inline-flex',
                       alignItems: 'center',
                       justifyContent: 'center',
-                      fontSize: '0.625rem',
+                      fontSize: 10,
                       fontWeight: '700',
                     })}
                   >
@@ -397,6 +479,9 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                 </div>
 
                 <select
+                  aria-label={t('reassignParticipant', {
+                    name: p.name || p.identity,
+                  })}
                   disabled={isReassigning}
                   onChange={(e) => {
                     if (e.target.value) {
@@ -408,18 +493,20 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                     }
                   }}
                   className={css({
-                    padding: '0.125rem 0.375rem',
-                    borderRadius: '0.25rem',
-                    border: '1px solid',
+                    paddingBlock: 0.125,
+                    paddingInline: 0.375,
+                    borderRadius: '4',
+                    borderWidth: 1,
+                    borderStyle: 'solid',
                     borderColor: 'box.border',
                     backgroundColor: 'box.bg',
                     color: 'box.text',
-                    fontSize: '0.6875rem',
+                    fontSize: 10,
                     cursor: isReassigning ? 'wait' : 'pointer',
                     opacity: isReassigning ? 0.6 : 1,
                   })}
                 >
-                  <option value="">{t('assignTo') ?? 'Assign to...'}</option>
+                  <option value="">{t('assignTo')}</option>
                   {rooms.map((r) => (
                     <option key={r.id} value={r.id}>
                       {r.name}
@@ -437,32 +524,31 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
         className={css({
           display: 'flex',
           flexDirection: 'column',
-          gap: '0.625rem',
+          gap: 0.625,
         })}
       >
         {rooms.map((room) => {
           const liveData = statusRoomMap.get(room.id)
-          const liveCount = liveData?.count ?? room.assignments.length
+          const liveCount = liveData?.count
           const isCurrentRoom =
             snap.currentBreakoutRoomLkName === room.livekit_room_name
 
-          // Assigned participants
-          const participants = room.assignments
+          // Actual presence is distinct from the configured assignment list.
+          const participants = liveData?.participants ?? []
 
           return (
             <div
               key={room.id}
               className={css({
-                padding: '0.75rem',
-                borderRadius: '0.5rem',
-                border: '1px solid',
-                borderColor: isCurrentRoom ? '#000091' : 'box.border',
-                backgroundColor: isCurrentRoom
-                  ? 'rgba(0, 0, 145, 0.08)'
-                  : 'rgba(255, 255, 255, 0.03)',
+                padding: 0.75,
+                borderRadius: '8',
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: isCurrentRoom ? 'primary' : 'box.border',
+                backgroundColor: isCurrentRoom ? 'primary.subtle' : 'box.bg',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '0.5rem',
+                gap: 0.5,
               })}
             >
               {/* Room Card Header */}
@@ -477,26 +563,25 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                   className={css({
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.5rem',
+                    gap: 0.5,
                   })}
                 >
-                  <span
-                    className={css({ fontWeight: '600', fontSize: '0.875rem' })}
-                  >
+                  <span className={css({ fontWeight: '600', fontSize: 14 })}>
                     {room.name}
                   </span>
                   {isCurrentRoom && (
                     <span
                       className={css({
-                        fontSize: '0.6875rem',
-                        padding: '0.125rem 0.375rem',
-                        borderRadius: '999px',
+                        fontSize: 10,
+                        paddingBlock: 0.125,
+                        paddingInline: 0.375,
+                        borderRadius: 'full',
                         backgroundColor: 'primary',
-                        color: 'white',
+                        color: 'primary.text',
                         fontWeight: '600',
                       })}
                     >
-                      {t('youAreHere') ?? 'You are here'}
+                      {t('youAreHere')}
                     </span>
                   )}
                 </div>
@@ -505,20 +590,24 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                   className={css({
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '0.5rem',
+                    gap: 0.5,
                   })}
                 >
                   <div
                     className={css({
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.25rem',
-                      fontSize: '0.8125rem',
-                      color: 'rgba(255, 255, 255, 0.6)',
+                      gap: 0.25,
+                      fontSize: 12,
+                      color: 'control.text',
                     })}
                   >
                     <RiGroupLine size={14} />
-                    <span>{liveCount}</span>
+                    <span>
+                      {liveCount === null || liveCount === undefined
+                        ? t('statusUnknown')
+                        : liveCount}
+                    </span>
                   </div>
 
                   {/* Join / Leave Room Button */}
@@ -532,11 +621,11 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                       <RiArrowGoBackLine size={14} />
                       <span
                         className={css({
-                          fontSize: '0.75rem',
-                          marginLeft: '0.25rem',
+                          fontSize: 12,
+                          marginLeft: 0.25,
                         })}
                       >
-                        {t('leaveRoom') ?? 'Leave'}
+                        {t('leaveRoom')}
                       </span>
                     </Button>
                   ) : (
@@ -549,7 +638,8 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                             room.id,
                             sessionId,
                             roomUuid,
-                            room.name
+                            room.name,
+                            true
                           )
                         }
                       }}
@@ -558,11 +648,11 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                       <RiLoginBoxLine size={14} />
                       <span
                         className={css({
-                          fontSize: '0.75rem',
-                          marginLeft: '0.25rem',
+                          fontSize: 12,
+                          marginLeft: 0.25,
                         })}
                       >
-                        {t('visitRoom') ?? 'Visit'}
+                        {t('visitRoom')}
                       </span>
                     </Button>
                   )}
@@ -575,50 +665,51 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                   className={css({
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.375rem',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                    paddingTop: '0.5rem',
+                    gap: 0.375,
+                    borderTopWidth: 1,
+                    borderTopStyle: 'solid',
+                    borderTopColor: 'box.border',
+                    paddingTop: 0.5,
                   })}
                 >
                   {participants.map((a) => (
                     <div
-                      key={a.id}
+                      key={a.identity}
                       className={css({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        padding: '0.25rem 0.375rem',
-                        borderRadius: '0.375rem',
-                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                        fontSize: '0.75rem',
+                        paddingBlock: 0.25,
+                        paddingInline: 0.375,
+                        borderRadius: '6',
+                        backgroundColor: 'box.bg',
+                        fontSize: 12,
                       })}
                     >
                       <div
                         className={css({
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '0.375rem',
+                          gap: 0.375,
                           minWidth: 0,
                           flex: 1,
                         })}
                       >
                         <span
                           className={css({
-                            width: '20px',
-                            height: '20px',
-                            borderRadius: '999px',
-                            backgroundColor: 'rgba(255, 255, 255, 0.12)',
+                            width: 1.25,
+                            height: 1.25,
+                            borderRadius: 'full',
+                            backgroundColor: 'control',
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            fontSize: '0.625rem',
+                            fontSize: 10,
                             fontWeight: '700',
                             flexShrink: 0,
                           })}
                         >
-                          {getInitials(
-                            a.participant_name || a.participant_identity
-                          )}
+                          {getInitials(a.name || a.identity)}
                         </span>
                         <span
                           className={css({
@@ -627,37 +718,40 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
                             whiteSpace: 'nowrap',
                           })}
                         >
-                          {a.participant_name || a.participant_identity}
+                          {a.name || a.identity}
                         </span>
                       </div>
 
                       {/* In-Flight Reassign Selector */}
                       <select
+                        aria-label={t('reassignParticipant', {
+                          name: a.name || a.identity,
+                        })}
                         value={room.id}
                         disabled={isReassigning}
                         onChange={(e) => {
                           const target = e.target.value || null
                           handleInFlightReassign(
-                            a.participant_identity,
-                            a.participant_name || a.participant_identity,
+                            a.identity,
+                            a.name || a.identity,
                             target
                           )
                         }}
                         className={css({
-                          padding: '0.125rem 0.375rem',
-                          borderRadius: '0.25rem',
-                          border: '1px solid',
+                          paddingBlock: 0.125,
+                          paddingInline: 0.375,
+                          borderRadius: '4',
+                          borderWidth: 1,
+                          borderStyle: 'solid',
                           borderColor: 'box.border',
                           backgroundColor: 'box.bg',
                           color: 'box.text',
-                          fontSize: '0.6875rem',
-                          marginLeft: '0.5rem',
+                          fontSize: 10,
+                          marginLeft: 0.5,
                           flexShrink: 0,
                         })}
                       >
-                        <option value="">
-                          {t('returnToMain') ?? 'Main Room'}
-                        </option>
+                        <option value="">{t('returnToMain')}</option>
                         {rooms.map((targetR) => (
                           <option key={targetR.id} value={targetR.id}>
                             {targetR.name}
@@ -670,13 +764,15 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
               ) : (
                 <div
                   className={css({
-                    fontSize: '0.75rem',
-                    color: 'rgba(255, 255, 255, 0.4)',
-                    borderTop: '1px solid rgba(255, 255, 255, 0.06)',
-                    paddingTop: '0.375rem',
+                    fontSize: 12,
+                    color: 'control.text',
+                    borderTopWidth: 1,
+                    borderTopStyle: 'solid',
+                    borderTopColor: 'box.border',
+                    paddingTop: 0.375,
                   })}
                 >
-                  {t('noParticipants') ?? 'No participants in this room'}
+                  {t('noParticipants')}
                 </div>
               )}
             </div>
@@ -692,7 +788,7 @@ export const BreakoutActiveView = ({ roomUuid }: BreakoutActiveViewProps) => {
         className={css({ marginTop: 'auto' })}
       >
         <RiStopFill size={16} />
-        <span style={{ marginLeft: '0.25rem' }}>{t('closeAll')}</span>
+        <span className={css({ marginLeft: 0.25 })}>{t('closeAll')}</span>
       </Button>
     </div>
   )

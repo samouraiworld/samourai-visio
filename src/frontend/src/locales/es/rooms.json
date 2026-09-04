@@ -806,6 +806,7 @@
     "heading": "Salas de grupo",
     "setup": {
       "roomCount": "Número de salas",
+      "roomCountOption": "{{count}} salas",
       "create": "Crear salas de grupo",
       "randomize": "Asignar aleatoriamente",
       "unassigned": "{{count}} sin asignar",
@@ -830,7 +831,12 @@
       "noParticipants": "Ningún participante asignado",
       "assignParticipants": "Asignar participantes",
       "unassignedOption": "Sin asignar",
-      "allAssigned": "Todos los participantes asignados"
+      "allAssigned": "Todos los participantes asignados",
+      "unassignParticipant": "Quitar la asignación de {{name}}",
+      "assignParticipant": "Asignar a {{name}} a una sala",
+      "syncFailed": "La sincronización de las salas ha fallado.",
+      "retrySynchronization": "Reintentar la sincronización",
+      "synchronizing": "Sincronizando las salas de grupo…"
     },
     "active": {
       "timeRemaining": "Tiempo restante",
@@ -845,7 +851,13 @@
       "leaveRoom": "Salir",
       "mainRoom": "Sala principal",
       "assignTo": "Asignar a...",
-      "noParticipants": "No hay participantes en esta sala"
+      "noParticipants": "No hay participantes en esta sala",
+      "statusUnknown": "Estado en directo no disponible",
+      "sendBroadcast": "Enviar el anuncio",
+      "reassignParticipant": "Mover a {{name}} a otra sala",
+      "syncFailed": "La sincronización de las salas ha fallado.",
+      "retrySynchronization": "Reintentar la sincronización",
+      "closing": "Cerrando las salas para grupos…"
     },
     "participant": {
       "currentRoom": "Estás en {{room}}",
@@ -854,11 +866,21 @@
       "returning": "Regresando a la sala principal…",
       "askForHelp": "Pedir ayuda",
       "askForHelpTooltip": "Notificar al anfitrión que necesitas ayuda",
-      "helpRequested": "Ayuda solicitada"
+      "helpRequested": "Ayuda solicitada",
+      "cancelHelp": "Cancelar solicitud de ayuda",
+      "returnAssigned": "Volver a la sala asignada",
+      "actionError": "La acción ha fallado. Inténtalo de nuevo.",
+      "unknownRoom": "Sala de grupo"
+    },
+    "timer": {
+      "remaining": "Tiempo restante: {{time}}",
+      "elapsed": "Tiempo transcurrido: {{time}}",
+      "open": "{{time}} (abierta)"
     },
     "transition": {
       "movingTo": "Moviéndose a {{room}}…",
-      "returningToMain": "Regresando a la sala principal…"
+      "returningToMain": "Regresando a la sala principal…",
+      "unknownRoom": "una sala de grupo"
     },
     "helpAlert": {
       "title": "Ayuda solicitada",

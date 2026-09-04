@@ -10,6 +10,8 @@ from rest_framework.response import Response
 
 from core.utils import build_telephony_config
 
+from .feature_flag import FeatureFlag
+
 
 def exception_handler(exc, context):
     """Handle Django ValidationError as an accepted exception.
@@ -67,7 +69,7 @@ def get_frontend_configuration(request):
         "subtitle": {"enabled": settings.ROOM_SUBTITLE_ENABLED},
         "diagnostics": {"connection_test_enabled": settings.CONNECTION_TEST_ENABLED},
         "breakout_rooms": {
-            "is_enabled": getattr(settings, "MEET_BREAKOUT_ROOMS_ENABLED", False),
+            "is_enabled": FeatureFlag.flag_is_active("breakout_rooms"),
         },
         "livekit": {
             "url": settings.LIVEKIT_CONFIGURATION["url"],

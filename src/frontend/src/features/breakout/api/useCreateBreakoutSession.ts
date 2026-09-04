@@ -5,6 +5,8 @@
 import { useMutation } from '@tanstack/react-query'
 import { fetchApi } from '@/api/fetchApi'
 import type { BreakoutSession } from './types'
+import { queryClient } from '@/api/queryClient'
+import { breakoutSessionKey } from './useBreakoutSession'
 
 interface CreateParams {
   roomId: string
@@ -32,5 +34,8 @@ const createBreakoutSession = ({
 export const useCreateBreakoutSession = () => {
   return useMutation({
     mutationFn: createBreakoutSession,
+    onSuccess: (session, variables) => {
+      queryClient.setQueryData(breakoutSessionKey(variables.roomId), [session])
+    },
   })
 }

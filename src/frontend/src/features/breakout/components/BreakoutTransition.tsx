@@ -17,7 +17,7 @@ export const BreakoutTransition = () => {
   const snap = useSnapshot(breakoutStore)
   const { currentBreakoutRoomLkName } = useIsInBreakoutRoom()
 
-  const targetName = snap.transitionTargetName || 'breakout room'
+  const targetName = snap.transitionTargetName || t('unknownRoom')
   const message = currentBreakoutRoomLkName
     ? t('returningToMain')
     : t('movingTo', { room: targetName })
@@ -31,9 +31,9 @@ export const BreakoutTransition = () => {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        backgroundColor: 'rgba(0, 0, 0, 0.85)',
+        backgroundColor: 'greyscale.950',
         zIndex: 9999,
-        gap: '1rem',
+        gap: 1,
       })}
       role="alert"
       aria-live="assertive"
@@ -41,8 +41,8 @@ export const BreakoutTransition = () => {
       <Spinner />
       <p
         className={css({
-          color: 'white',
-          fontSize: '1.125rem',
+          color: 'primary.text',
+          fontSize: 20,
           fontWeight: '500',
         })}
       >

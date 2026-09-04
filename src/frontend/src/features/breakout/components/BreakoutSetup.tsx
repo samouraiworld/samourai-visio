@@ -18,8 +18,8 @@ import { useCreateBreakoutSession } from '../api/useCreateBreakoutSession'
 import { useRandomizeAssignments } from '../api/useRandomizeAssignments'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
+import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
 import { ApiError } from '@/api/ApiError'
-import { breakoutStore } from '../stores/breakout'
 import type { BreakoutSession } from '../api/types'
 import {
   RiShuffleLine,
@@ -31,7 +31,6 @@ import {
 interface BreakoutSetupProps {
   roomUuid: string
   session: BreakoutSession | null
-  onSessionCreated: (session: BreakoutSession) => void
 }
 
 const DURATION_OPTION_KEYS = [
@@ -50,11 +49,7 @@ const DURATION_OPTION_KEYS = [
   { value: '14400', labelKey: 'durationOptions.4h' },
 ]
 
-export const BreakoutSetup = ({
-  roomUuid,
-  session,
-  onSessionCreated,
-}: BreakoutSetupProps) => {
+export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.setup' })
   const participants = useParticipants()
 
@@ -73,6 +68,8 @@ export const BreakoutSetup = ({
     useAssignParticipants()
   const { mutateAsync: updateSession, isPending: isActivating } =
     useUpdateBreakoutSession()
+  const { mutateAsync: retrySession, isPending: isRetrying } =
+    useRetryBreakoutSession()
 
   // Eligible participants (exclude local host)
   const assignableParticipants = useMemo(
@@ -82,13 +79,11 @@ export const BreakoutSetup = ({
 
   const handleCreate = useCallback(async () => {
     try {
-      const created = await createSession({
+      await createSession({
         roomId: roomUuid,
         numRooms,
         durationSeconds: duration === '0' ? null : parseInt(duration, 10),
       })
-      onSessionCreated(created)
-      breakoutStore.session = created
     } catch (e) {
       if (e instanceof ApiError && e.statusCode === 409) {
         // A session already exists (e.g. host reloaded the tab mid-session).
@@ -97,7 +92,7 @@ export const BreakoutSetup = ({
       }
       throw e
     }
-  }, [roomUuid, numRooms, duration, createSession, onSessionCreated])
+  }, [roomUuid, numRooms, duration, createSession])
 
   const handleRandomize = useCallback(async () => {
     if (!session) return
@@ -107,12 +102,12 @@ export const BreakoutSetup = ({
       name: p.name ?? p.identity,
     }))
 
-    const result = await randomize({
+    await randomize({
       roomId: roomUuid,
       sessionId: session.id,
+      revision: session.revision,
       participants: participantList,
     })
-    breakoutStore.session = result
   }, [session, assignableParticipants, roomUuid, randomize])
 
   const handleManualAssign = useCallback(
@@ -145,12 +140,12 @@ export const BreakoutSetup = ({
         })
       }
 
-      const result = await assignManual({
+      await assignManual({
         roomId: roomUuid,
         sessionId: session.id,
+        revision: session.revision,
         assignments: newAssignments,
       })
-      breakoutStore.session = result
     },
     [session, roomUuid, assignManual]
   )
@@ -158,13 +153,17 @@ export const BreakoutSetup = ({
   const handleActivate = useCallback(async () => {
     if (!session) return
 
-    const updated = await updateSession({
+    await updateSession({
       roomId: roomUuid,
       sessionId: session.id,
       status: 'active',
     })
-    breakoutStore.session = updated
   }, [session, roomUuid, updateSession])
+
+  const handleRetry = useCallback(async () => {
+    if (!session) return
+    await retrySession({ roomId: roomUuid, sessionId: session.id })
+  }, [retrySession, roomUuid, session])
 
   // Total assigned
   const assignedCount =
@@ -193,8 +192,8 @@ export const BreakoutSetup = ({
       className={css({
         display: 'flex',
         flexDirection: 'column',
-        gap: '1rem',
-        padding: '1rem',
+        gap: 1,
+        padding: 1,
         overflow: 'auto',
         flex: 1,
       })}
@@ -206,16 +205,16 @@ export const BreakoutSetup = ({
             className={css({
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.5rem',
+              gap: 0.5,
             })}
           >
-            <label className={css({ fontSize: '0.875rem', fontWeight: '500' })}>
+            <label className={css({ fontSize: 14, fontWeight: '500' })}>
               {t('roomCount')}
             </label>
             <div
               className={css({
                 display: 'flex',
-                gap: '0.5rem',
+                gap: 0.5,
                 flexWrap: 'wrap',
               })}
             >
@@ -233,7 +232,7 @@ export const BreakoutSetup = ({
                   variant={n === numRooms ? 'primary' : 'secondaryText'}
                   size="sm"
                   onPress={() => setNumRooms(n)}
-                  aria-label={`${n} rooms`}
+                  aria-label={t('roomCountOption', { count: n })}
                   aria-pressed={n === numRooms}
                 >
                   {n}
@@ -247,10 +246,10 @@ export const BreakoutSetup = ({
             className={css({
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.5rem',
+              gap: 0.5,
             })}
           >
-            <label className={css({ fontSize: '0.875rem', fontWeight: '500' })}>
+            <label className={css({ fontSize: 14, fontWeight: '500' })}>
               {t('duration')}
             </label>
             <select
@@ -258,18 +257,22 @@ export const BreakoutSetup = ({
               onChange={(e) => setDuration(e.target.value)}
               aria-label={t('duration')}
               className={css({
-                padding: '0.5rem 0.75rem',
-                borderRadius: '0.375rem',
-                border: '1px solid',
+                paddingBlock: 0.5,
+                paddingInline: 0.75,
+                borderRadius: '6',
+                borderWidth: 1,
+                borderStyle: 'solid',
                 borderColor: 'box.border',
                 backgroundColor: 'box.bg',
                 color: 'box.text',
-                fontSize: '0.875rem',
+                fontSize: 14,
                 cursor: 'pointer',
                 outline: 'none',
                 _focus: {
                   borderColor: 'primary',
-                  boxShadow: '0 0 0 2px rgba(0, 0, 145, 0.2)',
+                  outlineWidth: 2,
+                  outlineStyle: 'solid',
+                  outlineColor: 'focusRing',
                 },
               })}
             >
@@ -286,9 +289,38 @@ export const BreakoutSetup = ({
             isDisabled={isCreating}
             onPress={handleCreate}
           >
-            {t('create') ?? 'Create Breakout Rooms'}
+            {t('create')}
           </Button>
         </>
+      )}
+
+      {session?.effect_error && (
+        <div
+          role="alert"
+          className={css({
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 0.5,
+            padding: 0.75,
+            borderRadius: '8',
+            backgroundColor: 'danger.subtle',
+            color: 'danger.subtle-text',
+          })}
+        >
+          <span>{t('syncFailed')}</span>
+          <Button
+            variant="secondaryText"
+            size="sm"
+            isDisabled={isRetrying}
+            onPress={handleRetry}
+          >
+            {t('retrySynchronization')}
+          </Button>
+        </div>
+      )}
+
+      {session?.status === 'activating' && !session.effect_error && (
+        <div role="status">{t('synchronizing')}</div>
       )}
 
       {session && session.status === 'configuring' && (
@@ -298,21 +330,22 @@ export const BreakoutSetup = ({
             className={css({
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.625rem',
+              gap: 0.625,
             })}
           >
             {session.breakout_rooms.map((room) => (
               <div
                 key={room.id}
                 className={css({
-                  padding: '0.75rem',
-                  borderRadius: '0.5rem',
-                  border: '1px solid',
+                  padding: 0.75,
+                  borderRadius: '8',
+                  borderWidth: 1,
+                  borderStyle: 'solid',
                   borderColor: 'box.border',
-                  backgroundColor: 'rgba(255, 255, 255, 0.03)',
+                  backgroundColor: 'box.bg',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.375rem',
+                  gap: 0.375,
                 })}
               >
                 <div
@@ -322,18 +355,17 @@ export const BreakoutSetup = ({
                     alignItems: 'center',
                   })}
                 >
-                  <span
-                    className={css({ fontWeight: '600', fontSize: '0.875rem' })}
-                  >
+                  <span className={css({ fontWeight: '600', fontSize: 14 })}>
                     {room.name}
                   </span>
                   <span
                     className={css({
-                      fontSize: '0.75rem',
-                      color: 'rgba(255, 255, 255, 0.6)',
-                      backgroundColor: 'rgba(255, 255, 255, 0.08)',
-                      padding: '0.125rem 0.375rem',
-                      borderRadius: '999px',
+                      fontSize: 12,
+                      color: 'control.text',
+                      backgroundColor: 'control',
+                      paddingBlock: 0.125,
+                      paddingInline: 0.375,
+                      borderRadius: 'full',
                     })}
                   >
                     {room.assignments.length}
@@ -346,21 +378,22 @@ export const BreakoutSetup = ({
                     className={css({
                       display: 'flex',
                       flexWrap: 'wrap',
-                      gap: '0.375rem',
-                      marginTop: '0.25rem',
+                      gap: 0.375,
+                      marginTop: 0.25,
                     })}
                   >
                     {room.assignments.map((a) => (
                       <span
                         key={a.id}
                         className={css({
-                          fontSize: '0.75rem',
-                          backgroundColor: 'rgba(255, 255, 255, 0.06)',
-                          padding: '0.125rem 0.375rem',
-                          borderRadius: '0.25rem',
+                          fontSize: 12,
+                          backgroundColor: 'control',
+                          paddingBlock: 0.125,
+                          paddingInline: 0.375,
+                          borderRadius: '4',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '0.25rem',
+                          gap: 0.25,
                         })}
                       >
                         {a.participant_name || a.participant_identity}
@@ -372,15 +405,17 @@ export const BreakoutSetup = ({
                               null
                             )
                           }
-                          aria-label="Unassign participant"
+                          aria-label={t('unassignParticipant', {
+                            name: a.participant_name || a.participant_identity,
+                          })}
                           className={css({
                             border: 'none',
                             background: 'none',
-                            color: 'rgba(255, 255, 255, 0.5)',
+                            color: 'control.text',
                             cursor: 'pointer',
                             padding: 0,
                             display: 'flex',
-                            _hover: { color: 'white' },
+                            _hover: { color: 'control.text' },
                           })}
                         >
                           <RiCloseLine size={12} />
@@ -391,8 +426,8 @@ export const BreakoutSetup = ({
                 ) : (
                   <div
                     className={css({
-                      fontSize: '0.75rem',
-                      color: 'rgba(255, 255, 255, 0.4)',
+                      fontSize: 12,
+                      color: 'control.text',
                     })}
                   >
                     {t('noParticipants')}
@@ -408,10 +443,11 @@ export const BreakoutSetup = ({
               className={css({
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '0.5rem',
-                marginTop: '0.5rem',
-                paddingTop: '0.75rem',
-                borderTop: '1px solid',
+                gap: 0.5,
+                marginTop: 0.5,
+                paddingTop: 0.75,
+                borderTopWidth: 1,
+                borderTopStyle: 'solid',
                 borderColor: 'box.border',
               })}
             >
@@ -422,16 +458,14 @@ export const BreakoutSetup = ({
                   alignItems: 'center',
                 })}
               >
-                <span
-                  className={css({ fontSize: '0.8125rem', fontWeight: '600' })}
-                >
-                  {t('assignParticipants') ?? 'Assign Participants'}
+                <span className={css({ fontSize: 12, fontWeight: '600' })}>
+                  {t('assignParticipants')}
                 </span>
                 {unassignedCount > 0 ? (
                   <span
                     className={css({
-                      fontSize: '0.75rem',
-                      color: 'rgba(255, 255, 255, 0.5)',
+                      fontSize: 12,
+                      color: 'control.text',
                     })}
                   >
                     {t('unassigned', { count: unassignedCount })}
@@ -439,15 +473,16 @@ export const BreakoutSetup = ({
                 ) : (
                   <span
                     className={css({
-                      fontSize: '0.75rem',
-                      color: '#18753c', // DSFR success green
+                      fontSize: 12,
+                      color: 'success.subtle-text',
                       fontWeight: '600',
-                      backgroundColor: 'rgba(24, 117, 60, 0.12)',
-                      padding: '0.125rem 0.375rem',
-                      borderRadius: '999px',
+                      backgroundColor: 'success.subtle',
+                      paddingBlock: 0.125,
+                      paddingInline: 0.375,
+                      borderRadius: 'full',
                     })}
                   >
-                    {t('allAssigned') ?? 'All participants assigned'}
+                    {t('allAssigned')}
                   </span>
                 )}
               </div>
@@ -457,8 +492,7 @@ export const BreakoutSetup = ({
                 className={css({
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '0.375rem',
-                  maxHeight: '160px',
+                  gap: 0.375,
                   overflowY: 'auto',
                 })}
               >
@@ -472,17 +506,18 @@ export const BreakoutSetup = ({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        padding: '0.375rem 0.5rem',
-                        borderRadius: '0.375rem',
-                        backgroundColor: 'rgba(255, 255, 255, 0.02)',
-                        fontSize: '0.8125rem',
+                        paddingBlock: 0.375,
+                        paddingInline: 0.5,
+                        borderRadius: '6',
+                        backgroundColor: 'box.bg',
+                        fontSize: 12,
                       })}
                     >
                       <div
                         className={css({
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '0.375rem',
+                          gap: 0.375,
                           overflow: 'hidden',
                         })}
                       >
@@ -499,6 +534,9 @@ export const BreakoutSetup = ({
                       </div>
 
                       <select
+                        aria-label={t('assignParticipant', {
+                          name: p.name || p.identity,
+                        })}
                         value={assignedRoomId}
                         disabled={isAssigning}
                         onChange={(e) => {
@@ -510,18 +548,18 @@ export const BreakoutSetup = ({
                           )
                         }}
                         className={css({
-                          padding: '0.25rem 0.5rem',
-                          borderRadius: '0.25rem',
-                          border: '1px solid',
+                          paddingBlock: 0.25,
+                          paddingInline: 0.5,
+                          borderRadius: '4',
+                          borderWidth: 1,
+                          borderStyle: 'solid',
                           borderColor: 'box.border',
                           backgroundColor: 'box.bg',
                           color: 'box.text',
-                          fontSize: '0.75rem',
+                          fontSize: 12,
                         })}
                       >
-                        <option value="">
-                          {t('unassignedOption') ?? 'Unassigned'}
-                        </option>
+                        <option value="">{t('unassignedOption')}</option>
                         {session.breakout_rooms.map((room) => (
                           <option key={room.id} value={room.id}>
                             {room.name}
@@ -536,7 +574,7 @@ export const BreakoutSetup = ({
           )}
 
           {/* Randomize Button */}
-          <div className={css({ display: 'flex', gap: '0.5rem' })}>
+          <div className={css({ display: 'flex', gap: 0.5 })}>
             <Button
               variant="secondaryText"
               size="sm"
@@ -544,18 +582,20 @@ export const BreakoutSetup = ({
               onPress={handleRandomize}
             >
               <RiShuffleLine size={16} />
-              <span style={{ marginLeft: '0.25rem' }}>{t('randomize')}</span>
+              <span className={css({ marginLeft: 0.25 })}>
+                {t('randomize')}
+              </span>
             </Button>
           </div>
 
           {/* Open All Rooms CTA */}
           <Button
             variant="primary"
-            isDisabled={isActivating}
+            isDisabled={isActivating || !!session.effect_error}
             onPress={handleActivate}
           >
             <RiPlayFill size={16} />
-            <span style={{ marginLeft: '0.25rem' }}>{t('openAll')}</span>
+            <span className={css({ marginLeft: 0.25 })}>{t('openAll')}</span>
           </Button>
         </>
       )}

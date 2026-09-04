@@ -9,17 +9,21 @@ import { useEffect, useRef } from 'react'
 import { css } from '@/styled-system/css'
 import { useTranslation } from 'react-i18next'
 import { useBreakoutTimer } from '../hooks/useBreakoutTimer'
+import type { BreakoutTiming } from '../hooks/useBreakoutTimer'
 import { BREAKOUT_DEFAULTS } from '../utils/constants'
+import { srOnly } from '@/styles/a11y'
 
 interface BreakoutRecallBannerProps {
   onRecall: () => void
+  timing?: BreakoutTiming | null
 }
 
 export const BreakoutRecallBanner = ({
   onRecall,
+  timing,
 }: BreakoutRecallBannerProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.participant' })
-  const { remaining, hasTimer, isExpired } = useBreakoutTimer()
+  const { remaining, hasTimer, isExpired } = useBreakoutTimer(timing)
   const hasRecalledRef = useRef(false)
 
   const isWarning =
@@ -41,22 +45,27 @@ export const BreakoutRecallBanner = ({
     <div
       className={css({
         position: 'absolute',
-        bottom: 'calc(var(--sizes-room-control-bar) + 0.5rem)',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        padding: '0.75rem 1.5rem',
-        borderRadius: '0.75rem',
-        backgroundColor: 'rgba(239, 68, 68, 0.9)',
-        color: 'white',
-        fontSize: '0.9375rem',
+        bottom: 'room-control-bar',
+        insetInline: 0,
+        marginInline: 'auto',
+        width: 'fit',
+        maxWidth: 'full',
+        paddingBlock: 0.75,
+        paddingInline: 1.5,
+        borderRadius: '8',
+        backgroundColor: 'danger',
+        color: 'danger.text',
+        fontSize: 14,
         fontWeight: '600',
         zIndex: 50,
-        animation: 'pulse 2s ease-in-out infinite',
       })}
-      role="alert"
-      aria-live="assertive"
     >
-      {t('returningIn', { seconds: remaining })}
+      <span aria-hidden="true">{t('returningIn', { seconds: remaining })}</span>
+      <span className={srOnly} role="status" aria-live="polite">
+        {t('returningIn', {
+          seconds: BREAKOUT_DEFAULTS.RECALL_WARNING_SECONDS,
+        })}
+      </span>
     </div>
   )
 }

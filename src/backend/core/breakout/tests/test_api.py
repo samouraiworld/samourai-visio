@@ -6,7 +6,13 @@ from unittest import mock
 import pytest
 from rest_framework.test import APIClient
 
-from core.breakout.models import BreakoutAssignment, BreakoutRoom, BreakoutSession
+from core.breakout.models import (
+    BreakoutAssignment,
+    BreakoutHelpRequest,
+    BreakoutRoom,
+    BreakoutSession,
+)
+from core.breakout.services import BreakoutService
 from core.breakout.tests.factories import (
     BreakoutAssignmentFactory,
     BreakoutRoomFactory,
@@ -21,6 +27,7 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture(autouse=True)
 def enable_feature_flag(settings):
     settings.MEET_BREAKOUT_ROOMS_ENABLED = True
+    settings.CELERY_ENABLED = True
     settings.SECRET_KEY = "test-secret-key-for-testing-purposes-only"
 
 
@@ -36,6 +43,24 @@ def test_feature_flag_disabled_returns_404(settings):
 
     response = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
     assert response.status_code == 404
+
+
+def test_feature_flag_requires_celery_scheduler(settings):
+    """Breakout APIs stay disabled without authoritative timed cleanup."""
+    settings.MEET_BREAKOUT_ROOMS_ENABLED = True
+    settings.CELERY_ENABLED = False
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    client = APIClient()
+    client.force_login(admin)
+
+    response = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
+    config_response = client.get("/api/v1.0/config/")
+
+    assert response.status_code == 404
+    assert config_response.status_code == 200
+    assert config_response.json()["breakout_rooms"]["is_enabled"] is False
 
 
 def test_create_breakout_session_forbidden_for_non_admin():
@@ -148,6 +173,77 @@ def test_partial_update_activate(mock_meta, mock_send):
     assert session.is_active is True
 
 
+@mock.patch(
+    "core.services.room_management.RoomManagement.update_metadata",
+    side_effect=RuntimeError("LiveKit unavailable"),
+)
+def test_activation_effect_failure_returns_503(mock_meta):
+    """The API exposes a retryable activation failure without reporting active."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(room=room)
+    client = APIClient()
+    client.force_login(admin)
+
+    response = client.patch(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/",
+        {"status": "active"},
+        format="json",
+    )
+
+    assert response.status_code == 503
+    session.refresh_from_db()
+    assert session.status == BreakoutSession.Status.ACTIVATING
+
+
+@mock.patch("core.breakout.viewsets.BreakoutService.retry_session")
+def test_retry_effect_is_available_to_room_manager(mock_retry):
+    """A room manager can invoke the explicit effect-recovery endpoint."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(
+        room=room,
+        status=BreakoutSession.Status.ACTIVATING,
+        effect_error="LiveKit unavailable",
+    )
+    mock_retry.return_value = session
+    client = APIClient()
+    client.force_login(admin)
+
+    response = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/retry/",
+        format="json",
+    )
+
+    assert response.status_code == 200
+    mock_retry.assert_called_once_with(session)
+
+
+@mock.patch("core.breakout.viewsets.BreakoutService.retry_session")
+def test_retry_effect_is_forbidden_to_room_member(mock_retry):
+    """An ordinary room member cannot invoke lifecycle reconciliation."""
+    room = RoomFactory()
+    member = UserFactory()
+    room.accesses.create(user=member, role=RoleChoices.MEMBER)
+    session = BreakoutSessionFactory(
+        room=room,
+        status=BreakoutSession.Status.ACTIVATING,
+        effect_error="LiveKit unavailable",
+    )
+    client = APIClient()
+    client.force_login(member)
+
+    response = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/retry/",
+        format="json",
+    )
+
+    assert response.status_code == 403
+    mock_retry.assert_not_called()
+
+
 def test_bulk_assignments():
     """PUT assignments updates participant room allocations."""
     room = RoomFactory()
@@ -164,9 +260,10 @@ def test_bulk_assignments():
     response = client.put(
         f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
         {
+            "revision": session.revision,
             "assignments": {
                 str(br.id): [{"identity": "user-sub-1", "name": "Participant 1"}]
-            }
+            },
         },
         format="json",
     )
@@ -175,6 +272,28 @@ def test_bulk_assignments():
     assert BreakoutAssignment.objects.filter(
         breakout_room=br, participant_identity="user-sub-1"
     ).exists()
+
+
+def test_bulk_assignments_rejects_stale_revision():
+    """Concurrent moderator edits return conflict instead of losing updates."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(room=room, revision=2)
+    breakout_room = BreakoutRoomFactory(session=session)
+    client = APIClient()
+    client.force_login(admin)
+
+    response = client.put(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
+        {
+            "revision": 1,
+            "assignments": {str(breakout_room.id): []},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 409
 
 
 def test_randomize_endpoint():
@@ -194,10 +313,11 @@ def test_randomize_endpoint():
     response = client.post(
         f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/randomize/",
         {
+            "revision": session.revision,
             "participants": [
                 {"identity": "p1", "name": "User 1"},
                 {"identity": "p2", "name": "User 2"},
-            ]
+            ],
         },
         format="json",
     )
@@ -316,59 +436,183 @@ def test_create_session_with_extended_duration(mock_create_lk):
 
 
 def test_request_help_success():
-    """Participants can request help from the host."""
+    """A signed participant can create a durable help request."""
     room = RoomFactory()
     session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
     b_room = BreakoutRoomFactory(session=session)
-    BreakoutAssignment.objects.create(
-        breakout_room=b_room,
-        participant_identity="alice-123",
-        participant_name="Alice",
-    )
-
     client = APIClient()
     url = f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/request-help/"
     with mock.patch("core.breakout.services.utils.notify_participants"):
-        resp = client.post(
-            url,
-            {
-                "breakout_room_id": str(b_room.id),
-                "participant_id": "alice-123",
-                "participant_name": "Alice",
-            },
+        entry = client.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/",
+            {"username": "Alice"},
             format="json",
         )
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "help_requested"
+        BreakoutAssignment.objects.create(
+            breakout_room=b_room,
+            participant_identity=entry.json()["id"],
+            participant_name="Alice",
+        )
+        resp = client.post(url, {}, format="json")
+    assert resp.status_code == 201
+    assert resp.json()["status"] == "open"
+    assert resp.json()["requester_name"] == "Alice"
 
 
 def test_request_help_rate_limiting_returns_429():
-    """Participants attempting to spam help requests are rate-limited to 1 per 15s."""
+    """Creating a new help request during the cooldown is rejected."""
     room = RoomFactory()
     session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
     b_room = BreakoutRoomFactory(session=session)
-    BreakoutAssignment.objects.create(
-        breakout_room=b_room,
-        participant_identity="bob-123",
-        participant_name="Bob",
-    )
-
     client = APIClient()
     url = f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/request-help/"
-    payload = {
-        "breakout_room_id": str(b_room.id),
-        "participant_name": "Bob",
-        "participant_id": "bob-123",
-    }
     with mock.patch("core.breakout.services.utils.notify_participants"):
-        # First request succeeds
-        resp1 = client.post(url, payload, format="json")
-        assert resp1.status_code == 200
-
-        # Immediate follow-up request gets 429
-        resp2 = client.post(url, payload, format="json")
+        entry = client.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/",
+            {"username": "Bob"},
+            format="json",
+        )
+        BreakoutAssignment.objects.create(
+            breakout_room=b_room,
+            participant_identity=entry.json()["id"],
+            participant_name="Bob",
+        )
+        assert client.post(url, {}, format="json").status_code == 201
+        assert client.post(url, {}, format="json").status_code == 200
+        cancel_url = (
+            f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/cancel-help/"
+        )
+        assert client.post(cancel_url, {}, format="json").status_code == 200
+        resp2 = client.post(url, {}, format="json")
         assert resp2.status_code == 429
         assert resp2.json()["detail"] == "Please wait before requesting help again."
+
+
+def test_participant_can_cancel_own_help_request():
+    """The signed participant can cancel, but cannot select another identity."""
+    room = RoomFactory()
+    session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
+    breakout_room = BreakoutRoomFactory(session=session)
+    client = APIClient()
+    with mock.patch("core.services.lobby.utils.notify_participants"):
+        entry = client.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/",
+            {"username": "Alice"},
+            format="json",
+        )
+    assignment = BreakoutAssignment.objects.create(
+        breakout_room=breakout_room,
+        participant_identity=entry.json()["id"],
+        participant_name="Alice",
+    )
+    help_request = BreakoutHelpRequest.objects.create(
+        session=session,
+        breakout_room=assignment.breakout_room,
+        requester_identity=assignment.participant_identity,
+        requester_name=assignment.participant_name,
+    )
+
+    response = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/cancel-help/",
+        {"requester_identity": "someone-else"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    help_request.refresh_from_db()
+    assert help_request.status == BreakoutHelpRequest.Status.CANCELLED
+    assert help_request.cancelled_at is not None
+
+
+def test_manager_can_list_and_acknowledge_help_from_another_breakout():
+    """Help remains visible and actionable regardless of the manager's media room."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
+    breakout_room = BreakoutRoomFactory(session=session)
+    help_request = BreakoutHelpRequest.objects.create(
+        session=session,
+        breakout_room=breakout_room,
+        requester_identity="participant-a",
+        requester_name="Alice",
+    )
+    client = APIClient()
+    client.force_login(admin)
+
+    list_response = client.get(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/help-requests/"
+    )
+    ack_response = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/acknowledge-help/",
+        {
+            "help_request_id": str(help_request.id),
+            "expected_breakout_room_id": str(breakout_room.id),
+            "expected_assignment_revision": help_request.assignment_revision,
+        },
+        format="json",
+    )
+
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [str(help_request.id)]
+    assert ack_response.status_code == 200
+    help_request.refresh_from_db()
+    assert help_request.status == BreakoutHelpRequest.Status.ACKNOWLEDGED
+    assert help_request.acknowledged_at is not None
+
+
+def test_manager_cannot_acknowledge_help_after_reassignment():
+    """A host reaching an old room cannot acknowledge the participant's new alert."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(
+        room=room, status=BreakoutSession.Status.ACTIVE, revision=2
+    )
+    old_room = BreakoutRoomFactory(session=session)
+    new_room = BreakoutRoomFactory(session=session)
+    BreakoutAssignmentFactory(
+        breakout_room=old_room,
+        participant_identity="participant-a",
+        participant_name="Alice",
+    )
+    help_request = BreakoutHelpRequest.objects.create(
+        session=session,
+        breakout_room=old_room,
+        requester_identity="participant-a",
+        requester_name="Alice",
+        assignment_revision=2,
+    )
+    with (
+        mock.patch.object(BreakoutService, "_reconcile_livekit_assignments"),
+        mock.patch("core.services.room_management.RoomManagement.update_metadata"),
+    ):
+        BreakoutService().assign_participants(
+            session,
+            {
+                str(old_room.id): [],
+                str(new_room.id): [{"identity": "participant-a", "name": "Alice"}],
+            },
+            expected_revision=2,
+        )
+
+    client = APIClient()
+    client.force_login(admin)
+    response = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/acknowledge-help/",
+        {
+            "help_request_id": str(help_request.id),
+            "expected_breakout_room_id": str(old_room.id),
+            "expected_assignment_revision": 2,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 409
+    help_request.refresh_from_db()
+    assert help_request.breakout_room == new_room
+    assert help_request.assignment_revision == 3
+    assert help_request.status == BreakoutHelpRequest.Status.OPEN
 
 
 def test_join_breakout_room_inactive_session_returns_400():
@@ -411,27 +655,29 @@ def test_list_breakout_sessions_unauthenticated_returns_403():
 
 
 def test_join_breakout_room_anonymous_with_matching_identity():
-    """Anonymous participant with valid assigned identity can join their assigned breakout room."""
+    """A guest with a signed capability can join their assigned breakout room."""
     room = RoomFactory()
     session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
     b_room = BreakoutRoomFactory(session=session)
-    anon_identity = "livekit-anon-uuid-456"
+    client = APIClient()
+    with mock.patch("core.breakout.services.utils.notify_participants"):
+        entry = client.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/",
+            {"username": "Anonymous Guest"},
+            format="json",
+        )
+    anon_identity = entry.json()["id"]
     BreakoutAssignment.objects.create(
         breakout_room=b_room,
         participant_identity=anon_identity,
         participant_name="Anonymous Guest",
     )
 
-    client = APIClient()
     url = f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/rooms/{b_room.id}/join/"
     with mock.patch("core.utils.generate_token") as mock_token:
         mock_token.return_value = "mocked-anon-jwt-token"
 
-        resp = client.post(
-            url,
-            {"username": "Guest", "participant_id": anon_identity},
-            format="json",
-        )
+        resp = client.post(url, {}, format="json")
     assert resp.status_code == 200
     assert resp.json()["livekit"]["token"] == "mocked-anon-jwt-token"
 
@@ -495,7 +741,7 @@ def test_assignments_exceeding_room_limit_returns_400():
     }
     response = client.put(
         f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
-        {"assignments": oversized},
+        {"revision": session.revision, "assignments": oversized},
         format="json",
     )
     assert response.status_code == 400
@@ -521,11 +767,12 @@ def test_assignments_unknown_room_id_returns_400_and_preserves_db():
     response = client.put(
         f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/assignments/",
         {
+            "revision": session.revision,
             "assignments": {
                 "00000000-0000-0000-0000-000000000000": [
                     {"identity": "p2", "name": "Ghost"}
                 ]
-            }
+            },
         },
         format="json",
     )

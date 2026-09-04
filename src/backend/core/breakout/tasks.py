@@ -2,24 +2,23 @@
 
 from logging import getLogger
 
+from core.tasks._task import task
+
 from .services import BreakoutService
 
 logger = getLogger(__name__)
 
 
+@task
 def cleanup_stale_breakout_sessions():
-    """Periodic task: auto-close breakout sessions that have exceeded
-    their duration plus a grace period.
-
-    Intended to be called via Celery beat, Django-Q, or a management command.
-    """
+    """Close timed sessions at their deadline and retry failed close effects."""
     service = BreakoutService()
-    closed_count = service.cleanup_stale_sessions()
+    reconciled_count = service.cleanup_stale_sessions()
 
-    if closed_count:
+    if reconciled_count:
         logger.info(
-            "Cleaned up %d stale breakout session(s).",
-            closed_count,
+            "Reconciled %d stale breakout session(s).",
+            reconciled_count,
         )
 
-    return closed_count
+    return reconciled_count

@@ -2,11 +2,16 @@
 """Unit tests for breakout models."""
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 
 import pytest
 
-from core.breakout.models import BreakoutAssignment, BreakoutRoom, BreakoutSession
+from core.breakout.models import (
+    BreakoutAssignment,
+    BreakoutHelpRequest,
+    BreakoutRoom,
+    BreakoutSession,
+)
 from core.breakout.tests.factories import (
     BreakoutAssignmentFactory,
     BreakoutRoomFactory,
@@ -113,3 +118,60 @@ def test_cascade_deletion():
     assert BreakoutSession.objects.filter(id=session.id).exists() is False
     assert BreakoutRoom.objects.filter(id=br.id).exists() is False
     assert BreakoutAssignment.objects.filter(id=assignment.id).exists() is False
+
+
+def test_assignment_identity_is_unique_across_rooms_in_session():
+    """The database enforces one authoritative room per participant."""
+    session = BreakoutSessionFactory()
+    first_room = BreakoutRoomFactory(session=session)
+    second_room = BreakoutRoomFactory(session=session)
+    BreakoutAssignmentFactory(
+        breakout_room=first_room,
+        participant_identity="participant-1",
+    )
+
+    with pytest.raises((IntegrityError, ValidationError)), transaction.atomic():
+        BreakoutAssignmentFactory(
+            breakout_room=second_room,
+            participant_identity="participant-1",
+        )
+
+
+def test_assignment_rejects_room_from_another_session():
+    """The application boundary rejects inconsistent denormalized session data."""
+    session = BreakoutSessionFactory()
+    other_room = BreakoutRoomFactory()
+
+    with pytest.raises(ValidationError):
+        BreakoutAssignment.objects.create(
+            session=session,
+            breakout_room=other_room,
+            participant_identity="participant-1",
+        )
+
+
+def test_only_one_open_help_request_per_participant():
+    """Concurrent assistance requests cannot create duplicate open work."""
+    assignment = BreakoutAssignmentFactory(participant_identity="participant-1")
+    values = {
+        "session": assignment.session,
+        "breakout_room": assignment.breakout_room,
+        "requester_identity": assignment.participant_identity,
+    }
+    BreakoutHelpRequest.objects.create(**values)
+
+    with pytest.raises((IntegrityError, ValidationError)), transaction.atomic():
+        BreakoutHelpRequest.objects.create(**values)
+
+
+def test_help_request_rejects_room_from_another_session():
+    """A durable help request cannot reference another session's room."""
+    session = BreakoutSessionFactory()
+    other_room = BreakoutRoomFactory()
+
+    with pytest.raises(ValidationError):
+        BreakoutHelpRequest.objects.create(
+            session=session,
+            breakout_room=other_room,
+            requester_identity="participant",
+        )

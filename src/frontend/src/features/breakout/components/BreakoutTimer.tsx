@@ -8,7 +8,12 @@
 import { css } from '@/styled-system/css'
 import { RiTimerLine } from '@remixicon/react'
 import { useBreakoutTimer } from '../hooks/useBreakoutTimer'
+import type { BreakoutTiming } from '../hooks/useBreakoutTimer'
 import { BREAKOUT_DEFAULTS } from '../utils/constants'
+import { findCrossedTimerMilestone } from '../utils/timerMilestones'
+import { useTranslation } from 'react-i18next'
+import { useEffect, useRef, useState } from 'react'
+import { srOnly } from '@/styles/a11y'
 
 const formatTime = (seconds: number): string => {
   const mins = Math.floor(Math.max(0, seconds) / 60)
@@ -18,11 +23,34 @@ const formatTime = (seconds: number): string => {
 
 interface BreakoutTimerProps {
   variant?: 'panel' | 'overlay'
+  timing?: BreakoutTiming | null
 }
 
-export const BreakoutTimer = ({ variant = 'panel' }: BreakoutTimerProps) => {
+export const BreakoutTimer = ({
+  variant = 'panel',
+  timing,
+}: BreakoutTimerProps) => {
+  const { t } = useTranslation('rooms', { keyPrefix: 'breakout.timer' })
   const { remaining, elapsed, hasTimer, isCountdown, isExpired } =
-    useBreakoutTimer()
+    useBreakoutTimer(timing)
+  const previousRemaining = useRef<number | null>(null)
+  const [announcement, setAnnouncement] = useState('')
+
+  useEffect(() => {
+    previousRemaining.current = null
+    setAnnouncement('')
+  }, [timing?.started_at])
+
+  useEffect(() => {
+    if (!isCountdown) return
+    const previous = previousRemaining.current
+    previousRemaining.current = remaining
+    if (previous === null) return
+    const crossedMilestone = findCrossedTimerMilestone(previous, remaining)
+    if (crossedMilestone !== undefined) {
+      setAnnouncement(t('remaining', { time: formatTime(crossedMilestone) }))
+    }
+  }, [isCountdown, remaining, t])
 
   if (!hasTimer) return null
 
@@ -32,45 +60,37 @@ export const BreakoutTimer = ({ variant = 'panel' }: BreakoutTimerProps) => {
     remaining > 0
 
   const isOverlay = variant === 'overlay'
-  const bgColor = isWarning
-    ? isOverlay
-      ? 'rgba(239, 68, 68, 0.25)'
-      : 'rgba(225, 0, 15, 0.12)'
-    : isOverlay
-      ? 'rgba(255, 255, 255, 0.12)'
-      : 'rgba(0, 0, 145, 0.08)'
-
-  const textColor = isWarning
-    ? isOverlay
-      ? '#ff8080'
-      : '#ce0500'
-    : isOverlay
-      ? '#ffffff'
-      : '#000091'
 
   return (
     <div
       className={css({
         display: 'flex',
         alignItems: 'center',
-        gap: '0.375rem',
-        padding: '0.25rem 0.75rem',
-        borderRadius: '999px',
-        fontSize: '0.8125rem',
+        gap: 0.375,
+        paddingBlock: 0.25,
+        paddingInline: 0.75,
+        borderRadius: 'full',
+        fontSize: 12,
         fontWeight: '600',
         fontVariantNumeric: 'tabular-nums',
         transition: 'all 0.3s ease',
+        backgroundColor: isWarning
+          ? 'danger.subtle'
+          : isOverlay
+            ? 'control.subtle'
+            : 'primary.subtle',
+        color: isWarning
+          ? 'danger.subtle-text'
+          : isOverlay
+            ? 'primary.text'
+            : 'primary.subtle-text',
       })}
-      style={{
-        backgroundColor: bgColor,
-        color: textColor,
-      }}
       role="timer"
-      aria-live="polite"
+      aria-live="off"
       aria-label={
         isCountdown
-          ? `Time remaining: ${formatTime(remaining)}`
-          : `Elapsed time: ${formatTime(elapsed)}`
+          ? t('remaining', { time: formatTime(remaining) })
+          : t('elapsed', { time: formatTime(elapsed) })
       }
     >
       <RiTimerLine size={15} aria-hidden="true" />
@@ -79,7 +99,10 @@ export const BreakoutTimer = ({ variant = 'panel' }: BreakoutTimerProps) => {
           ? isExpired
             ? '0:00'
             : formatTime(remaining)
-          : `${formatTime(elapsed)} (Open)`}
+          : t('open', { time: formatTime(elapsed) })}
+      </span>
+      <span className={srOnly} aria-live="polite" aria-atomic="true">
+        {announcement}
       </span>
     </div>
   )

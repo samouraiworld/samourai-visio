@@ -807,6 +807,7 @@
     "heading": "Gruppenräume",
     "setup": {
       "roomCount": "Anzahl der Räume",
+      "roomCountOption": "{{count}} Räume",
       "create": "Gruppenräume erstellen",
       "randomize": "Zufällig zuweisen",
       "unassigned": "{{count}} nicht zugewiesen",
@@ -831,7 +832,12 @@
       "noParticipants": "Keine Teilnehmer zugewiesen",
       "assignParticipants": "Teilnehmer zuweisen",
       "unassignedOption": "Nicht zugewiesen",
-      "allAssigned": "Alle Teilnehmer zugewiesen"
+      "allAssigned": "Alle Teilnehmer zugewiesen",
+      "unassignParticipant": "Zuweisung von {{name}} aufheben",
+      "assignParticipant": "{{name}} einem Raum zuweisen",
+      "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
+      "retrySynchronization": "Synchronisierung wiederholen",
+      "synchronizing": "Breakout-Räume werden synchronisiert…"
     },
     "active": {
       "timeRemaining": "Verbleibende Zeit",
@@ -846,7 +852,13 @@
       "leaveRoom": "Verlassen",
       "mainRoom": "Hauptraum",
       "assignTo": "Zuweisen zu...",
-      "noParticipants": "Keine Teilnehmer in diesem Raum"
+      "noParticipants": "Keine Teilnehmer in diesem Raum",
+      "statusUnknown": "Live-Status nicht verfügbar",
+      "sendBroadcast": "Ankündigung senden",
+      "reassignParticipant": "{{name}} in einen anderen Raum verschieben",
+      "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
+      "retrySynchronization": "Synchronisierung wiederholen",
+      "closing": "Breakout-Räume werden geschlossen…"
     },
     "participant": {
       "currentRoom": "Sie sind in {{room}}",
@@ -855,11 +867,21 @@
       "returning": "Rückkehr zum Hauptraum…",
       "askForHelp": "Um Hilfe bitten",
       "askForHelpTooltip": "Den Gastgeber um Unterstützung bitten",
-      "helpRequested": "Hilfe angefordert"
+      "helpRequested": "Hilfe angefordert",
+      "cancelHelp": "Hilfeanfrage abbrechen",
+      "returnAssigned": "Zum zugewiesenen Raum zurückkehren",
+      "actionError": "Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.",
+      "unknownRoom": "Gruppenraum"
+    },
+    "timer": {
+      "remaining": "Verbleibende Zeit: {{time}}",
+      "elapsed": "Vergangene Zeit: {{time}}",
+      "open": "{{time}} (offen)"
     },
     "transition": {
       "movingTo": "Wechsel zu {{room}}…",
-      "returningToMain": "Rückkehr zum Hauptraum…"
+      "returningToMain": "Rückkehr zum Hauptraum…",
+      "unknownRoom": "einem Gruppenraum"
     },
     "helpAlert": {
       "title": "Hilfe angefordert",

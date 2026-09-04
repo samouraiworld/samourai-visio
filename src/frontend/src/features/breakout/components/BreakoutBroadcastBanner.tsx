@@ -3,7 +3,6 @@
  * broadcasts a message to all breakout rooms.
  */
 
-import { useEffect } from 'react'
 import { css } from '@/styled-system/css'
 import { useTranslation } from 'react-i18next'
 import { RiMegaphoneLine, RiCloseLine } from '@remixicon/react'
@@ -19,31 +18,29 @@ export const BreakoutBroadcastBanner = ({
 }: BreakoutBroadcastBannerProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.broadcast' })
 
-  // Auto-dismiss after 10 seconds
-  useEffect(() => {
-    const timer = setTimeout(onDismiss, 10000)
-    return () => clearTimeout(timer)
-  }, [onDismiss])
-
   return (
     <div
       className={css({
         position: 'absolute',
-        top: '4.5rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
+        top: 4,
+        insetInline: 0,
+        marginInline: 'auto',
         display: 'flex',
         alignItems: 'center',
-        gap: '0.75rem',
-        padding: '0.625rem 1.25rem',
-        borderRadius: '0.5rem',
-        backgroundColor: 'rgba(0, 0, 145, 0.92)',
-        color: 'white',
-        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
-        backdropFilter: 'blur(8px)',
+        flexWrap: 'wrap',
+        gap: 0.75,
+        paddingBlock: 0.625,
+        paddingInline: 1.25,
+        borderRadius: '8',
+        backgroundColor: 'primary',
+        color: 'primary.text',
+        boxShadow: 'box',
         zIndex: 100,
-        maxWidth: '90vw',
-        border: '1px solid rgba(255, 255, 255, 0.2)',
+        width: 'full',
+        maxWidth: 'room-side-panel',
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'primary.warm',
       })}
       role="alert"
       aria-live="polite"
@@ -52,7 +49,7 @@ export const BreakoutBroadcastBanner = ({
       <div className={css({ display: 'flex', flexDirection: 'column' })}>
         <span
           className={css({
-            fontSize: '0.75rem',
+            fontSize: 12,
             textTransform: 'uppercase',
             letterSpacing: '0.05em',
             fontWeight: '700',
@@ -63,7 +60,7 @@ export const BreakoutBroadcastBanner = ({
         </span>
         <span
           className={css({
-            fontSize: '0.9375rem',
+            fontSize: 14,
             fontWeight: '500',
             wordBreak: 'break-word',
           })}
@@ -75,15 +72,15 @@ export const BreakoutBroadcastBanner = ({
         onClick={onDismiss}
         aria-label={t('dismiss')}
         className={css({
-          marginLeft: '0.5rem',
-          padding: '0.25rem',
-          borderRadius: '999px',
+          marginLeft: 0.5,
+          padding: 0.25,
+          borderRadius: 'full',
           backgroundColor: 'transparent',
           border: 'none',
-          color: 'white',
+          color: 'primary.text',
           cursor: 'pointer',
           opacity: 0.8,
-          _hover: { opacity: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+          _hover: { opacity: 1, backgroundColor: 'primary.hover' },
         })}
       >
         <RiCloseLine size={18} />

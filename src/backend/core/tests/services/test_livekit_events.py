@@ -809,6 +809,58 @@ def test_receive_ignores_connection_test_room(
     mock_handle_room_finished.assert_not_called()
 
 
+@pytest.mark.parametrize("event", ["room_started", "room_finished"])
+@mock.patch.object(api.WebhookReceiver, "receive")
+@mock.patch.object(LiveKitEventsService, "_handle_room_finished")
+@mock.patch.object(LiveKitEventsService, "_handle_room_started")
+def test_receive_acknowledges_breakout_room_lifecycle_without_parent_cleanup(
+    mock_handle_room_started,
+    mock_handle_room_finished,
+    mock_receive,
+    mock_livekit_config,
+    event,
+):
+    """Ephemeral breakout room lifecycle never enters parent-room cleanup."""
+    mock_request = mock.MagicMock()
+    mock_request.headers = {"Authorization": "test_token"}
+    mock_request.body = b"{}"
+    mock_data = mock.MagicMock()
+    mock_data.room.name = f"breakout_{uuid.uuid4()}_0"
+    mock_data.event = event
+    mock_receive.return_value = mock_data
+
+    service = LiveKitEventsService()
+    service.receive(mock_request)
+
+    mock_handle_room_started.assert_not_called()
+    mock_handle_room_finished.assert_not_called()
+
+
+@mock.patch(
+    "core.breakout.services.BreakoutService.enforce_breakout_participant_access"
+)
+@mock.patch.object(api.WebhookReceiver, "receive")
+def test_receive_enforces_breakout_participant_join_before_room_filter(
+    mock_receive, mock_enforce, mock_livekit_config, settings
+):
+    """A cached token cannot bypass assignment checks when the room filter is UUID-only."""
+    settings.LIVEKIT_WEBHOOK_EVENTS_FILTER_REGEX = (
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    )
+    request = mock.MagicMock()
+    request.headers = {"Authorization": "test_token"}
+    request.body = b"{}"
+    data = mock.MagicMock()
+    data.room.name = f"breakout_{uuid.uuid4()}_0"
+    data.participant.identity = "participant-1"
+    data.event = "participant_joined"
+    mock_receive.return_value = data
+
+    LiveKitEventsService().receive(request)
+
+    mock_enforce.assert_called_once_with(data.room.name, "participant-1")
+
+
 @mock.patch("core.services.presence.cache.delete")
 def test_participant_left_clearing_gated_by_setting(mock_delete, service, settings):
     """PRESENCE_CLEAR_ON_PARTICIPANT_LEFT toggles eager presence invalidation."""
