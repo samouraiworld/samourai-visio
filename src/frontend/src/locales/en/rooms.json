@@ -335,7 +335,8 @@
         "exit": "Exit fullscreen mode"
       },
       "support": "Contact support",
-      "documentation": "Documentation"
+      "documentation": "Documentation",
+      "breakoutRooms": "Breakout Rooms"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Record",
       "admin": "Host settings",
       "tools": "More tools",
-      "info": "Meeting information"
+      "info": "Meeting information",
+      "breakout": "Breakout Rooms"
     },
     "content": {
       "participants": "participants",
@@ -433,7 +435,8 @@
       "screenRecording": "record",
       "admin": "host settings",
       "tools": "more tools",
-      "info": "meeting information"
+      "info": "meeting information",
+      "breakout": "breakout rooms"
     },
     "closeButton": "Hide {{content}} (Escape)",
     "escapeHint": "Press Escape to close"
@@ -798,5 +801,97 @@
   },
   "participantTile": {
     "screenShare": "{{name}}'s screen"
+  },
+  "breakout": {
+    "menuItem": "Breakout Rooms",
+    "heading": "Breakout Rooms",
+    "setup": {
+      "roomCount": "Number of rooms",
+      "roomCountOption": "{{count}} rooms",
+      "create": "Create Breakout Rooms",
+      "randomize": "Assign all randomly",
+      "unassigned": "{{count}} unassigned",
+      "openAll": "Open All Rooms",
+      "cancel": "Cancel",
+      "duration": "Duration",
+      "durationOptions": {
+        "none": "No timer",
+        "2min": "2 minutes",
+        "5min": "5 minutes",
+        "10min": "10 minutes",
+        "15min": "15 minutes",
+        "30min": "30 minutes",
+        "1h": "1 hour",
+        "20min": "20 minutes",
+        "45min": "45 minutes",
+        "1h30": "1 hour 30 minutes",
+        "2h": "2 hours",
+        "3h": "3 hours",
+        "4h": "4 hours"
+      },
+      "noParticipants": "No participants assigned",
+      "assignParticipants": "Assign participants",
+      "unassignedOption": "Unassigned",
+      "allAssigned": "All participants assigned",
+      "unassignParticipant": "Unassign {{name}}",
+      "assignParticipant": "Assign {{name}} to a room",
+      "syncFailed": "Room synchronization failed.",
+      "retrySynchronization": "Retry synchronization",
+      "synchronizing": "Synchronizing breakout rooms…"
+    },
+    "active": {
+      "timeRemaining": "Time remaining",
+      "closeAll": "Close All Rooms",
+      "participantCount": "{{count}} participant(s)",
+      "visitRoom": "Visit",
+      "returnToMain": "Return to Main Room",
+      "broadcastTitle": "Broadcast Announcement",
+      "broadcastPlaceholder": "Type announcement to all rooms...",
+      "broadcastSent": "Announcement sent to all rooms!",
+      "youAreHere": "You are here",
+      "leaveRoom": "Leave",
+      "mainRoom": "Main Room",
+      "assignTo": "Assign to...",
+      "noParticipants": "No participants in this room",
+      "statusUnknown": "Live status unavailable",
+      "sendBroadcast": "Send announcement",
+      "reassignParticipant": "Move {{name}} to another room",
+      "syncFailed": "Room synchronization failed.",
+      "retrySynchronization": "Retry synchronization",
+      "closing": "Closing breakout rooms…"
+    },
+    "participant": {
+      "currentRoom": "You are in {{room}}",
+      "returnButton": "Return to main room",
+      "returningIn": "Returning to main room in {{seconds}}s",
+      "returning": "Returning to main room…",
+      "askForHelp": "Ask for Help",
+      "askForHelpTooltip": "Notify the host you need assistance",
+      "helpRequested": "Help requested",
+      "cancelHelp": "Cancel help request",
+      "returnAssigned": "Return to assigned room",
+      "actionError": "The action failed. Please try again.",
+      "unknownRoom": "Breakout room"
+    },
+    "timer": {
+      "remaining": "Time remaining: {{time}}",
+      "elapsed": "Elapsed time: {{time}}",
+      "open": "{{time}} (open)"
+    },
+    "transition": {
+      "movingTo": "Moving to {{room}}…",
+      "returningToMain": "Returning to main room…",
+      "unknownRoom": "breakout room"
+    },
+    "helpAlert": {
+      "title": "Help Requested",
+      "body": "{{participantName}} in {{roomName}} is asking for help",
+      "joinRoom": "Join Room",
+      "dismiss": "Dismiss alert"
+    },
+    "broadcast": {
+      "title": "Host Announcement",
+      "dismiss": "Dismiss announcement"
+    }
   }
 }

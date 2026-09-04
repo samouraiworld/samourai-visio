@@ -283,6 +283,27 @@
 | `celery.extraVolumes`                                | Additional volumes to mount on the celery.                                        | `[]`        |
 | `celery.pdb.enabled`                                 | Enable pdb on celery                                                              | `false`     |
 
+### Breakout rooms
+
+| Name                    | Description                                           | Value   |
+| ----------------------- | ----------------------------------------------------- | ------- |
+| `breakoutRooms.enabled` | Enable breakout rooms and their required Beat service | `false` |
+
+### celeryBeat
+
+| Name                              | Description                                | Value                                             |
+| --------------------------------- | ------------------------------------------ | ------------------------------------------------- |
+| `celeryBeat.enabled`              | Deploy the Celery Beat scheduler           | `false`                                           |
+| `celeryBeat.command`              | Celery Beat command                        | `["celery","-A","meet.celery_app","beat","--loglevel=info"]` |
+| `celeryBeat.envVars`              | Additional environment variables           | `undefined`                                       |
+| `celeryBeat.podAnnotations`       | Annotations for the Beat pod               | `{}`                                              |
+| `celeryBeat.podSecurityContext`   | Pod security context                       | `nil`                                             |
+| `celeryBeat.securityContext`      | Container security context                 | `nil`                                             |
+| `celeryBeat.resources`            | Resource requests and limits               | `{}`                                              |
+| `celeryBeat.nodeSelector`         | Node selector                              | `{}`                                              |
+| `celeryBeat.tolerations`          | Tolerations                                | `[]`                                              |
+| `celeryBeat.affinity`             | Affinity rules                             | `{}`                                              |
+
 ### agents
 
 | Name                                                 | Description                                                                       | Value                 |

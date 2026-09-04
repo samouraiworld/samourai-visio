@@ -1,0 +1,94 @@
+{{- $backendEnv := default dict .Values.backend.envVars -}}
+{{- if hasKey $backendEnv "MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- fail "Use breakoutRooms.enabled instead of backend.envVars.MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- end -}}
+{{- $beatEnabled := or .Values.breakoutRooms.enabled .Values.celeryBeat.enabled -}}
+{{- if $beatEnabled }}
+{{- $componentEnv := deepCopy (default dict .Values.celeryBeat.envVars) -}}
+{{- if hasKey $componentEnv "MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- fail "Use breakoutRooms.enabled instead of celeryBeat.envVars.MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- end -}}
+{{- $effectiveEnv := mergeOverwrite (deepCopy $backendEnv) $componentEnv -}}
+{{- $_ := set $effectiveEnv "MEET_BREAKOUT_ROOMS_ENABLED" .Values.breakoutRooms.enabled -}}
+{{- $_ := set $effectiveEnv "CELERY_ENABLED" true -}}
+{{- $envVars := include "meet.env.transformDict" $effectiveEnv -}}
+{{- $fullName := include "meet.celeryBeat.fullname" . -}}
+{{- $component := "celery-beat" -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $fullName }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "meet.common.labels" (list . $component) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "meet.common.selectorLabels" (list . $component) | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.celeryBeat.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "meet.common.selectorLabels" (list . $component) | nindent 8 }}
+    spec:
+      {{- if $.Values.image.credentials }}
+      imagePullSecrets:
+        - name: {{ include "meet.secret.dockerconfigjson.name" (dict "fullname" (include "meet.fullname" .) "imageCredentials" $.Values.image.credentials) }}
+      {{- end }}
+      {{- with .Values.celeryBeat.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ (.Values.backend.image | default dict).repository | default .Values.image.repository }}:{{ (.Values.backend.image | default dict).tag | default .Values.image.tag }}"
+          imagePullPolicy: {{ (.Values.backend.image | default dict).pullPolicy | default .Values.image.pullPolicy }}
+          command:
+            {{- toYaml .Values.celeryBeat.command | nindent 12 }}
+          env:
+            {{- if $envVars }}
+            {{- $envVars | indent 12 }}
+            {{- end }}
+          {{- with .Values.celeryBeat.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.celeryBeat.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.mountFiles }}
+          volumeMounts:
+            {{- range $index, $value := . }}
+            - name: "files-{{ $index }}"
+              mountPath: {{ $value.path }}
+              subPath: content
+            {{- end }}
+          {{- end }}
+      {{- with .Values.celeryBeat.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celeryBeat.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.celeryBeat.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.mountFiles }}
+      volumes:
+        {{- range $index, $value := . }}
+        - name: "files-{{ $index }}"
+          configMap:
+            name: "{{ include "meet.fullname" $ }}-files-{{ $index }}"
+        {{- end }}
+      {{- end }}
+{{- end }}

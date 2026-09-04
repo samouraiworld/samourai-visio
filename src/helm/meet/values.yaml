@@ -21,6 +21,12 @@ image:
 nameOverride: ""
 fullnameOverride: ""
 
+## @section Breakout rooms
+
+breakoutRooms:
+  ## @param breakoutRooms.enabled Enable breakout rooms and their required Celery scheduler
+  enabled: false
+
 ## @skip commonEnvVars
 commonEnvVars: &commonEnvVars
   <<: []
@@ -776,6 +782,36 @@ celeryBackend:
   ## @param celeryBackend.pdb.enabled Enable pdb on celeryBackend
   pdb:
     enabled: false
+
+## @section celeryBeat
+
+celeryBeat:
+  ## @param celeryBeat.enabled Deploy the Celery Beat scheduler
+  enabled: false
+  ## @param celeryBeat.command Celery Beat command
+  command:
+    - "celery"
+    - "-A"
+    - "meet.celery_app"
+    - "beat"
+    - "--loglevel=info"
+  ## @param celeryBeat.envVars Additional environment variables
+  envVars:
+    <<: *commonEnvVars
+  ## @param celeryBeat.podAnnotations Annotations for the Beat pod
+  podAnnotations: {}
+  ## @param celeryBeat.podSecurityContext Pod security context
+  podSecurityContext: null
+  ## @param celeryBeat.securityContext Container security context
+  securityContext: null
+  ## @param celeryBeat.resources Resource requests and limits
+  resources: {}
+  ## @param celeryBeat.nodeSelector Node selector
+  nodeSelector: {}
+  ## @param celeryBeat.tolerations Tolerations
+  tolerations: []
+  ## @param celeryBeat.affinity Affinity rules
+  affinity: {}
 
 ## @section celeryTranscribe
 
