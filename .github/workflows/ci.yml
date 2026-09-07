@@ -51,6 +51,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - run: scripts/check-hygiene.sh
+      # The static half of the digest gate, and its self-test, need no
+      # Docker; the rendered half runs in Compose merge below.
+      - name: Every image reference carries its digest
+        run: scripts/check-image-digests.sh deploy/compose.override.yaml deploy/greffon/visio/1.0/docker-compose.yml
+      - name: And that gate can fail
+        run: scripts/check-image-digests.selftest.sh
 
   lint:
     name: Lint
@@ -151,22 +157,16 @@ jobs:
         # ever reach the log. Never run bare `docker compose config` here.
         run: docker compose config --no-env-resolution -q
 
-      - name: Every image is pinned to an immutable-looking tag
+      - name: Every image is pinned by digest (the rendered config)
         working-directory: deploy
-        run: |
-          set -euo pipefail
-          # `grep -c latest` is NOT sufficient: an untagged image renders with
-          # no tag at all and is implicitly :latest, containing no "latest".
-          docker compose config --images | tee /tmp/images
-          status=0
-          while read -r img; do
-            case "$img" in
-              *:latest|*:main|*:master|*:edge) echo "::error::floating tag: $img"; status=1 ;;
-              *:*) ;;
-              *) echo "::error::untagged (implicitly :latest): $img"; status=1 ;;
-            esac
-          done < /tmp/images
-          exit $status
+        # An allowlist, on what compose will actually pull — the merged
+        # config, upstream's compose.yaml included. The step this replaces
+        # rejected a denylist (latest, main, master, edge, untagged) and
+        # passed every other tag, which read as pinning while pinning
+        # nothing: a tag is a pointer its registry owner can move. The gate
+        # and its self-test live in scripts/ so Repo hygiene runs them on the
+        # files without Docker.
+        run: docker compose config --images | ../scripts/check-image-digests.sh
 
       - name: Gateway template parses (production image's own nginx -t)
         working-directory: deploy

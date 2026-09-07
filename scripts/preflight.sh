@@ -371,18 +371,16 @@ phase_config() {
   fi
   ok "compose.yaml + compose.override.yaml merge into a valid config"
 
-  # `grep -c latest` is NOT sufficient: an untagged image renders with no tag
-  # at all, is implicitly :latest, and contains no "latest" to match.
+  # An allowlist, not a denylist: a reference is pinned only if it carries
+  # its content digest. A tag — even one that reads like a release — is a
+  # pointer the registry owner can move under a running deployment. Same
+  # rule as scripts/check-image-digests.sh, whose self-test proves it fails.
   local float=""
   while read -r img; do
-    case "$img" in
-      *:latest|*:main|*:master|*:edge) float="$float $img" ;;
-      *:*) ;;
-      *) float="$float $img(untagged)" ;;
-    esac
+    printf '%s\n' "$img" | grep -qE '@sha256:[0-9a-f]{64}$' || float="$float $img"
   done < <(dc config --images 2>/dev/null)
-  if [ -z "$float" ]; then ok "every image is pinned to a fixed tag"
-  else bad "floating image tag(s) — an upstream push will restart production unannounced" "$float"; fi
+  if [ -z "$float" ]; then ok "every image is pinned by digest"
+  else bad "image(s) without a digest — an upstream push could restart production unannounced" "$float"; fi
 
   dc config --no-env-resolution --format json > /tmp/preflight-cfg.json 2>/dev/null
   local merge; merge="$(python3 - <<'PY'

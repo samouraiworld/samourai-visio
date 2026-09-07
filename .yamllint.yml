@@ -2,7 +2,10 @@ extends: default
 
 rules:
   line-length:
-    max: 100
+    # 120, not 100: an image pinned as `tag@sha256:<64 hex>` is 107-112
+    # characters, and it stays on ONE line on purpose — `grep image:` on the
+    # compose files must show the whole reference, digest included.
+    max: 120
     allow-non-breakable-words: true
   # GitHub Actions requires the `on:` key, which YAML 1.1 parses as boolean
   # true. This is unavoidable, not a style choice.

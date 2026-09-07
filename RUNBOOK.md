@@ -768,29 +768,39 @@ docker compose run --rm backend python manage.py showmigrations \
 #    fresh upstream default.conf.template + the SAMOURAI-marked blocks, into
 #    deploy/nginx/default.conf.template (then copy to ~/visio/nginx/).
 #
-# 5. Bump the tags in compose.override.yaml (NOT compose.yaml — that gets
-#    re-fetched verbatim), then:
+# 5. Bump the pins in compose.override.yaml (NOT compose.yaml — that gets
+#    re-fetched verbatim). A pin is the tag AND its digest. Resolve the
+#    digest from the registry, never from a local `docker images`, so the
+#    file records what the registry serves for that tag:
+scripts/resolve-image-digest.sh lasuite/meet-backend:v1.25.0
+scripts/resolve-image-digest.sh lasuite/meet-frontend:v1.25.0
+#    Paste each printed line as the service's `image:`. CI refuses a
+#    reference without a digest (scripts/check-image-digests.sh) and so
+#    does `preflight.sh stack`. Then:
 docker compose pull
 docker compose up -d          # NOT `restart`
-docker compose config --images   # confirm the new tags are actually running
+docker compose config --images   # confirm the new digests are actually running
 docker compose run --rm backend python manage.py migrate
 ```
 
-**Rollback:** revert the tags in `compose.override.yaml`, `docker compose up -d`, then restore the dump if the migration was not reversible. Re-fetch upstream `compose.yaml` at the old tag if it changed.
+**Rollback:** revert the pins (tag and digest together) in `compose.override.yaml`, `docker compose up -d`, then restore the dump if the migration was not reversible. Re-fetch upstream `compose.yaml` at the old tag if it changed.
 
-### Where we stand (read 2026-08-25)
+### Where we stand
 
-Pinned: **v1.24.0** (21 July). Upstream head: **v1.28.0** (24 August). Four
-minors and two hotfix tags behind, and the gap grows by roughly one minor
-every nine days.
+Pinned: **v1.24.0**, by digest — every `image:` in `compose.override.yaml`
+carries its `@sha256:` next to the tag, resolved from the registry with
+`scripts/resolve-image-digest.sh`, and CI accepts nothing else
+(`scripts/check-image-digests.sh`). Upstream head: **v1.30.0**, six minors
+behind, and the gap grows by roughly one minor every nine days.
 
-What the batch to v1.28.0 actually involves, checked against upstream rather
+What the batch to v1.30.0 actually involves, checked against upstream rather
 than assumed:
 
 - **`UPGRADE.md` has no entry after v1.23.0** — no manual step for any release
-  in this range.
+  in this range (its only newer note concerns recording storage webhooks,
+  which this instance does not run).
 - **One migration**, additive: `0022_user_default_room_access_level_and_more`.
-- 194 commits over 300 files, overwhelmingly frontend.
+- 236 commits over 300 files, overwhelmingly frontend.
 
 That last point is the reason this is not just hygiene. v1.26.0–v1.28.0 are
 mostly **join-path device handling**: camera-in-use failures explained on the
@@ -801,8 +811,8 @@ exact failures a 40–100 person community call with mixed hardware hits, and
 they are fixed upstream and not here. Batch the upgrade **before** an event,
 not after, with the 24 h canary.
 
-`scripts/check-upstream-contract.sh v1.28.0` was run on 2026-08-25 and **all
-fifteen assumptions still hold** — the OIDC traps, the CSS variable names, the
+`scripts/check-upstream-contract.sh v1.30.0` passes — **all fifteen
+assumptions still hold** — the OIDC traps, the CSS variable names, the
 synthetic-room claim, the gateway template, and the LiveKit room-cap keys. So
 the remaining risk in this batch is runtime behaviour, not contract drift: what
 the canary is for. Re-run the gate against the tag you actually pick, since
