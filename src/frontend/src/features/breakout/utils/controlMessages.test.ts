@@ -15,6 +15,18 @@ describe('breakout data packets are hints, never commands', () => {
     expect(classifyBreakoutHint({ type: 'breakout:broadcast' })).toBe('refresh')
   })
 
+  it('ignores every field except the type', () => {
+    // A forged packet cannot smuggle content through: the classifier returns
+    // an enum, so nothing from the payload can reach breakout state.
+    expect(
+      classifyBreakoutHint({
+        type: 'breakout:broadcast',
+        message: 'forged',
+        revision: 999,
+      })
+    ).toBe('refresh')
+  })
+
   it('ignores packets that are not breakout packets', () => {
     expect(classifyBreakoutHint({ type: 'chat' })).toBeNull()
     expect(classifyBreakoutHint({})).toBeNull()
