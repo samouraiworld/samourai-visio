@@ -838,13 +838,11 @@
       "assignParticipant": "{{name}} aan een ruimte toewijzen",
       "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
       "retrySynchronization": "Synchronisatie opnieuw proberen",
-      "synchronizing": "Breakoutruimtes worden gesynchroniseerd…",
+      "synchronizing": "Groepsruimtes worden gesynchroniseerd…",
       "disabled": "Het aanmaken van groepsruimtes is uitgeschakeld op deze dienst."
     },
     "active": {
-      "timeRemaining": "Resterende tijd",
       "closeAll": "Alle ruimtes sluiten",
-      "participantCount": "{{count}} deelnemer(s)",
       "visitRoom": "Bezoeken",
       "returnToMain": "Terug naar de hoofdruimte",
       "broadcastTitle": "Aankondiging sturen",
@@ -860,17 +858,22 @@
       "reassignParticipant": "{{name}} naar een andere ruimte verplaatsen",
       "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
       "retrySynchronization": "Synchronisatie opnieuw proberen",
-      "closing": "Breakoutruimtes worden gesloten…",
-      "flagDisabled": "Nieuwe groepsruimtes zijn uitgeschakeld op deze dienst. U kunt deze sessie nog steeds sluiten."
+      "closing": "Groepsruimtes worden gesloten…",
+      "flagDisabled": "Nieuwe groepsruimtes zijn uitgeschakeld op deze dienst. U kunt deze sessie nog steeds sluiten.",
+      "actionFailed": {
+        "conflict": "De ruimtes zijn intussen gewijzigd. Ze zijn vernieuwd, probeer het opnieuw.",
+        "upstream": "De videoserver heeft niet gereageerd. Probeer het zo meteen opnieuw.",
+        "forbidden": "U kunt de groepsruimtes van deze vergadering niet meer beheren.",
+        "gone": "Deze groepssessie is al gesloten.",
+        "generic": "De actie is mislukt. Probeer het opnieuw."
+      }
     },
     "participant": {
       "currentRoom": "U bevindt zich in {{room}}",
       "returnButton": "Terug naar de hoofdruimte",
       "returningIn": "Terugkeren naar de hoofdruimte in {{seconds}}s",
-      "returning": "Terugkeren naar de hoofdruimte…",
       "askForHelp": "Om hulp vragen",
       "askForHelpTooltip": "De host informeren dat u hulp nodig heeft",
-      "helpRequested": "Hulp aangevraagd",
       "cancelHelp": "Hulpverzoek annuleren",
       "returnAssigned": "Terug naar toegewezen ruimte",
       "actionError": "De actie is mislukt. Probeer het opnieuw.",

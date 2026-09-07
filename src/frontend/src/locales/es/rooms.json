@@ -841,9 +841,7 @@
       "disabled": "La creación de salas de grupo está desactivada en este servicio."
     },
     "active": {
-      "timeRemaining": "Tiempo restante",
       "closeAll": "Cerrar todas las salas",
-      "participantCount": "{{count}} participante(s)",
       "visitRoom": "Visitar",
       "returnToMain": "Volver a la sala principal",
       "broadcastTitle": "Enviar anuncio",
@@ -859,17 +857,22 @@
       "reassignParticipant": "Mover a {{name}} a otra sala",
       "syncFailed": "La sincronización de las salas ha fallado.",
       "retrySynchronization": "Reintentar la sincronización",
-      "closing": "Cerrando las salas para grupos…",
-      "flagDisabled": "Las nuevas salas de grupo están desactivadas en este servicio. Aún puedes cerrar esta sesión."
+      "closing": "Cerrando las salas de grupo…",
+      "flagDisabled": "Las nuevas salas de grupo están desactivadas en este servicio. Aún puedes cerrar esta sesión.",
+      "actionFailed": {
+        "conflict": "Las salas han cambiado mientras tanto. Se han actualizado, inténtalo de nuevo.",
+        "upstream": "El servidor de vídeo no ha respondido. Inténtalo de nuevo en unos instantes.",
+        "forbidden": "Ya no puedes gestionar las salas de grupo de esta reunión.",
+        "gone": "Esta sesión de salas de grupo ya se ha cerrado.",
+        "generic": "La acción ha fallado. Inténtalo de nuevo."
+      }
     },
     "participant": {
       "currentRoom": "Estás en {{room}}",
       "returnButton": "Volver a la sala principal",
       "returningIn": "Regresando a la sala principal en {{seconds}}s",
-      "returning": "Regresando a la sala principal…",
       "askForHelp": "Pedir ayuda",
       "askForHelpTooltip": "Notificar al anfitrión que necesitas ayuda",
-      "helpRequested": "Ayuda solicitada",
       "cancelHelp": "Cancelar solicitud de ayuda",
       "returnAssigned": "Volver a la sala asignada",
       "actionError": "La acción ha fallado. Inténtalo de nuevo.",

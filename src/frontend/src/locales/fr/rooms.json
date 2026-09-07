@@ -842,9 +842,7 @@
       "disabled": "La création de salles de sous-groupe est désactivée sur ce service."
     },
     "active": {
-      "timeRemaining": "Temps restant",
       "closeAll": "Fermer toutes les salles",
-      "participantCount": "{{count}} participant(s)",
       "visitRoom": "Visiter",
       "returnToMain": "Retourner à la salle principale",
       "broadcastTitle": "Diffuser une annonce",
@@ -861,16 +859,21 @@
       "syncFailed": "La synchronisation des salles a échoué.",
       "retrySynchronization": "Réessayer la synchronisation",
       "closing": "Fermeture des salles de sous-groupe…",
-      "flagDisabled": "La création de nouvelles salles est désactivée sur ce service. Vous pouvez toujours fermer cette session."
+      "flagDisabled": "La création de nouvelles salles est désactivée sur ce service. Vous pouvez toujours fermer cette session.",
+      "actionFailed": {
+        "conflict": "Les salles ont été modifiées entre-temps. Elles ont été actualisées, veuillez réessayer.",
+        "upstream": "Le serveur de visioconférence n'a pas répondu. Veuillez réessayer dans quelques instants.",
+        "forbidden": "Vous ne pouvez plus gérer les salles de sous-groupe de cette réunion.",
+        "gone": "Cette session de sous-groupes a déjà été fermée.",
+        "generic": "L'action a échoué. Veuillez réessayer."
+      }
     },
     "participant": {
       "currentRoom": "Vous êtes dans {{room}}",
       "returnButton": "Retourner à la salle principale",
       "returningIn": "Retour à la salle principale dans {{seconds}}s",
-      "returning": "Retour à la salle principale…",
       "askForHelp": "Demander de l'aide",
       "askForHelpTooltip": "Avertir l'hôte que vous avez besoin d'aide",
-      "helpRequested": "Aide demandée",
       "cancelHelp": "Annuler la demande d'aide",
       "returnAssigned": "Retourner dans la salle attribuée",
       "actionError": "L'action a échoué. Veuillez réessayer.",

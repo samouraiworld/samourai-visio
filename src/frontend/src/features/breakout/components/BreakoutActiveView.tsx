@@ -11,13 +11,14 @@
  * 7. 'Close All Rooms' recall button.
  */
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
 import { useTranslation } from 'react-i18next'
 import { useConfig } from '@/api/useConfig'
 import { useSnapshot } from 'valtio'
 import { useParticipants } from '@livekit/components-react'
+import { queryClient } from '@/api/queryClient'
 import { breakoutStore, clearBreakoutSession } from '../stores/breakout'
 import { useBreakoutStatus } from '../api/useBreakoutStatus'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
@@ -25,8 +26,13 @@ import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
 import { useBroadcastMessage } from '../api/useBroadcastMessage'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useBreakoutRoomSwap } from '../hooks/useBreakoutRoomSwap'
+import { breakoutSessionKey } from '../api/useBreakoutSession'
 import { BreakoutTimer } from './BreakoutTimer'
 import type { BreakoutSession } from '../api/types'
+import {
+  classifyActionFailure,
+  type ActionFailure,
+} from '../utils/actionFailure'
 import {
   RiStopFill,
   RiGroupLine,
@@ -88,14 +94,39 @@ export const BreakoutActiveView = ({
       currentRoomSlug: snap.mainRoomSlug ?? undefined,
     })
 
+  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(null)
+
+  // A fresh revision from the poll supersedes a stale failure message.
+  useEffect(() => setActionFailure(null), [session.revision])
+
+  /**
+   * Run a manager action; on failure show why and refresh the stale session.
+   * Returns false when the action was refused so callers stop there.
+   */
+  const runAction = useCallback(
+    async (action: () => Promise<unknown>): Promise<boolean> => {
+      setActionFailure(null)
+      try {
+        await action()
+        return true
+      } catch (error) {
+        setActionFailure(classifyActionFailure(error))
+        await queryClient.invalidateQueries({
+          queryKey: breakoutSessionKey(roomUuid),
+        })
+        return false
+      }
+    },
+    [roomUuid]
+  )
+
   const handleCloseAll = useCallback(async () => {
     if (!sessionId) return
 
-    await updateSession({
-      roomId: roomUuid,
-      sessionId,
-      status: 'closed',
-    })
+    const closed = await runAction(() =>
+      updateSession({ roomId: roomUuid, sessionId, status: 'closed' })
+    )
+    if (!closed) return
 
     if (snap.currentBreakoutRoomLkName) {
       await returnToMainRoomAfterClose()
@@ -108,25 +139,29 @@ export const BreakoutActiveView = ({
     updateSession,
     snap.currentBreakoutRoomLkName,
     returnToMainRoomAfterClose,
+    runAction,
   ])
 
   const handleRetry = useCallback(async () => {
-    await retrySession({ roomId: roomUuid, sessionId })
-  }, [retrySession, roomUuid, sessionId])
+    await runAction(() => retrySession({ roomId: roomUuid, sessionId }))
+  }, [retrySession, roomUuid, sessionId, runAction])
 
   const handleSendBroadcast = useCallback(async () => {
     if (!sessionId || !broadcastText.trim()) return
 
-    await sendBroadcast({
-      roomId: roomUuid,
-      sessionId,
-      message: broadcastText.trim(),
+    await runAction(async () => {
+      await sendBroadcast({
+        roomId: roomUuid,
+        sessionId,
+        message: broadcastText.trim(),
+      })
+
+      setBroadcastText('')
+      setBroadcastSuccess(true)
     })
 
-    setBroadcastText('')
-    setBroadcastSuccess(true)
     setTimeout(() => setBroadcastSuccess(false), 4000)
-  }, [sessionId, roomUuid, broadcastText, sendBroadcast])
+  }, [sessionId, roomUuid, broadcastText, sendBroadcast, runAction])
 
   // In-flight reassignment: move participant from current room to target room (or main room)
   const handleInFlightReassign = useCallback(
@@ -158,14 +193,16 @@ export const BreakoutActiveView = ({
         })
       }
 
-      await assignParticipants({
-        roomId: roomUuid,
-        sessionId,
-        revision: session.revision,
-        assignments: newAssignments,
-      })
+      await runAction(() =>
+        assignParticipants({
+          roomId: roomUuid,
+          sessionId,
+          revision: session.revision,
+          assignments: newAssignments,
+        })
+      )
     },
-    [sessionId, session, roomUuid, assignParticipants]
+    [sessionId, session, roomUuid, assignParticipants, runAction]
   )
 
   const rooms = session.breakout_rooms
@@ -257,6 +294,21 @@ export const BreakoutActiveView = ({
         <p role="status" className={css({ fontSize: 14 })}>
           {t('flagDisabled')}
         </p>
+      )}
+
+      {actionFailure && (
+        <div
+          role="alert"
+          className={css({
+            padding: 0.75,
+            borderRadius: '8',
+            backgroundColor: 'danger.subtle',
+            color: 'danger.subtle-text',
+            fontSize: 14,
+          })}
+        >
+          {t(`actionFailed.${actionFailure}`)}
+        </div>
       )}
 
       {session.effect_error && (

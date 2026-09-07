@@ -838,13 +838,11 @@
       "assignParticipant": "{{name}} einem Raum zuweisen",
       "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
       "retrySynchronization": "Synchronisierung wiederholen",
-      "synchronizing": "Breakout-Räume werden synchronisiert…",
+      "synchronizing": "Gruppenräume werden synchronisiert…",
       "disabled": "Das Erstellen von Gruppenräumen ist auf diesem Dienst deaktiviert."
     },
     "active": {
-      "timeRemaining": "Verbleibende Zeit",
       "closeAll": "Alle Räume schließen",
-      "participantCount": "{{count}} Teilnehmer",
       "visitRoom": "Besuchen",
       "returnToMain": "Zurück zum Hauptraum",
       "broadcastTitle": "Ankündigung senden",
@@ -860,17 +858,22 @@
       "reassignParticipant": "{{name}} in einen anderen Raum verschieben",
       "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
       "retrySynchronization": "Synchronisierung wiederholen",
-      "closing": "Breakout-Räume werden geschlossen…",
-      "flagDisabled": "Neue Gruppenräume sind auf diesem Dienst deaktiviert. Sie können diese Sitzung weiterhin schließen."
+      "closing": "Gruppenräume werden geschlossen…",
+      "flagDisabled": "Neue Gruppenräume sind auf diesem Dienst deaktiviert. Sie können diese Sitzung weiterhin schließen.",
+      "actionFailed": {
+        "conflict": "Die Räume wurden zwischenzeitlich geändert. Sie wurden aktualisiert, bitte versuchen Sie es erneut.",
+        "upstream": "Der Videoserver hat nicht geantwortet. Bitte versuchen Sie es in Kürze erneut.",
+        "forbidden": "Sie können die Gruppenräume dieses Meetings nicht mehr verwalten.",
+        "gone": "Diese Gruppensitzung wurde bereits geschlossen.",
+        "generic": "Die Aktion ist fehlgeschlagen. Bitte versuchen Sie es erneut."
+      }
     },
     "participant": {
       "currentRoom": "Sie sind in {{room}}",
       "returnButton": "Zurück zum Hauptraum",
       "returningIn": "Rückkehr zum Hauptraum in {{seconds}}s",
-      "returning": "Rückkehr zum Hauptraum…",
       "askForHelp": "Um Hilfe bitten",
       "askForHelpTooltip": "Den Gastgeber um Unterstützung bitten",
-      "helpRequested": "Hilfe angefordert",
       "cancelHelp": "Hilfeanfrage abbrechen",
       "returnAssigned": "Zum zugewiesenen Raum zurückkehren",
       "actionError": "Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.",

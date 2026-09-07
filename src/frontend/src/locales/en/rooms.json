@@ -842,9 +842,7 @@
       "disabled": "Creating breakout rooms is disabled on this service."
     },
     "active": {
-      "timeRemaining": "Time remaining",
       "closeAll": "Close All Rooms",
-      "participantCount": "{{count}} participant(s)",
       "visitRoom": "Visit",
       "returnToMain": "Return to Main Room",
       "broadcastTitle": "Broadcast Announcement",
@@ -861,16 +859,21 @@
       "syncFailed": "Room synchronization failed.",
       "retrySynchronization": "Retry synchronization",
       "closing": "Closing breakout rooms…",
-      "flagDisabled": "New breakout rooms are disabled on this service. You can still close this session."
+      "flagDisabled": "New breakout rooms are disabled on this service. You can still close this session.",
+      "actionFailed": {
+        "conflict": "The rooms changed in the meantime. They have been refreshed, please try again.",
+        "upstream": "The video server did not respond. Please try again in a moment.",
+        "forbidden": "You can no longer manage the breakout rooms of this meeting.",
+        "gone": "This breakout session has already been closed.",
+        "generic": "The action failed. Please try again."
+      }
     },
     "participant": {
       "currentRoom": "You are in {{room}}",
       "returnButton": "Return to main room",
       "returningIn": "Returning to main room in {{seconds}}s",
-      "returning": "Returning to main room…",
       "askForHelp": "Ask for Help",
       "askForHelpTooltip": "Notify the host you need assistance",
-      "helpRequested": "Help requested",
       "cancelHelp": "Cancel help request",
       "returnAssigned": "Return to assigned room",
       "actionError": "The action failed. Please try again.",
