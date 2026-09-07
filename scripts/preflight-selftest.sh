@@ -39,6 +39,10 @@ FAKE="selftest_fake_value_0000000000000000000000"
 sed -E "s/<[^>]*>/$FAKE/g" deploy/env.d/common.example      > "$WORK/env.d/common"
 sed -E "s/<[^>]*>/$FAKE/g" deploy/env.d/postgresql.example  > "$WORK/env.d/postgresql"
 sed -E "s/<[^>]*>/$FAKE/g" deploy/env.d/backup.example      > "$WORK/env.d/backup"
+# The two backup keys must differ, as the check demands; the blanket
+# placeholder replacement above would have made them identical.
+sed -i.bak "s/^RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=.*/RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=${FAKE}_prune/" \
+  "$WORK/env.d/backup" && rm -f "$WORK/env.d/backup.bak"
 sed -E "s/<[^>]*>/$FAKE/"  deploy/livekit-server.yaml.example > "$WORK/livekit-server.yaml"
 printf 'body\n' > "$WORK/custom/style.css"
 printf 'png\n'  > "$WORK/custom/logo.png"
@@ -57,8 +61,9 @@ cp deploy/host/visio-retention.conf "$WORK/etc/systemd/journald.conf.d/visio-ret
 cp deploy/host/daemon.json          "$WORK/etc/docker/daemon.json"
 printf '/var/log/syslog\n/var/log/auth.log\n{\n\trotate 7\n\tdaily\n\tmissingok\n}\n' \
   > "$WORK/etc/logrotate.d/rsyslog"
-# An installed backup cron, path-edited the way RUNBOOK §8ter prescribes.
-printf '17 3 * * * user VISIO_DIR=/home/user/visio /home/user/repo/scripts/backup.sh 2>&1 | logger -t visio-backup\n' \
+# An installed backup cron, path-edited the way RUNBOOK §8ter prescribes:
+# the dump line and the prune line.
+printf '17 3 * * * user VISIO_DIR=/home/user/visio /home/user/repo/scripts/backup.sh 2>&1 | logger -t visio-backup\n45 3 * * * user VISIO_DIR=/home/user/visio /home/user/repo/scripts/backup.sh prune 2>&1 | logger -t visio-backup\n' \
   > "$WORK/etc/cron.d/visio-backup"
 export VISIO_ETC="$WORK/etc"
 
@@ -149,6 +154,13 @@ mutate '/./d' custom/icons/site.webmanifest "one icon file empty (Docker would m
 mutate 's/daily/weekly/' etc/logrotate.d/rsyslog "rsyslog logrotate back at the distro default"
 mutate 's/^BACKUP_REMOTE_PATH=.*/BACKUP_REMOTE_PATH=<bucket name>/' env.d/backup "backup bucket left as a placeholder"
 mutate 's|backup\.sh|something-else.sh|' etc/cron.d/visio-backup "backup cron pointing at nothing"
+# The credential split: each half lost on its own.
+mutate_re '/backup\.sh prune/d' etc/cron.d/visio-backup 'no ACTIVE line running .backup.sh prune' \
+  "prune line dropped from the cron (nothing deletes; retention turns red at KEEP+2 days)"
+mutate_re "s/^RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=.*/RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=$FAKE/" env.d/backup \
+  'same access key' "prune key set to the write key (one credential that writes and deletes)"
+mutate_re '/^RCLONE_CONFIG_VISIOPRUNE_/d' env.d/backup 'no visioprune remote' \
+  "visioprune block missing entirely (the prune has no credential)"
 
 # A malformed (wrapped-secret-style) line: a bare continuation with no '='.
 echo "special: wrapped-secret continuation line"

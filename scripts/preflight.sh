@@ -445,6 +445,30 @@ PY
     local bref; bref="$(grep -vE '^[[:space:]]*(#|$)' "$bc" | grep -c 'backup\.sh')"
     if [ "$bref" -ge 1 ]; then ok "backup cron installed with an active line pointing at backup.sh"
     else bad "$bc has no ACTIVE line running backup.sh" "the job line is missing or commented out — the cron file exists and does nothing"; fi
+    # The prune is its own line with its own key. Without it nothing deletes:
+    # the bucket grows past the published retention and the nightly's
+    # invariant turns red at KEEP_REMOTE+2 days — this catches it on day one.
+    local pref; pref="$(grep -vE '^[[:space:]]*(#|$)' "$bc" | grep -c 'backup\.sh prune')"
+    if [ "$pref" -ge 1 ]; then ok "backup cron also runs \`backup.sh prune\` (the only process holding the delete key)"
+    else bad "$bc has no ACTIVE line running \`backup.sh prune\`" "the nightly never deletes; without this line the published retention is not enforced"; fi
+  fi
+  # Two keys, not one. The write key (nightly, drill) must not be able to
+  # delete, and the prune key must be a different key — the same access key
+  # in both blocks is one leaked credential that writes and empties alike.
+  # Whether the write key really cannot delete is an IAM fact this file
+  # cannot see; RUNBOOK §8ter has the probe that proves it on the host.
+  local wk pk pt
+  wk="$(envval env.d/backup RCLONE_CONFIG_VISIO_ACCESS_KEY_ID)"
+  pk="$(envval env.d/backup RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID)"
+  pt="$(envval env.d/backup RCLONE_CONFIG_VISIOPRUNE_TYPE)"
+  if [ -z "$pt" ]; then
+    bad "env.d/backup defines no visioprune remote" \
+        "\`backup.sh prune\` has no credential of its own; the nightly key must not be the one that deletes (deploy/env.d/backup.example)"
+  elif [ -n "$wk" ] && [ "$wk" = "$pk" ]; then
+    bad "the write key and the prune key are the same access key" \
+        "one leaked key would then both write and empty the bucket — the split exists so the nightly key cannot delete"
+  else
+    ok "backup credentials are split: the nightly write key is not the prune key"
   fi
   local brp; brp="$(envval env.d/backup BACKUP_REMOTE_PATH)"
   case "$brp" in

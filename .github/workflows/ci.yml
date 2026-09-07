@@ -43,7 +43,16 @@ jobs:
           curl -sSfL -o /tmp/gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --redact --verbose --exit-code 1
+          # The history that reaches THIS ref, not every ref. fetch-depth 0
+          # brings every branch into the checkout and gitleaks defaults to
+          # `--all`, so an unrelated branch that mirrors an upstream history
+          # (test fixtures with fake keys, placeholder secrets in dist files)
+          # turned every pull request red. HEAD is the merge ref on a pull
+          # request — the PR's commits plus everything main already carries,
+          # which is exactly what a merge would bring in — and main itself on
+          # push. A branch's own history is scanned when a PR proposes it.
+          /tmp/gitleaks detect --source . --redact --verbose --exit-code 1 \
+            --log-opts="--full-history --diff-filter=tuxdb HEAD"
 
   hygiene:
     name: Repo hygiene
@@ -243,6 +252,7 @@ jobs:
           # rclone's local backend needs no credentials: `:local:` + a path.
           cat > "$W/env.d/backup" <<YAML
           RCLONE_CONFIG_VISIO_TYPE=local
+          RCLONE_CONFIG_VISIOPRUNE_TYPE=local
           BACKUP_REMOTE_PATH=visio:$W/bucket/pg
           BACKUP_KEEP_LOCAL_DAYS=7
           BACKUP_KEEP_REMOTE_DAYS=30
@@ -302,6 +312,66 @@ jobs:
           # PII must not be world-readable (umask 077 + chmod 700).
           m="$(stat -c '%a' "$(ls -1t "$HOME"/backups/visio-*.sql.gz | head -1)")"
           [ "$m" = "600" ] || { echo "::error::local dump mode $m, expected 600"; exit 1; }
+
+      - name: backup.sh prune deletes with its own key, and the nightly notices when it has not
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          before="$(cat "$HOME/backups/LAST_OK")"
+          # A dump older than the published retention, planted in the bucket:
+          # the state of a host whose prune stopped. The nightly must go red
+          # on the invariant — and must not refresh the freshness marker.
+          old="$W/bucket/pg/visio-2000-01-01-0000.sql.gz"
+          cp "$(ls -1 "$W"/bucket/pg/visio-*.sql.gz | head -1)" "$old"
+          touch -d '40 days ago' "$old"
+          if VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" > /tmp/stale.out 2>&1; then
+            cat /tmp/stale.out
+            echo "::error::nightly reported OK with a 40-day-old object in the bucket"; exit 1
+          fi
+          cat /tmp/stale.out
+          grep -q 'NOT enforced' /tmp/stale.out ||
+            { echo "::error::no FAIL line naming the unenforced retention"; exit 1; }
+          [ "$(cat "$HOME/backups/LAST_OK")" = "$before" ] ||
+            { echo "::error::LAST_OK moved on a failed run"; exit 1; }
+          # The prune, through the delete key only, clears it.
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" prune | tee /tmp/prune.out
+          grep -q '^OK prune' /tmp/prune.out || { echo "::error::prune did not report OK"; exit 1; }
+          [ ! -e "$old" ] || { echo "::error::prune left the 40-day-old object in place"; exit 1; }
+          # And the nightly is green again.
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/after.out
+          grep -q '^OK ' /tmp/after.out || { echo "::error::nightly not OK after the prune"; exit 1; }
+
+      - name: And each entry point holds only its own credential
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          cp env.d/backup /tmp/backup.env
+          # Nightly with NO prune remote defined: it never deletes, so it
+          # must not care. This is also the state of a host that has not yet
+          # created the second key — the nightly keeps running there, and
+          # preflight.sh config is what goes red until it does.
+          sed -i '/^RCLONE_CONFIG_VISIOPRUNE_/d' env.d/backup
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/nowrite.out
+          grep -q '^OK ' /tmp/nowrite.out ||
+            { echo "::error::the nightly needed the prune credential"; exit 1; }
+          # Prune with NO write remote defined: it never uploads, so it must
+          # not care either.
+          cp /tmp/backup.env env.d/backup
+          sed -i '/^RCLONE_CONFIG_VISIO_/d' env.d/backup
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" prune | tee /tmp/noprune.out
+          grep -q '^OK prune' /tmp/noprune.out ||
+            { echo "::error::the prune needed the write credential"; exit 1; }
+          # And a prune with no credential of its own says so, loudly.
+          sed -i '/^RCLONE_CONFIG_VISIOPRUNE_/d' env.d/backup
+          if VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" prune > /tmp/nokey.out 2>&1; then
+            cat /tmp/nokey.out
+            echo "::error::prune reported OK with no visioprune remote"; exit 1
+          fi
+          grep -q '^FAIL .*no RCLONE_CONFIG_VISIOPRUNE_' /tmp/nokey.out ||
+            { cat /tmp/nokey.out; echo "::error::no FAIL line naming the missing prune remote"; exit 1; }
+          cp /tmp/backup.env env.d/backup
 
       - name: restore-drill.sh restores that dump, locally and from the bucket
         run: |

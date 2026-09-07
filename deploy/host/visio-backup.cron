@@ -8,6 +8,14 @@
 # ~/backups/LAST_OK, which `preflight.sh stack` turns red within a day — the
 # cron itself never fails silently.
 #
-# preflight.sh `config` asserts this file is installed and points at
-# backup.sh.
+# preflight.sh `config` asserts this file is installed and carries both
+# lines: the dump, and the prune.
+#
+# Two processes, on purpose. The dump runs with the write key, which cannot
+# delete; the prune runs with the delete key, in a process that never sees
+# the dump. Same night, after the dump has landed and been verified, so the
+# published 30-day retention holds to the day — a weekly prune would let a
+# dump live up to 37 days against the number the privacy page publishes
+# (and would need the +2 slack in backup.sh raised to cover the gap).
 17 3 * * * <user> VISIO_DIR=<absolute path to ~/visio> <absolute path to the repo clone>/scripts/backup.sh 2>&1 | logger -t visio-backup
+45 3 * * * <user> VISIO_DIR=<absolute path to ~/visio> <absolute path to the repo clone>/scripts/backup.sh prune 2>&1 | logger -t visio-backup
