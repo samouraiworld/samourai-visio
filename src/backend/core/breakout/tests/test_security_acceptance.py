@@ -253,7 +253,7 @@ def test_breakout_room_names_are_never_served_as_unregistered_rooms(settings):
         session=BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
     )
 
-    with mock.patch("core.utils.generate_token") as token:
+    with mock.patch("core.utils.generate_token", return_value="unused-token") as token:
         response = APIClient().get(
             f"/api/v1.0/rooms/{breakout_room.livekit_room_name}/"
         )
