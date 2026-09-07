@@ -6,6 +6,7 @@ from time import monotonic, sleep
 from unittest import mock
 
 from django.db import connection, connections, transaction
+from django.utils import timezone
 
 import pytest
 from rest_framework.test import APIClient
@@ -878,3 +879,60 @@ def test_assignments_unknown_room_id_returns_400_and_preserves_db():
         ).participant_identity
         == "original-p1"
     )
+
+
+@mock.patch.object(BreakoutService, "_send_data_to_rooms")
+def test_broadcast_is_readable_from_the_assignment_poll(mock_send):
+    """Announcements are served by the poll; the data packet is only a hint."""
+    room = RoomFactory()
+    admin = UserFactory()
+    room.accesses.create(user=admin, role=RoleChoices.ADMIN)
+    session = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
+    breakout_room = BreakoutRoomFactory(session=session)
+    BreakoutAssignmentFactory(
+        breakout_room=breakout_room,
+        participant_identity=str(admin.sub),
+        participant_name="Admin",
+    )
+    client = APIClient()
+    client.force_login(admin)
+
+    sent = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/broadcast/",
+        {"message": "Five minutes left"},
+        format="json",
+    )
+    polled = client.get(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/current-assignment/"
+    )
+
+    assert sent.status_code == 200
+    session.refresh_from_db()
+    assert session.last_broadcast_message == "Five minutes left"
+    assert session.last_broadcast_at is not None
+    assert polled.json()["last_broadcast"]["message"] == "Five minutes left"
+    assert polled.json()["last_broadcast"]["sent_at"] == (
+        session.last_broadcast_at.isoformat().replace("+00:00", "Z")
+    )
+    mock_send.assert_called_once()
+
+
+@mock.patch.object(BreakoutService, "_delete_livekit_rooms")
+@mock.patch.object(BreakoutService, "_try_send_data_to_rooms")
+@mock.patch("core.services.room_management.RoomManagement.update_metadata")
+def test_close_clears_the_last_announcement(mock_meta, mock_send, mock_delete):
+    room = RoomFactory()
+    session = BreakoutSessionFactory(
+        room=room,
+        status=BreakoutSession.Status.ACTIVE,
+        last_broadcast_message="Wrap up",
+        last_broadcast_at=timezone.now(),
+    )
+    BreakoutRoomFactory(session=session)
+
+    BreakoutService().close_session(session)
+
+    session.refresh_from_db()
+    assert session.status == BreakoutSession.Status.CLOSED
+    assert session.last_broadcast_message == ""
+    assert session.last_broadcast_at is None

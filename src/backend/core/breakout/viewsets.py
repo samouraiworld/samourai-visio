@@ -544,6 +544,14 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 "started_at": session.started_at,
                 "ends_at": session.ends_at,
                 "duration_seconds": session.duration_seconds,
+                "last_broadcast": (
+                    {
+                        "message": session.last_broadcast_message,
+                        "sent_at": session.last_broadcast_at,
+                    }
+                    if session.last_broadcast_at
+                    else None
+                ),
                 "assignment": assignment_data,
                 "help_request": (
                     BreakoutHelpRequestSerializer(open_help_request).data

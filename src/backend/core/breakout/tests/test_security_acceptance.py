@@ -197,6 +197,7 @@ def test_participant_assignment_endpoint_returns_only_the_caller():
             "livekit_room_name": breakout_room.livekit_room_name,
         },
         "help_request": None,
+        "last_broadcast": None,
     }
     assert "other-participant" not in str(response.json())
 

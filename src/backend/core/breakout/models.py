@@ -95,6 +95,20 @@ class BreakoutSession(BaseModel):
         verbose_name=_("effect error"),
         help_text=_("Latest retryable LiveKit reconciliation error."),
     )
+    last_broadcast_message = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name=_("last broadcast message"),
+        help_text=_(
+            "Most recent host announcement, served through the assignment poll."
+        ),
+    )
+    last_broadcast_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("last broadcast at"),
+    )
 
     class Meta:
         app_label = "core"

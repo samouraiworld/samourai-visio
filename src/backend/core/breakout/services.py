@@ -350,8 +350,17 @@ class BreakoutService:
             session.status = BreakoutSession.Status.CLOSED
             session.closed_at = timezone.now()
             session.effect_error = ""
+            session.last_broadcast_message = ""
+            session.last_broadcast_at = None
             session.save(
-                update_fields=["status", "closed_at", "effect_error", "updated_at"]
+                update_fields=[
+                    "status",
+                    "closed_at",
+                    "effect_error",
+                    "last_broadcast_message",
+                    "last_broadcast_at",
+                    "updated_at",
+                ]
             )
 
         logger.info("Closed breakout session %s", session.id)
@@ -862,6 +871,9 @@ class BreakoutService:
     def _record_effect_error(session: BreakoutSession, error: Exception) -> None:
         """Persist a bounded retryable effect error for operator visibility."""
         effect_error = str(error)[:2000] or error.__class__.__name__
+        logger.error(
+            "Breakout effect failed for session %s: %s", session.pk, effect_error
+        )
         updated = BreakoutSession.objects.filter(
             pk=session.pk,
             status=session.status,
@@ -1069,6 +1081,15 @@ class BreakoutService:
         """
         if not session.is_active:
             raise InvalidSessionStateError("Cannot broadcast to an inactive session.")
+
+        sent_at = timezone.now()
+        BreakoutSession.objects.filter(
+            pk=session.pk, status=BreakoutSession.Status.ACTIVE
+        ).update(
+            last_broadcast_message=message,
+            last_broadcast_at=sent_at,
+            updated_at=sent_at,
+        )
 
         payload = {
             "type": "breakout:broadcast",

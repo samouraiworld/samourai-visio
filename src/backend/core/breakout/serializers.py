@@ -47,6 +47,8 @@ class BreakoutSessionSerializer(serializers.ModelSerializer):
             "closed_at",
             "revision",
             "effect_error",
+            "last_broadcast_message",
+            "last_broadcast_at",
             "created_at",
             "breakout_rooms",
         ]
@@ -58,6 +60,8 @@ class BreakoutSessionSerializer(serializers.ModelSerializer):
             "closed_at",
             "revision",
             "effect_error",
+            "last_broadcast_message",
+            "last_broadcast_at",
             "created_at",
         ]
 
