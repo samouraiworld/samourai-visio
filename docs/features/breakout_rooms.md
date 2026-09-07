@@ -20,6 +20,10 @@ until the automated and live acceptance checks described here have passed.
 - Ordinary participants can retrieve only their own assignment. The complete
   assignment map is available only to managers and is never stored in shared
   LiveKit room metadata.
+- Management rights come from the LiveKit `room_role` attribute, kept during a
+  visit through the moderator-visit flag. Guests are identified by the signed,
+  room-scoped cookie on every token path, including direct entry to a public
+  room. A breakout room name is never served as an unregistered room.
 
 ## Session and assignment state
 
@@ -33,8 +37,9 @@ configuration writers so concurrent updates preserve unrelated metadata keys.
 One participant has at most one assignment in a session, enforced by the
 database. Assignment and current connection location are separate: visiting the
 main room does not clear an assignment, and the participant can return to it.
-Every assignment change increments a monotonic revision so clients can discard
-duplicate or stale notifications.
+Every assignment change increments a monotonic revision. Clients treat every
+data packet as a hint and re-read the assignment endpoint; nothing acts on
+packet content.
 
 Reassignment disconnects the participant from the old breakout room, publishes
 a server-originated revision hint, and issues short-lived join tokens bounded by
@@ -46,6 +51,10 @@ stale connection. This is eventual containment, not synchronous admission
 control, so its latency and failure behaviour are part of live acceptance.
 See the [LiveKit token lifecycle](https://docs.livekit.io/frontends/reference/tokens-grants/).
 
+The latest host announcement (`last_broadcast_message`, at most 500 characters)
+is stored on the session, readable by every participant of that session
+through the assignment poll, and cleared when the session closes.
+
 ## Room transitions and media
 
 The client snapshots the tracks that are actually publishing immediately before
@@ -56,10 +65,20 @@ disabled. Breakout tokens also preserve the main room's exact publication-source
 policy, including an explicit empty list.
 
 Transitions complete from LiveKit connection events rather than fixed delays.
-Failures remain visible and offer a retry.
+Failures remain visible and offer a retry. A same-room token change is never a
+transition. When a returning guest's lobby admission has expired, the client
+reloads into the lobby page with an explanation and keeps its deliberate-return
+intent. Any other unplanned disconnect inside a breakout room shows a
+reconnecting state, asks the assignment poll what to do, and leaves to the
+feedback page after 15 s without an answer. A second drop restarts that fifteen
+seconds rather than inheriting the first deadline. A disconnect that carries no
+reason at all — reconnect exhaustion, token expiry — no longer falls through
+silently in any position: outside a breakout room it ends on the feedback page
+like any other.
 Connection failures retain the captured media intent and pending close/recall
-completion until a connection succeeds. A retry must not replace that intent
-with the muted tracks of an incomplete connection or initial device preferences.
+completion until a connection succeeds, except on the lobby re-entry path,
+which starts over. A retry must not replace that intent with the muted tracks
+of an incomplete connection or initial device preferences.
 
 ## Lifecycle and cleanup
 
@@ -82,6 +101,14 @@ meaning; authentication, transport, and other upstream failures remain retryable
 The admission webhook rejects joins after `ends_at`, even if scheduled cleanup
 has not yet changed the session status.
 
+The webhook scope filter applies to the parent meeting id; breakout rooms
+unknown to this deployment are ignored. While a breakout session is open,
+`room_finished` on the main room does not purge lobby admissions; entries
+still expire on their own TTL (accepted: `LOBBY_ACCEPTED_TIMEOUT`, 6 h by
+default), which bounds an untimed session's guest re-entry window. Sessions
+are capped at 10 rooms; each server-originated hint costs two LiveKit API
+calls per room plus one assignment poll per participant.
+
 ## Help requests
 
 Help requests are durable records bound to the requester's server-derived
@@ -94,16 +121,28 @@ including when a later LiveKit operation fails. Cancellation and acknowledgement
 are serialized with assignment changes so terminal help states cannot overwrite
 one another.
 
-Real-time messages contain only a server-originated invalidation event and never
-serve as authorization or the source of help-request content. Participant-originated
-control packets cannot create host alerts.
+Real-time messages contain only a server-originated invalidation event and
+never serve as authorization or the source of help-request content.
+Participant-originated control packets can only trigger a re-read of server
+state, throttled to one every two seconds for help lists.
 
 ## Feature availability
 
-When the feature flag is disabled, the frontend exposes no breakout entry point
-and every breakout endpoint returns not found. Attendance distinguishes actual
-LiveKit presence from assignment and exposes upstream status failures as unknown
-or degraded.
+`MEET_BREAKOUT_ROOMS_ENABLED` and `CELERY_ENABLED` (both must be true) gate only
+the creation and activation of a session and the "create" entry point. Every
+other endpoint (list, close, retry, status, assignments, join, broadcast, help
+requests, current-assignment) keeps working for sessions that already exist,
+and the panel stays reachable for their managers, so turning the flag off never
+strands a live session. The scheduled cleanup task runs whenever a Celery Beat
+process is up, regardless of the flag; it closes timed sessions and retries
+failed effects. Operator rule: before turning the flag off, either wait until
+`SELECT count(*) FROM meet_breakout_session WHERE status <> 'closed'` is 0, or
+keep Beat running until it is (Helm: set `celeryBeat.enabled=true` in the same
+upgrade, because `breakoutRooms.enabled=false` alone removes the Beat
+deployment).
+
+Attendance distinguishes actual LiveKit presence from assignment and exposes
+upstream status failures as unknown or degraded.
 
 ## Acceptance command
 

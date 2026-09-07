@@ -10,9 +10,8 @@ and this project adheres to
 
 ### Added
 
-- ✨(frontend) add breakout rooms for sub-group sessions #801
-- ✨(backend) add breakout session models, API and services #801
-
+- ✨(frontend) add breakout rooms for sub-group sessions #63
+- ✨(backend) add breakout session models, API and services #63
 - ✨(frontend) add 1080p sending resolution option #1660
 - ✨(backend) add Traefik support via configurable media-auth url header #1649
 - ✨(backend) update a room's attributes from the external API
