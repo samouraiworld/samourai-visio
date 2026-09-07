@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 import { useConfig } from '@/api/useConfig'
 import { useSnapshot } from 'valtio'
 import { useParticipants } from '@livekit/components-react'
-import { breakoutStore, clearBreakoutState } from '../stores/breakout'
+import { breakoutStore, clearBreakoutSession } from '../stores/breakout'
 import { useBreakoutStatus } from '../api/useBreakoutStatus'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
 import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
@@ -85,7 +85,7 @@ export const BreakoutActiveView = ({
 
   const { moveToBreakoutRoom, returnToMainRoom, returnToMainRoomAfterClose } =
     useBreakoutRoomSwap({
-      currentRoomSlug: snap.mainRoomSlug || '',
+      currentRoomSlug: snap.mainRoomSlug ?? undefined,
     })
 
   const handleCloseAll = useCallback(async () => {
@@ -101,7 +101,7 @@ export const BreakoutActiveView = ({
       await returnToMainRoomAfterClose()
       return
     }
-    clearBreakoutState()
+    clearBreakoutSession()
   }, [
     sessionId,
     roomUuid,

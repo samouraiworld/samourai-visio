@@ -42,8 +42,7 @@ export const BreakoutBroadcastBanner = ({
         borderStyle: 'solid',
         borderColor: 'primary.warm',
       })}
-      role="alert"
-      aria-live="polite"
+      role="status"
     >
       <RiMegaphoneLine size={20} className={css({ flexShrink: 0 })} />
       <div className={css({ display: 'flex', flexDirection: 'column' })}>

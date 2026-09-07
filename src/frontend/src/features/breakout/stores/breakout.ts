@@ -7,7 +7,6 @@
 
 import { proxy, subscribe } from 'valtio'
 import { STORAGE_KEYS } from '../utils/constants'
-import type { BreakoutLiveKitConnection } from '../api/types'
 import type { PendingHelpAcknowledgement } from '../utils/helpAcknowledgement'
 
 interface PersistedBreakoutState {
@@ -41,8 +40,6 @@ interface BreakoutState extends PersistedBreakoutState {
   pendingHelpAcknowledgement: PendingHelpAcknowledgement | null
   /** Bumped whenever a hint says the assignment poll must run now. */
   assignmentRefreshNonce: number
-  /** Active LiveKit connection details for the breakout room. */
-  activeConnection: BreakoutLiveKitConnection['livekit'] | null
   /** The room we belonged to dropped us outside a planned transition. */
   connectionLost: boolean
 }
@@ -97,7 +94,6 @@ export const breakoutStore = proxy<BreakoutState>({
   assignedRoomId: restored.assignedRoomId,
   pausedAssignmentRevision: restored.pausedAssignmentRevision,
   lastBroadcastShownAt: restored.lastBroadcastShownAt,
-  activeConnection: null,
   connectionLost: false,
 })
 
@@ -152,7 +148,6 @@ export const clearBreakoutState = (): void => {
   breakoutStore.assignedRoomId = null
   breakoutStore.pausedAssignmentRevision = null
   breakoutStore.lastBroadcastShownAt = null
-  breakoutStore.activeConnection = null
   breakoutStore.connectionLost = false
   sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_STATE)
 }

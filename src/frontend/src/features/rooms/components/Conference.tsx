@@ -155,6 +155,7 @@ const BreakoutActions = ({
     <>
       {snap.activeSessionId && snap.assignedRoomId && (
         <BreakoutParticipantOverlay
+          roomId={mainRoomId}
           onReturnToMain={returnToMainRoom}
           onReturnToAssigned={() => {
             const assignment = assignmentState?.assignment

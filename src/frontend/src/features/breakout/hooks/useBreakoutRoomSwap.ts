@@ -75,7 +75,6 @@ export const useBreakoutRoomSwap = ({
         }
         breakoutStore.mainRoomSlug =
           currentRoomSlug ?? breakoutStore.mainRoomSlug
-        breakoutStore.activeConnection = response.livekit
         applyConnection({
           token: response.livekit.token,
           roomName: response.livekit.room,
@@ -119,7 +118,6 @@ export const useBreakoutRoomSwap = ({
           return
         }
         breakoutStore.isModeratorVisiting = false
-        breakoutStore.activeConnection = response.livekit
         applyConnection({
           token: response.livekit.token,
           roomName: response.livekit.room,

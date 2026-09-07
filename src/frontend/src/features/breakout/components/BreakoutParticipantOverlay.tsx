@@ -22,18 +22,19 @@ import {
 } from '@remixicon/react'
 
 interface BreakoutParticipantOverlayProps {
+  roomId: string
   onReturnToMain: () => void
   onReturnToAssigned: () => void
 }
 
 export const BreakoutParticipantOverlay = ({
+  roomId,
   onReturnToMain,
   onReturnToAssigned,
 }: BreakoutParticipantOverlayProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.participant' })
   const snap = useSnapshot(breakoutStore)
   const sessionId = snap.activeSessionId ?? undefined
-  const roomId = snap.mainRoomId || snap.mainRoomSlug || undefined
   const { data: assignmentState } = useCurrentBreakoutAssignment(
     roomId,
     sessionId
