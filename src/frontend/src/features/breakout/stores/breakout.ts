@@ -43,6 +43,8 @@ interface BreakoutState extends PersistedBreakoutState {
   assignmentRefreshNonce: number
   /** Active LiveKit connection details for the breakout room. */
   activeConnection: BreakoutLiveKitConnection['livekit'] | null
+  /** The room we belonged to dropped us outside a planned transition. */
+  connectionLost: boolean
 }
 
 /** Restore persisted state from sessionStorage. */
@@ -96,6 +98,7 @@ export const breakoutStore = proxy<BreakoutState>({
   pausedAssignmentRevision: restored.pausedAssignmentRevision,
   lastBroadcastShownAt: restored.lastBroadcastShownAt,
   activeConnection: null,
+  connectionLost: false,
 })
 
 // Persist critical fields to sessionStorage on change
@@ -148,7 +151,20 @@ export const clearBreakoutState = (): void => {
   breakoutStore.pausedAssignmentRevision = null
   breakoutStore.lastBroadcastShownAt = null
   breakoutStore.activeConnection = null
+  breakoutStore.connectionLost = false
   sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_STATE)
+}
+
+/**
+ * Reset session-scoped state but keep what belongs to the page: the binding
+ * to the current meeting and the announcement already shown.
+ */
+export const clearBreakoutSession = (): void => {
+  const { mainRoomId, mainRoomSlug, lastBroadcastShownAt } = breakoutStore
+  clearBreakoutState()
+  breakoutStore.mainRoomId = mainRoomId
+  breakoutStore.mainRoomSlug = mainRoomSlug
+  breakoutStore.lastBroadcastShownAt = lastBroadcastShownAt
 }
 
 /** Ask the metadata watcher to re-read the caller's assignment from the server. */
@@ -159,7 +175,7 @@ export const requestAssignmentRefresh = (): void => {
 export const completeBreakoutTransition = (): void => {
   if (breakoutStore.clearAfterTransition) {
     const transitionError = breakoutStore.transitionError
-    clearBreakoutState()
+    clearBreakoutSession()
     breakoutStore.transitionError = transitionError
     return
   }

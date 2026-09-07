@@ -10,6 +10,7 @@ import {
 import {
   bindBreakoutToMainRoom,
   breakoutStore,
+  clearBreakoutSession,
   clearBreakoutState,
   clearMatchingPendingHelpAcknowledgement,
   completeBreakoutTransition,
@@ -88,7 +89,7 @@ describe('completeBreakoutTransition', () => {
     completeBreakoutTransition()
 
     expect(breakoutStore.activeSessionId).toBeNull()
-    expect(breakoutStore.mainRoomId).toBeNull()
+    expect(breakoutStore.mainRoomId).toBe('main-1')
     expect(breakoutStore.pendingMediaIntent).toBeNull()
     expect(breakoutStore.isTransitioning).toBe(false)
     expect(breakoutStore.clearAfterTransition).toBe(false)
@@ -198,6 +199,22 @@ describe('bindBreakoutToMainRoom', () => {
       requestAssignmentRefresh()
       requestAssignmentRefresh()
       expect(breakoutStore.assignmentRefreshNonce).toBe(before + 2)
+    })
+  })
+
+  describe('clearBreakoutSession', () => {
+    it('keeps the meeting binding and the shown announcement', () => {
+      breakoutStore.mainRoomId = 'main-1'
+      breakoutStore.mainRoomSlug = 'room-slug'
+      breakoutStore.lastBroadcastShownAt = '2026-09-07T10:00:00Z'
+      breakoutStore.activeSessionId = 'session-1'
+      breakoutStore.connectionLost = true
+      clearBreakoutSession()
+      expect(breakoutStore.activeSessionId).toBeNull()
+      expect(breakoutStore.connectionLost).toBe(false)
+      expect(breakoutStore.mainRoomId).toBe('main-1')
+      expect(breakoutStore.mainRoomSlug).toBe('room-slug')
+      expect(breakoutStore.lastBroadcastShownAt).toBe('2026-09-07T10:00:00Z')
     })
   })
 })
