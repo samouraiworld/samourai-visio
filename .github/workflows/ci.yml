@@ -313,7 +313,7 @@ jobs:
           m="$(stat -c '%a' "$(ls -1t "$HOME"/backups/visio-*.sql.gz | head -1)")"
           [ "$m" = "600" ] || { echo "::error::local dump mode $m, expected 600"; exit 1; }
 
-      - name: backup.sh prune deletes with its own key, and the nightly notices when it has not
+      - name: backup.sh prune deletes with its own key; the nightly notices when it has not
         run: |
           set -euo pipefail
           W="$RUNNER_TEMP/visio"
@@ -340,7 +340,8 @@ jobs:
           [ ! -e "$old" ] || { echo "::error::prune left the 40-day-old object in place"; exit 1; }
           # And the nightly is green again.
           VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/after.out
-          grep -q '^OK ' /tmp/after.out || { echo "::error::nightly not OK after the prune"; exit 1; }
+          grep -q '^OK ' /tmp/after.out ||
+            { echo "::error::nightly not OK after the prune"; exit 1; }
 
       - name: And each entry point holds only its own credential
         run: |
@@ -369,8 +370,10 @@ jobs:
             cat /tmp/nokey.out
             echo "::error::prune reported OK with no visioprune remote"; exit 1
           fi
-          grep -q '^FAIL .*no RCLONE_CONFIG_VISIOPRUNE_' /tmp/nokey.out ||
-            { cat /tmp/nokey.out; echo "::error::no FAIL line naming the missing prune remote"; exit 1; }
+          grep -q '^FAIL .*no RCLONE_CONFIG_VISIOPRUNE_' /tmp/nokey.out || {
+            cat /tmp/nokey.out
+            echo "::error::no FAIL line naming the missing prune remote"; exit 1
+          }
           cp /tmp/backup.env env.d/backup
 
       - name: restore-drill.sh restores that dump, locally and from the bucket
