@@ -333,6 +333,8 @@ class LiveKitEventsService:
 
         self.presence_cache.clear_room(room_id)
 
+        # A session stuck in an open status keeps these entries alive until
+        # LOBBY_ACCEPTED_TIMEOUT (6 h) expires them; that TTL is the backstop.
         if BreakoutSession.objects.filter(
             room_id=room_id, status__in=BreakoutSession.OPEN_STATUSES
         ).exists():

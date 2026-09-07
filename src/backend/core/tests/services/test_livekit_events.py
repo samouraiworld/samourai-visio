@@ -941,14 +941,15 @@ def test_participant_left_without_identity_is_ignored(mock_delete, service, sett
     mock_delete.assert_not_called()
 
 
+@pytest.mark.parametrize("open_status", BreakoutSession.OPEN_STATUSES)
 @mock.patch.object(LobbyService, "clear_room_cache")
 def test_room_finished_keeps_lobby_admissions_during_breakout_session(
-    mock_clear, service, settings
+    mock_clear, service, settings, open_status
 ):
     """The main room empties while everyone is in breakouts; guests must return."""
     settings.ROOM_TELEPHONY_ENABLED = False
     settings.ROOMKIT_ENABLED = False
-    session = BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    session = BreakoutSessionFactory(status=open_status)
     data = mock.Mock()
     data.room.name = str(session.room_id)
 
