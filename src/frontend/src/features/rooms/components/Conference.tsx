@@ -543,15 +543,17 @@ export const Conference = ({
                 case DisconnectReason.CLIENT_INITIATED:
                   navigateTo('feedback', {}, { state: { ...metadata } })
                   return
-                case DisconnectReason.DUPLICATE_IDENTITY:
-                case DisconnectReason.PARTICIPANT_REMOVED:
-                case DisconnectReason.ROOM_DELETED:
+                default:
+                  // Everything else, INCLUDING a disconnect with no reason at
+                  // all, must still land somewhere. Reconnect exhaustion and
+                  // token-expiry joins arrive with no reason, and the switch
+                  // previously matched nothing for them: the participant was
+                  // left on a dead conference with no overlay and no exit.
                   navigateTo(
                     'feedback',
                     {},
                     { state: { reason: e, ...metadata } }
                   )
-                  return
               }
             }
 
