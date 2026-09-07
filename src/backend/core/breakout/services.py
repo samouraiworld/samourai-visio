@@ -1083,13 +1083,17 @@ class BreakoutService:
             raise InvalidSessionStateError("Cannot broadcast to an inactive session.")
 
         sent_at = timezone.now()
-        BreakoutSession.objects.filter(
+        updated = BreakoutSession.objects.filter(
             pk=session.pk, status=BreakoutSession.Status.ACTIVE
         ).update(
             last_broadcast_message=message,
             last_broadcast_at=sent_at,
             updated_at=sent_at,
         )
+        if not updated:
+            # The session left ACTIVE between the unlocked fetch and this write.
+            # Refuse rather than publish a hint the poll can never satisfy.
+            raise InvalidSessionStateError("Cannot broadcast to an inactive session.")
 
         payload = {
             "type": "breakout:broadcast",

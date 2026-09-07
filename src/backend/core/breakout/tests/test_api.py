@@ -17,7 +17,7 @@ from core.breakout.models import (
     BreakoutRoom,
     BreakoutSession,
 )
-from core.breakout.services import BreakoutService
+from core.breakout.services import BreakoutService, InvalidSessionStateError
 from core.breakout.tests.factories import (
     BreakoutAssignmentFactory,
     BreakoutRoomFactory,
@@ -936,3 +936,20 @@ def test_close_clears_the_last_announcement(mock_meta, mock_send, mock_delete):
     assert session.status == BreakoutSession.Status.CLOSED
     assert session.last_broadcast_message == ""
     assert session.last_broadcast_at is None
+
+
+def test_broadcast_refuses_when_the_session_left_active_concurrently():
+    """A close that lands between the fetch and the write must not report success."""
+    session = BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    BreakoutRoomFactory(session=session)
+    # Simulate the concurrent close: the row is no longer ACTIVE, but the
+    # in-memory object the service was handed still says it is.
+    BreakoutSession.objects.filter(pk=session.pk).update(
+        status=BreakoutSession.Status.CLOSED
+    )
+
+    with mock.patch.object(BreakoutService, "_send_data_to_rooms") as mock_send:
+        with pytest.raises(InvalidSessionStateError):
+            BreakoutService().broadcast_message(session, "Five minutes left")
+
+    mock_send.assert_not_called()
