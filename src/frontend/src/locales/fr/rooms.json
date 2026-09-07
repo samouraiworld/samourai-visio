@@ -55,6 +55,7 @@
   },
   "join": {
     "heading": "Rejoindre la réunion ?",
+    "breakoutReentry": "Votre accès à la salle principale a expiré. Rejoignez à nouveau la réunion ; l'hôte devra peut-être vous admettre.",
     "effects": {
       "description": "Arrière-plans et effets",
       "title": "Arrière-plans et effets",
@@ -883,6 +884,7 @@
     "transition": {
       "movingTo": "Déplacement vers {{room}}…",
       "returningToMain": "Retour à la salle principale…",
+      "reconnecting": "Reconnexion en cours…",
       "unknownRoom": "une salle de sous-groupe"
     },
     "helpAlert": {

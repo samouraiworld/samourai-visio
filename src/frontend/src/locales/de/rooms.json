@@ -60,6 +60,7 @@
       "subTitle": "Konfiguriere die Effekte deiner Kamera."
     },
     "heading": "Dem Meeting beitreten?",
+    "breakoutReentry": "Dein Zugang zum Hauptraum ist abgelaufen. Tritt dem Meeting erneut bei; der Gastgeber muss dich eventuell zulassen.",
     "joinLabel": "Beitreten",
     "joinMeeting": "Meeting beitreten",
     "toggleOff": "Klicken, um auszuschalten",
@@ -883,6 +884,7 @@
     "transition": {
       "movingTo": "Wechsel zu {{room}}…",
       "returningToMain": "Rückkehr zum Hauptraum…",
+      "reconnecting": "Verbindung wird wiederhergestellt…",
       "unknownRoom": "einem Gruppenraum"
     },
     "helpAlert": {

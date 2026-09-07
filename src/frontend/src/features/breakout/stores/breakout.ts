@@ -101,8 +101,8 @@ export const breakoutStore = proxy<BreakoutState>({
   connectionLost: false,
 })
 
-// Persist critical fields to sessionStorage on change
-subscribe(breakoutStore, () => {
+/** Persist the critical fields to sessionStorage. */
+const persistBreakoutState = () => {
   const {
     activeSessionId,
     currentBreakoutRoomLkName,
@@ -127,9 +127,11 @@ subscribe(breakoutStore, () => {
       })
     )
   } catch {
-    // sessionStorage full or unavailable — best effort
+    // sessionStorage full or unavailable: best effort
   }
-})
+}
+
+subscribe(breakoutStore, persistBreakoutState)
 
 /** Reset all breakout state (on session close or return to main). */
 export const clearBreakoutState = (): void => {
@@ -165,6 +167,23 @@ export const clearBreakoutSession = (): void => {
   breakoutStore.mainRoomId = mainRoomId
   breakoutStore.mainRoomSlug = mainRoomSlug
   breakoutStore.lastBroadcastShownAt = lastBroadcastShownAt
+}
+
+/**
+ * The lobby no longer holds our admission: forget the session but keep the
+ * deliberate-return intent, and tell the lobby page why it is shown.
+ */
+export const prepareLobbyReentry = (): void => {
+  const { pausedAssignmentRevision } = breakoutStore
+  clearBreakoutSession()
+  breakoutStore.pausedAssignmentRevision = pausedAssignmentRevision
+  // Write now: the caller reloads before valtio's subscriber microtask runs.
+  persistBreakoutState()
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.BREAKOUT_REENTRY, '1')
+  } catch {
+    // Best effort: the lobby simply shows no explanation.
+  }
 }
 
 /** Ask the metadata watcher to re-read the caller's assignment from the server. */

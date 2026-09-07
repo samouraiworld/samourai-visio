@@ -60,6 +60,7 @@
       "subTitle": "Configureer de effecten van uw camera."
     },
     "heading": "Deelnemen aan de vergadering",
+    "breakoutReentry": "Uw toegang tot de hoofdruimte is verlopen. Neem opnieuw deel aan de vergadering; mogelijk moet de host u toelaten.",
     "joinLabel": "Deelnemen",
     "joinMeeting": "Deelnemen aan de vergadering",
     "toggleOff": "Klik om uit te schakelen",
@@ -883,6 +884,7 @@
     "transition": {
       "movingTo": "Verplaatsen naar {{room}}…",
       "returningToMain": "Terugkeren naar de hoofdruimte…",
+      "reconnecting": "Opnieuw verbinden…",
       "unknownRoom": "een groepsruimte"
     },
     "helpAlert": {

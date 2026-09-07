@@ -18,9 +18,11 @@ export const BreakoutTransition = () => {
   const { currentBreakoutRoomLkName } = useIsInBreakoutRoom()
 
   const targetName = snap.transitionTargetName || t('unknownRoom')
-  const message = currentBreakoutRoomLkName
-    ? t('returningToMain')
-    : t('movingTo', { room: targetName })
+  const message = snap.connectionLost
+    ? t('reconnecting')
+    : currentBreakoutRoomLkName
+      ? t('returningToMain')
+      : t('movingTo', { room: targetName })
 
   return (
     <div

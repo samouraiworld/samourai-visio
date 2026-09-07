@@ -5,7 +5,11 @@ import { fetchApi } from '@/api/fetchApi'
 import { requestEntry } from '@/features/rooms/api/requestEntry'
 import { userStore } from '@/stores/user'
 import type { BreakoutLiveKitConnection } from '../api/types'
-import { breakoutStore, triggerRoomSwap } from '../stores/breakout'
+import {
+  breakoutStore,
+  prepareLobbyReentry,
+  triggerRoomSwap,
+} from '../stores/breakout'
 import { captureMediaIntent } from '../utils/mediaIntent'
 
 interface RoomConnection {
@@ -104,12 +108,15 @@ export const useBreakoutRoomSwap = ({
           roomId: mainSlug,
           username: username ?? '',
         })
-        if (!response.livekit) {
-          throw new Error(`main_room_${response.status}`)
-        }
-
+        // Record the deliberate-return intent first: the re-entry path below
+        // must keep it, or the watcher moves the participant straight back.
         if (!breakoutStore.isModeratorVisiting) {
           breakoutStore.pausedAssignmentRevision = breakoutStore.revisionHint
+        }
+        if (!response.livekit) {
+          prepareLobbyReentry()
+          window.location.reload()
+          return
         }
         breakoutStore.isModeratorVisiting = false
         breakoutStore.activeConnection = response.livekit

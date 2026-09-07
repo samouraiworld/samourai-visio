@@ -55,6 +55,7 @@
   },
   "join": {
     "heading": "¿Unirse a la reunión?",
+    "breakoutReentry": "Tu acceso a la sala principal ha caducado. Vuelve a unirte a la reunión; puede que el anfitrión tenga que admitirte.",
     "effects": {
       "description": "Fondos y efectos",
       "title": "Fondos y efectos",
@@ -882,6 +883,7 @@
     "transition": {
       "movingTo": "Moviéndose a {{room}}…",
       "returningToMain": "Regresando a la sala principal…",
+      "reconnecting": "Reconectando…",
       "unknownRoom": "una sala de grupo"
     },
     "helpAlert": {

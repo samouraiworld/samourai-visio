@@ -60,6 +60,7 @@
       "subTitle": "Configure your camera's effects."
     },
     "heading": "Join the meeting?",
+    "breakoutReentry": "Your access to the main room has expired. Join the meeting again; the host may need to admit you.",
     "joinLabel": "Join",
     "joinMeeting": "Join meeting",
     "toggleOff": "Click to turn off",
@@ -883,6 +884,7 @@
     "transition": {
       "movingTo": "Moving to {{room}}…",
       "returningToMain": "Returning to main room…",
+      "reconnecting": "Reconnecting…",
       "unknownRoom": "breakout room"
     },
     "helpAlert": {

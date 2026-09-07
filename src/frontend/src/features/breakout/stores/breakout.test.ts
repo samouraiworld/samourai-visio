@@ -15,8 +15,10 @@ import {
   clearMatchingPendingHelpAcknowledgement,
   completeBreakoutTransition,
   failBreakoutConnection,
+  prepareLobbyReentry,
   requestAssignmentRefresh,
 } from './breakout'
+import { STORAGE_KEYS } from '../utils/constants'
 
 describe('completeBreakoutTransition', () => {
   beforeAll(() => {
@@ -215,6 +217,21 @@ describe('bindBreakoutToMainRoom', () => {
       expect(breakoutStore.mainRoomId).toBe('main-1')
       expect(breakoutStore.mainRoomSlug).toBe('room-slug')
       expect(breakoutStore.lastBroadcastShownAt).toBe('2026-09-07T10:00:00Z')
+    })
+  })
+
+  describe('prepareLobbyReentry', () => {
+    it('keeps the deliberate-return intent and flags the reload', () => {
+      breakoutStore.activeSessionId = 'session-1'
+      breakoutStore.currentBreakoutRoomLkName = 'breakout_s_0'
+      breakoutStore.pausedAssignmentRevision = 4
+      prepareLobbyReentry()
+      expect(breakoutStore.activeSessionId).toBeNull()
+      expect(breakoutStore.currentBreakoutRoomLkName).toBeNull()
+      expect(breakoutStore.pausedAssignmentRevision).toBe(4)
+      expect(sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_REENTRY)).toBe('1')
+      const persisted = sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_STATE)
+      expect(JSON.parse(persisted ?? '{}').pausedAssignmentRevision).toBe(4)
     })
   })
 })

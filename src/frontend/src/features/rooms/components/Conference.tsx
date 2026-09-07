@@ -54,6 +54,7 @@ import {
   completeBreakoutTransition,
   failBreakoutConnection,
   registerRoomSwapHandler,
+  requestAssignmentRefresh,
 } from '@/features/breakout/stores/breakout'
 import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
 import { BreakoutParticipantOverlay } from '@/features/breakout/components/BreakoutParticipantOverlay'
@@ -68,7 +69,15 @@ import {
   useAcknowledgeBreakoutHelp,
   useBreakoutHelpRequests,
 } from '@/features/breakout/api/useBreakoutHelpRequests'
-import { useCurrentBreakoutAssignment } from '@/features/breakout/api/useCurrentBreakoutAssignment'
+import {
+  fetchCurrentBreakoutAssignment,
+  useCurrentBreakoutAssignment,
+} from '@/features/breakout/api/useCurrentBreakoutAssignment'
+import {
+  isRemovalAReassignment,
+  resolveDisconnectAction,
+} from '@/features/breakout/utils/disconnectActions'
+import { BREAKOUT_DEFAULTS } from '@/features/breakout/utils/constants'
 import { finishBreakoutConnection } from '@/features/breakout/utils/connectionLifecycle'
 import { acknowledgeConnectedHelp } from '@/features/breakout/utils/helpAcknowledgement'
 
@@ -384,6 +393,14 @@ export const Conference = ({
 
   const hasAutoMutedRef = useRef(false)
 
+  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
+    },
+    []
+  )
+
   /*
    * Ensure stable WebSocket connection URL. This is critical for legacy browser compatibility
    * (Firefox <124, Chrome <125, Edge <125) where HTTPS URLs in WebSocket() constructor
@@ -465,6 +482,11 @@ export const Conference = ({
               connectedRoomName && connectedRoomName !== data?.livekit?.room
                 ? connectedRoomName
                 : null
+            breakoutStore.connectionLost = false
+            if (recoveryTimerRef.current) {
+              clearTimeout(recoveryTimerRef.current)
+              recoveryTimerRef.current = null
+            }
             const pendingHelp = breakoutStore.pendingHelpAcknowledgement
             const acknowledgePendingHelp = async () => {
               if (
@@ -514,49 +536,72 @@ export const Conference = ({
             }
           }}
           onDisconnected={(e) => {
-            // Breakout room swap in progress — do NOT navigate to feedback
-            if (breakoutStore.isTransitioning) return
+            const leaveMeeting = () => {
+              clearBreakoutState()
+              const metadata = { room_id: roomId }
+              switch (e) {
+                case DisconnectReason.CLIENT_INITIATED:
+                  navigateTo('feedback', {}, { state: { ...metadata } })
+                  return
+                case DisconnectReason.DUPLICATE_IDENTITY:
+                case DisconnectReason.PARTICIPANT_REMOVED:
+                case DisconnectReason.ROOM_DELETED:
+                  navigateTo(
+                    'feedback',
+                    {},
+                    { state: { reason: e, ...metadata } }
+                  )
+                  return
+              }
+            }
 
-            if (
-              breakoutStore.activeSessionId &&
-              e === DisconnectReason.PARTICIPANT_REMOVED
-            ) {
-              breakoutStore.revisionHint += 1
+            const recoverSession = () => {
+              // The poll decides whether we go back to main or rejoin; give up
+              // to the feedback page if no connection lands in time.
+              breakoutStore.connectionLost = true
+              requestAssignmentRefresh()
+              recoveryTimerRef.current = setTimeout(() => {
+                if (!breakoutStore.connectionLost) return
+                // leaveMeeting() only navigates for three reasons; a stale
+                // recovery must always end on the feedback page.
+                clearBreakoutState()
+                navigateTo(
+                  'feedback',
+                  {},
+                  { state: { reason: e, room_id: roomId } }
+                )
+              }, BREAKOUT_DEFAULTS.RECOVERY_TIMEOUT_MS)
+            }
+
+            const action = resolveDisconnectAction({
+              reason: e,
+              isTransitioning: breakoutStore.isTransitioning,
+              activeSessionId: breakoutStore.activeSessionId,
+              currentBreakoutRoomLkName:
+                breakoutStore.currentBreakoutRoomLkName,
+            })
+
+            if (action === 'ignore') return
+            if (action === 'recover-session') {
+              recoverSession()
               return
             }
-
-            // Clear any residual breakout state so it does not bleed into
-            // the next meeting or reconnect attempt.
-            clearBreakoutState()
-
-            const metadata = {
-              room_id: roomId,
-            }
-
-            switch (e) {
-              case DisconnectReason.CLIENT_INITIATED:
-                navigateTo(
-                  'feedback',
-                  {},
-                  {
-                    state: { ...metadata },
-                  }
-                )
+            if (action === 'verify-assignment') {
+              const sessionId = breakoutStore.activeSessionId
+              const previous = breakoutStore.currentBreakoutRoomLkName
+              if (!sessionId || !data?.id) {
+                leaveMeeting()
                 return
-              case DisconnectReason.DUPLICATE_IDENTITY:
-              case DisconnectReason.PARTICIPANT_REMOVED:
-                navigateTo(
-                  'feedback',
-                  {},
-                  {
-                    state: {
-                      reason: e,
-                      ...metadata,
-                    },
-                  }
-                )
-                return
+              }
+              void fetchCurrentBreakoutAssignment(data.id, sessionId)
+                .then((fresh) => {
+                  if (isRemovalAReassignment(previous, fresh)) recoverSession()
+                  else leaveMeeting()
+                })
+                .catch(() => leaveMeeting())
+              return
             }
+            leaveMeeting()
           }}
         >
           <WatchMediaDeviceErrors />
@@ -565,7 +610,9 @@ export const Conference = ({
             setActiveRoomConnection={setActiveRoomConnection}
             mainRoomId={data?.id ?? ''}
           />
-          {breakoutSnap.isTransitioning && <BreakoutTransition />}
+          {(breakoutSnap.isTransitioning || breakoutSnap.connectionLost) && (
+            <BreakoutTransition />
+          )}
           {breakoutSnap.broadcastAnnouncement && (
             <BreakoutBroadcastBanner
               message={breakoutSnap.broadcastAnnouncement.message}
