@@ -73,6 +73,7 @@ export const BreakoutParticipantOverlay = ({
       <BreakoutRecallBanner
         onRecall={onReturnToMain}
         timing={assignmentState}
+        canRecall={isInBreakout}
       />
       <div
         className={css({

@@ -90,6 +90,12 @@ export const useBreakoutRoomSwap = ({
       const mainSlug = breakoutStore.mainRoomSlug
       if (!mainSlug) return
 
+      // A same-room token swap never reconnects (Room.connect returns early
+      // when already connected), so a "return" from main would leave the
+      // transition overlay up forever. The lost-connection recovery path keeps
+      // currentBreakoutRoomLkName set, so it still passes here.
+      if (!breakoutStore.currentBreakoutRoomLkName) return
+
       beginTransition()
       breakoutStore.clearAfterTransition = clearOnConnect
       breakoutStore.transitionTargetName = null

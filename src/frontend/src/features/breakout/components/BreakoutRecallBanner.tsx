@@ -16,14 +16,18 @@ import { srOnly } from '@/styles/a11y'
 interface BreakoutRecallBannerProps {
   onRecall: () => void
   timing?: BreakoutTiming | null
+  /** Only a participant inside a breakout room has somewhere to return to. */
+  canRecall: boolean
 }
 
 export const BreakoutRecallBanner = ({
   onRecall,
   timing,
+  canRecall,
 }: BreakoutRecallBannerProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.participant' })
-  const { remaining, hasTimer, isExpired } = useBreakoutTimer(timing)
+  const { remaining, hasTimer, isCountdown, isExpired } =
+    useBreakoutTimer(timing)
   const hasRecalledRef = useRef(false)
 
   const isWarning =
@@ -31,13 +35,13 @@ export const BreakoutRecallBanner = ({
     remaining <= BREAKOUT_DEFAULTS.RECALL_WARNING_SECONDS &&
     remaining > 0
 
-  // Auto-recall when timer expires
+  // Auto-recall once, when a real countdown reaches zero, from a breakout room.
   useEffect(() => {
-    if (isExpired && !hasRecalledRef.current) {
+    if (canRecall && isCountdown && isExpired && !hasRecalledRef.current) {
       hasRecalledRef.current = true
       onRecall()
     }
-  }, [isExpired, onRecall])
+  }, [canRecall, isCountdown, isExpired, onRecall])
 
   if (!isWarning) return null
 
