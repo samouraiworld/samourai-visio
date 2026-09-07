@@ -3,13 +3,28 @@ export interface BreakoutControlMessage {
   [key: string]: unknown
 }
 
-/** Only the LiveKit server may author breakout control messages. */
-export const isTrustedBreakoutControlMessage = (
-  data: BreakoutControlMessage,
-  hasRemoteParticipant: boolean
-): boolean => {
-  const type = typeof data.type === 'string' ? data.type : ''
-  return !(hasRemoteParticipant && type.startsWith('breakout:'))
+export type BreakoutHint = 'help' | 'refresh'
+
+/**
+ * Any participant can publish a data packet, and the sender is undefined
+ * whenever the publisher is missing from the local participant map, so no
+ * packet is ever trusted for its content. It only tells us which server
+ * state to re-read.
+ */
+export const classifyBreakoutHint = (
+  data: BreakoutControlMessage
+): BreakoutHint | null => {
+  switch (data.type) {
+    case 'breakout:help_revision':
+      return 'help'
+    case 'breakout:revision':
+    case 'breakout:recall':
+    case 'breakout:close':
+    case 'breakout:broadcast':
+      return 'refresh'
+    default:
+      return null
+  }
 }
 
 export const parseBreakoutControlMessage = (

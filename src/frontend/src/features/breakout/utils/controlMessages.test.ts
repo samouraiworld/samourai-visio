@@ -1,32 +1,29 @@
 import { describe, expect, it } from 'vitest'
 import {
-  isTrustedBreakoutControlMessage,
+  classifyBreakoutHint,
   parseBreakoutControlMessage,
 } from './controlMessages'
 
-describe('breakout control message trust boundary', () => {
-  it.each([
-    'breakout:recall',
-    'breakout:close',
-    'breakout:broadcast',
-    'breakout:revision',
-    'breakout:help_revision',
-  ])('rejects participant-authored %s packets', (type) => {
-    expect(isTrustedBreakoutControlMessage({ type }, true)).toBe(false)
+describe('breakout data packets are hints, never commands', () => {
+  it('maps every breakout packet to a refresh of server state', () => {
+    expect(classifyBreakoutHint({ type: 'breakout:revision' })).toBe('refresh')
+    expect(classifyBreakoutHint({ type: 'breakout:help_revision' })).toBe(
+      'help'
+    )
+    expect(classifyBreakoutHint({ type: 'breakout:recall' })).toBe('refresh')
+    expect(classifyBreakoutHint({ type: 'breakout:close' })).toBe('refresh')
+    expect(classifyBreakoutHint({ type: 'breakout:broadcast' })).toBe('refresh')
   })
 
-  it('accepts server-authored breakout packets', () => {
-    expect(
-      isTrustedBreakoutControlMessage({ type: 'breakout:recall' }, false)
-    ).toBe(true)
+  it('ignores packets that are not breakout packets', () => {
+    expect(classifyBreakoutHint({ type: 'chat' })).toBeNull()
+    expect(classifyBreakoutHint({})).toBeNull()
+    expect(classifyBreakoutHint({ type: 42 })).toBeNull()
   })
 
   it('ignores malformed and non-object payloads safely', () => {
-    expect(
-      parseBreakoutControlMessage(new TextEncoder().encode('{'))
-    ).toBeNull()
-    expect(
-      parseBreakoutControlMessage(new TextEncoder().encode('"text"'))
-    ).toBeNull()
+    const encode = (text: string) => new TextEncoder().encode(text)
+    expect(parseBreakoutControlMessage(encode('{'))).toBeNull()
+    expect(parseBreakoutControlMessage(encode('"text"'))).toBeNull()
   })
 })

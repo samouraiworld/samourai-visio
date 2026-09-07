@@ -81,16 +81,12 @@ const BreakoutWatcher = ({
   setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
   mainRoomId: string
 }) => {
-  const { returnToMainRoom } = useBreakoutRoomSwap({
-    currentRoomSlug,
-    setActiveRoomConnection,
-  })
   useBreakoutMetadataWatcher({
     currentRoomSlug,
     setActiveRoomConnection,
     mainRoomId,
   })
-  useBreakoutDataMessages({ onRecall: returnToMainRoom })
+  useBreakoutDataMessages()
   return null
 }
 

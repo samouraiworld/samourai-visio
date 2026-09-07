@@ -84,6 +84,7 @@ export interface BreakoutCurrentAssignment {
     livekit_room_name: string
   } | null
   help_request: BreakoutHelpRequest | null
+  last_broadcast: { message: string; sent_at: string } | null
 }
 
 export interface BreakoutHelpRequest {

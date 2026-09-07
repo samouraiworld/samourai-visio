@@ -44,6 +44,7 @@ export const useBreakoutHelpRequests = (
       ),
     enabled: enabled && !!roomId && !!sessionId,
     refetchInterval: 5000,
+    staleTime: 2000,
   })
 
 export const useAcknowledgeBreakoutHelp = () =>

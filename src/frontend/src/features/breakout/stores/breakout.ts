@@ -17,6 +17,7 @@ interface PersistedBreakoutState {
   mainRoomId: string | null
   assignedRoomId: string | null
   pausedAssignmentRevision: number | null
+  lastBroadcastShownAt: string | null
 }
 
 interface BreakoutState extends PersistedBreakoutState {
@@ -38,6 +39,8 @@ interface BreakoutState extends PersistedBreakoutState {
   clearAfterTransition: boolean
   /** Help work is acknowledged only after the host reaches its room. */
   pendingHelpAcknowledgement: PendingHelpAcknowledgement | null
+  /** Bumped whenever a hint says the assignment poll must run now. */
+  assignmentRefreshNonce: number
   /** Active LiveKit connection details for the breakout room. */
   activeConnection: BreakoutLiveKitConnection['livekit'] | null
 }
@@ -54,6 +57,7 @@ const restoreState = (): PersistedBreakoutState => {
         mainRoomId: null,
         assignedRoomId: null,
         pausedAssignmentRevision: null,
+        lastBroadcastShownAt: null,
         ...(JSON.parse(stored) as Partial<PersistedBreakoutState>),
       }
     }
@@ -67,6 +71,7 @@ const restoreState = (): PersistedBreakoutState => {
     mainRoomId: null,
     assignedRoomId: null,
     pausedAssignmentRevision: null,
+    lastBroadcastShownAt: null,
   }
 }
 
@@ -82,12 +87,14 @@ export const breakoutStore = proxy<BreakoutState>({
   isModeratorVisiting: false,
   clearAfterTransition: false,
   pendingHelpAcknowledgement: null,
+  assignmentRefreshNonce: 0,
   activeSessionId: restored.activeSessionId,
   currentBreakoutRoomLkName: restored.currentBreakoutRoomLkName,
   mainRoomSlug: restored.mainRoomSlug,
   mainRoomId: restored.mainRoomId,
   assignedRoomId: restored.assignedRoomId,
   pausedAssignmentRevision: restored.pausedAssignmentRevision,
+  lastBroadcastShownAt: restored.lastBroadcastShownAt,
   activeConnection: null,
 })
 
@@ -100,6 +107,7 @@ subscribe(breakoutStore, () => {
     mainRoomId,
     assignedRoomId,
     pausedAssignmentRevision,
+    lastBroadcastShownAt,
   } = breakoutStore
 
   try {
@@ -112,6 +120,7 @@ subscribe(breakoutStore, () => {
         mainRoomId,
         assignedRoomId,
         pausedAssignmentRevision,
+        lastBroadcastShownAt,
       })
     )
   } catch {
@@ -130,14 +139,21 @@ export const clearBreakoutState = (): void => {
   breakoutStore.isModeratorVisiting = false
   breakoutStore.clearAfterTransition = false
   breakoutStore.pendingHelpAcknowledgement = null
+  breakoutStore.assignmentRefreshNonce = 0
   breakoutStore.activeSessionId = null
   breakoutStore.currentBreakoutRoomLkName = null
   breakoutStore.mainRoomSlug = null
   breakoutStore.mainRoomId = null
   breakoutStore.assignedRoomId = null
   breakoutStore.pausedAssignmentRevision = null
+  breakoutStore.lastBroadcastShownAt = null
   breakoutStore.activeConnection = null
   sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_STATE)
+}
+
+/** Ask the metadata watcher to re-read the caller's assignment from the server. */
+export const requestAssignmentRefresh = (): void => {
+  breakoutStore.assignmentRefreshNonce += 1
 }
 
 export const completeBreakoutTransition = (): void => {

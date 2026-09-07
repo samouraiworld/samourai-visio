@@ -14,6 +14,7 @@ import {
   clearMatchingPendingHelpAcknowledgement,
   completeBreakoutTransition,
   failBreakoutConnection,
+  requestAssignmentRefresh,
 } from './breakout'
 
 describe('completeBreakoutTransition', () => {
@@ -189,5 +190,14 @@ describe('bindBreakoutToMainRoom', () => {
     expect(breakoutStore.assignedRoomId).toBeNull()
     expect(breakoutStore.mainRoomId).toBe('main-2')
     expect(breakoutStore.mainRoomSlug).toBe('other-room')
+  })
+
+  describe('requestAssignmentRefresh', () => {
+    it('bumps a nonce the watcher can depend on', () => {
+      const before = breakoutStore.assignmentRefreshNonce
+      requestAssignmentRefresh()
+      requestAssignmentRefresh()
+      expect(breakoutStore.assignmentRefreshNonce).toBe(before + 2)
+    })
   })
 })
