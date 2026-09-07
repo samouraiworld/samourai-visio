@@ -13,7 +13,7 @@ from django.conf import settings
 from livekit import api
 
 from core import models
-from core.breakout.models import BreakoutRoom
+from core.breakout.models import BreakoutRoom, BreakoutSession
 from core.breakout.services import BreakoutService
 from core.recording.services.metadata_collector import (
     MetadataCollectorException,
@@ -332,6 +332,15 @@ class LiveKitEventsService:
                 ) from e
 
         self.presence_cache.clear_room(room_id)
+
+        if BreakoutSession.objects.filter(
+            room_id=room_id, status__in=BreakoutSession.OPEN_STATUSES
+        ).exists():
+            logger.info(
+                "Keeping lobby admissions for room %s: a breakout session is open",
+                room_id,
+            )
+            return
 
         try:
             self.lobby_service.clear_room_cache(room_id)

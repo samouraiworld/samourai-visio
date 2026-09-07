@@ -9,8 +9,9 @@ from unittest import mock
 import pytest
 from livekit.api import EgressStatus
 
+from core.breakout.models import BreakoutSession
 from core.breakout.services import BreakoutService
-from core.breakout.tests.factories import BreakoutRoomFactory
+from core.breakout.tests.factories import BreakoutRoomFactory, BreakoutSessionFactory
 from core.factories import RecordingFactory, RoomFactory
 from core.recording.services.recording_events import RecordingEventsService
 from core.services.livekit_events import (
@@ -938,3 +939,23 @@ def test_participant_left_without_identity_is_ignored(mock_delete, service, sett
 
     service._handle_participant_left(data)  # pylint: disable=protected-access
     mock_delete.assert_not_called()
+
+
+@mock.patch.object(LobbyService, "clear_room_cache")
+def test_room_finished_keeps_lobby_admissions_during_breakout_session(
+    mock_clear, service, settings
+):
+    """The main room empties while everyone is in breakouts; guests must return."""
+    settings.ROOM_TELEPHONY_ENABLED = False
+    settings.ROOMKIT_ENABLED = False
+    session = BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    data = mock.Mock()
+    data.room.name = str(session.room_id)
+
+    service._handle_room_finished(data)  # pylint: disable=protected-access
+    mock_clear.assert_not_called()
+
+    session.status = BreakoutSession.Status.CLOSED
+    session.save(update_fields=["status"])
+    service._handle_room_finished(data)  # pylint: disable=protected-access
+    mock_clear.assert_called_once_with(session.room_id)
