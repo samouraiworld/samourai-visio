@@ -276,7 +276,12 @@ class RoomViewSet(
         else:
             data = self.get_serializer(instance).data
 
-        return drf_response.Response(data)
+        response = drf_response.Response(data)
+        if LobbyService.has_pending_guest_cookie(request):
+            # A token plus a Set-Cookie must never be served from a shared cache.
+            response["Cache-Control"] = "no-store"
+            LobbyService.prepare_response(response, None, request=request)
+        return response
 
     def list(self, request, *args, **kwargs):
         """Limit listed rooms to the ones related to the authenticated user."""

@@ -20,6 +20,7 @@ from rest_framework.exceptions import PermissionDenied
 from timezone_field.rest_framework import TimeZoneSerializerField
 
 from core import models, utils
+from core.services.lobby import LobbyService
 
 logger = logging.getLogger(__name__)
 
@@ -197,12 +198,21 @@ class RoomSerializer(serializers.ModelSerializer):
         if should_access_room:
             room_id = f"{instance.id!s}"
             username = request.query_params.get("username", None)
+            participant_id = None
+            if request.user.is_anonymous:
+                # Guests who bypass the lobby must carry the same signed identity
+                # the lobby would have issued, or breakout assignments cannot
+                # recognise them.
+                participant_id = LobbyService.get_or_create_participant_id(
+                    request, instance.id
+                )
             output["livekit"] = utils.generate_livekit_config(
                 room_id=room_id,
                 user=request.user,
                 username=username,
                 configuration=output["configuration"],
                 role=role,
+                participant_id=participant_id,
             )
         else:
             del output["pin_code"]

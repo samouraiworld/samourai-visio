@@ -216,3 +216,31 @@ def test_authenticated_identity_cannot_be_overridden_by_request_body():
     )
 
     assert response.status_code == 403
+
+
+def test_direct_public_guest_can_read_and_join_own_assignment():
+    """A guest who never used the lobby is still the identity the host assigns."""
+    room = RoomFactory(access_level=RoomAccessLevel.PUBLIC)
+    guest = APIClient()
+    with mock.patch("core.utils.generate_token", return_value="main-token") as token:
+        entry = guest.get(f"/api/v1.0/rooms/{room.id}/")
+    assert entry.status_code == 200
+    identity = token.call_args.kwargs["participant_id"]
+
+    session, breakout_room = active_assignment(room, identity, "Guest")
+
+    current = guest.get(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/current-assignment/"
+    )
+    assert current.status_code == 200
+    assert current.json()["assignment"]["breakout_room_id"] == str(breakout_room.id)
+
+    with mock.patch("core.utils.generate_token", return_value="breakout-token"):
+        join = guest.post(
+            f"/api/v1.0/rooms/{room.id}/breakout-sessions/{session.id}/"
+            f"rooms/{breakout_room.id}/join/",
+            {},
+            format="json",
+        )
+    assert join.status_code == 200
+    assert join.json()["livekit"]["token"] == "breakout-token"

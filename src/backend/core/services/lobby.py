@@ -165,6 +165,22 @@ class LobbyService:
         return cls._derive_guest_identity(room_id, capability)
 
     @classmethod
+    def get_or_create_participant_id(cls, request, room_id: UUID) -> str:
+        """Issue or reuse the room-scoped guest identity for a request that skips the lobby.
+
+        Public rooms hand out a token on ``GET /rooms/{id}/`` without ever calling
+        ``request_entry``. That token must still carry the identity breakout
+        assignments are keyed on, and the response must carry the cookie that
+        lets the guest prove it later.
+        """
+        return cls._get_or_create_participant_id(request, room_id)
+
+    @classmethod
+    def has_pending_guest_cookie(cls, request) -> bool:
+        """Return True when a guest cookie was issued while handling ``request``."""
+        return getattr(request, cls._REQUEST_COOKIE_ATTRIBUTE, None) is not None
+
+    @classmethod
     def prepare_response(cls, response, participant_id, request=None):
         """Set the signed capability cookie without exposing it in API data."""
         del participant_id  # Public participant IDs are never browser credentials.
