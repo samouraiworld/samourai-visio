@@ -91,13 +91,21 @@ export const Lobby = ({
 
   const [isBreakoutReentry] = useState(() => {
     try {
-      const flagged = sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_REENTRY)
-      sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_REENTRY)
-      return flagged === '1'
+      return sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_REENTRY) === '1'
     } catch {
       return false
     }
   })
+  // Clear in an effect, never in the initializer: StrictMode double-invokes
+  // initializers and commits the second pass, so a read-and-clear there makes
+  // the note vanish in development.
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_REENTRY)
+    } catch {
+      // Best effort.
+    }
+  }, [])
 
   switch (status) {
     case ApiLobbyStatus.TIMEOUT:

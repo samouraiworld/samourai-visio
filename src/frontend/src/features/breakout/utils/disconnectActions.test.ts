@@ -38,6 +38,11 @@ describe('resolveDisconnectAction', () => {
     expect(resolveDisconnectAction(input)).toBe('ignore')
   })
 
+  it('leaves the meeting on a reason-less disconnect in the main room', () => {
+    // The realistic trigger, in the position that has no recovery path.
+    expect(resolveDisconnectAction(inMain)).toBe('leave')
+  })
+
   it('leaves the meeting when no session is active', () => {
     const input = { ...inMain, activeSessionId: null }
     const reason = DisconnectReason.PARTICIPANT_REMOVED

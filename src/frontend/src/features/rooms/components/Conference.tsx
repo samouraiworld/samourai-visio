@@ -560,6 +560,10 @@ export const Conference = ({
               // to the feedback page if no connection lands in time.
               breakoutStore.connectionLost = true
               requestAssignmentRefresh()
+              // A second drop must restart the full grace period, not inherit
+              // the deadline of an orphaned timer.
+              if (recoveryTimerRef.current)
+                clearTimeout(recoveryTimerRef.current)
               recoveryTimerRef.current = setTimeout(() => {
                 if (!breakoutStore.connectionLost) return
                 // leaveMeeting() only navigates for three reasons; a stale
