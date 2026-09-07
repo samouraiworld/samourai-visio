@@ -15,6 +15,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
 import { useTranslation } from 'react-i18next'
+import { useConfig } from '@/api/useConfig'
 import { useSnapshot } from 'valtio'
 import { useParticipants } from '@livekit/components-react'
 import { breakoutStore, clearBreakoutState } from '../stores/breakout'
@@ -69,6 +70,7 @@ export const BreakoutActiveView = ({
     sessionId ?? undefined,
     !!sessionId
   )
+  const { data: config } = useConfig()
 
   const { mutateAsync: updateSession, isPending: isClosing } =
     useUpdateBreakoutSession()
@@ -251,6 +253,12 @@ export const BreakoutActiveView = ({
         flex: 1,
       })}
     >
+      {config?.breakout_rooms?.is_enabled === false && (
+        <p role="status" className={css({ fontSize: 14 })}>
+          {t('flagDisabled')}
+        </p>
+      )}
+
       {session.effect_error && (
         <div
           role="alert"

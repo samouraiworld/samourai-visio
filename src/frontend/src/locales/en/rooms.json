@@ -837,7 +837,8 @@
       "assignParticipant": "Assign {{name}} to a room",
       "syncFailed": "Room synchronization failed.",
       "retrySynchronization": "Retry synchronization",
-      "synchronizing": "Synchronizing breakout rooms…"
+      "synchronizing": "Synchronizing breakout rooms…",
+      "disabled": "Creating breakout rooms is disabled on this service."
     },
     "active": {
       "timeRemaining": "Time remaining",
@@ -858,7 +859,8 @@
       "reassignParticipant": "Move {{name}} to another room",
       "syncFailed": "Room synchronization failed.",
       "retrySynchronization": "Retry synchronization",
-      "closing": "Closing breakout rooms…"
+      "closing": "Closing breakout rooms…",
+      "flagDisabled": "New breakout rooms are disabled on this service. You can still close this session."
     },
     "participant": {
       "currentRoom": "You are in {{room}}",

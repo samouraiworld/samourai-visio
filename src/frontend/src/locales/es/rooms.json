@@ -836,7 +836,8 @@
       "assignParticipant": "Asignar a {{name}} a una sala",
       "syncFailed": "La sincronización de las salas ha fallado.",
       "retrySynchronization": "Reintentar la sincronización",
-      "synchronizing": "Sincronizando las salas de grupo…"
+      "synchronizing": "Sincronizando las salas de grupo…",
+      "disabled": "La creación de salas de grupo está desactivada en este servicio."
     },
     "active": {
       "timeRemaining": "Tiempo restante",
@@ -857,7 +858,8 @@
       "reassignParticipant": "Mover a {{name}} a otra sala",
       "syncFailed": "La sincronización de las salas ha fallado.",
       "retrySynchronization": "Reintentar la sincronización",
-      "closing": "Cerrando las salas para grupos…"
+      "closing": "Cerrando las salas para grupos…",
+      "flagDisabled": "Las nuevas salas de grupo están desactivadas en este servicio. Aún puedes cerrar esta sesión."
     },
     "participant": {
       "currentRoom": "Estás en {{room}}",

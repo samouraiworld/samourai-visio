@@ -837,7 +837,8 @@
       "assignParticipant": "{{name}} aan een ruimte toewijzen",
       "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
       "retrySynchronization": "Synchronisatie opnieuw proberen",
-      "synchronizing": "Breakoutruimtes worden gesynchroniseerd…"
+      "synchronizing": "Breakoutruimtes worden gesynchroniseerd…",
+      "disabled": "Het aanmaken van groepsruimtes is uitgeschakeld op deze dienst."
     },
     "active": {
       "timeRemaining": "Resterende tijd",
@@ -858,7 +859,8 @@
       "reassignParticipant": "{{name}} naar een andere ruimte verplaatsen",
       "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
       "retrySynchronization": "Synchronisatie opnieuw proberen",
-      "closing": "Breakoutruimtes worden gesloten…"
+      "closing": "Breakoutruimtes worden gesloten…",
+      "flagDisabled": "Nieuwe groepsruimtes zijn uitgeschakeld op deze dienst. U kunt deze sessie nog steeds sluiten."
     },
     "participant": {
       "currentRoom": "U bevindt zich in {{room}}",

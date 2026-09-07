@@ -837,7 +837,8 @@
       "assignParticipant": "{{name}} einem Raum zuweisen",
       "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
       "retrySynchronization": "Synchronisierung wiederholen",
-      "synchronizing": "Breakout-Räume werden synchronisiert…"
+      "synchronizing": "Breakout-Räume werden synchronisiert…",
+      "disabled": "Das Erstellen von Gruppenräumen ist auf diesem Dienst deaktiviert."
     },
     "active": {
       "timeRemaining": "Verbleibende Zeit",
@@ -858,7 +859,8 @@
       "reassignParticipant": "{{name}} in einen anderen Raum verschieben",
       "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
       "retrySynchronization": "Synchronisierung wiederholen",
-      "closing": "Breakout-Räume werden geschlossen…"
+      "closing": "Breakout-Räume werden geschlossen…",
+      "flagDisabled": "Neue Gruppenräume sind auf diesem Dienst deaktiviert. Sie können diese Sitzung weiterhin schließen."
     },
     "participant": {
       "currentRoom": "Sie sind in {{room}}",

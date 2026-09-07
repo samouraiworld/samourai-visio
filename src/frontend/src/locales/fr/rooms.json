@@ -837,7 +837,8 @@
       "assignParticipant": "Affecter {{name}} à une salle",
       "syncFailed": "La synchronisation des salles a échoué.",
       "retrySynchronization": "Réessayer la synchronisation",
-      "synchronizing": "Synchronisation des salles en cours…"
+      "synchronizing": "Synchronisation des salles en cours…",
+      "disabled": "La création de salles de sous-groupe est désactivée sur ce service."
     },
     "active": {
       "timeRemaining": "Temps restant",
@@ -858,7 +859,8 @@
       "reassignParticipant": "Déplacer {{name}} vers une autre salle",
       "syncFailed": "La synchronisation des salles a échoué.",
       "retrySynchronization": "Réessayer la synchronisation",
-      "closing": "Fermeture des salles de sous-groupe…"
+      "closing": "Fermeture des salles de sous-groupe…",
+      "flagDisabled": "La création de nouvelles salles est désactivée sur ce service. Vous pouvez toujours fermer cette session."
     },
     "participant": {
       "currentRoom": "Vous êtes dans {{room}}",

@@ -12,6 +12,7 @@ import { useState, useCallback, useMemo } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
 import { useTranslation } from 'react-i18next'
+import { useConfig } from '@/api/useConfig'
 import { useParticipants } from '@livekit/components-react'
 import { BREAKOUT_DEFAULTS } from '../utils/constants'
 import { useCreateBreakoutSession } from '../api/useCreateBreakoutSession'
@@ -70,10 +71,17 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
     useUpdateBreakoutSession()
   const { mutateAsync: retrySession, isPending: isRetrying } =
     useRetryBreakoutSession()
+  const { data: config } = useConfig()
+  const isCreationEnabled = config?.breakout_rooms?.is_enabled === true
 
-  // Eligible participants (exclude local host)
+  // Eligible participants: exclude the local host and every other manager.
   const assignableParticipants = useMemo(
-    () => participants.filter((p) => !p.isLocal),
+    () =>
+      participants.filter(
+        (p) =>
+          !p.isLocal &&
+          !['owner', 'administrator'].includes(p.attributes.room_role ?? '')
+      ),
     [participants]
   )
 
@@ -284,13 +292,19 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
             </select>
           </div>
 
-          <Button
-            variant="primary"
-            isDisabled={isCreating}
-            onPress={handleCreate}
-          >
-            {t('create')}
-          </Button>
+          {isCreationEnabled ? (
+            <Button
+              variant="primary"
+              isDisabled={isCreating}
+              onPress={handleCreate}
+            >
+              {t('create')}
+            </Button>
+          ) : (
+            <p role="status" className={css({ fontSize: 14 })}>
+              {t('disabled')}
+            </p>
+          )}
         </>
       )}
 

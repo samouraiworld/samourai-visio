@@ -34,6 +34,7 @@ import {
   reportError,
 } from '@/features/analytics/telemetry'
 import { useConfig } from '@/api/useConfig'
+import { useIsAdminOrOwner } from '@/features/rooms/livekit/hooks/useIsAdminOrOwner'
 import { isFireFox } from '@/utils/livekit'
 import { useIsMobile } from '@/utils/useIsMobile'
 import { navigateTo } from '@/navigation/navigateTo'
@@ -105,12 +106,10 @@ const BreakoutActions = ({
   roomId,
   setActiveRoomConnection,
   mainRoomId,
-  canManageBreakout,
 }: {
   roomId: string
   setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
   mainRoomId: string
-  canManageBreakout: boolean
 }) => {
   const { t } = useTranslation('rooms', {
     keyPrefix: 'breakout.participant',
@@ -120,6 +119,10 @@ const BreakoutActions = ({
     setActiveRoomConnection,
   })
   const snap = useSnapshot(breakoutStore)
+  const isAdminOrOwner = useIsAdminOrOwner()
+  // Breakout tokens are minted with role "member"; keep the host's controls
+  // while they visit a room.
+  const canManageBreakout = isAdminOrOwner || snap.isModeratorVisiting
   const { data: helpRequests = [] } = useBreakoutHelpRequests(
     mainRoomId,
     snap.activeSessionId ?? undefined,
@@ -580,7 +583,6 @@ export const Conference = ({
             roomId={roomId}
             setActiveRoomConnection={setActiveRoomConnection}
             mainRoomId={data?.id ?? ''}
-            canManageBreakout={data?.is_administrable ?? false}
           />
           <VideoConference />
           {!isMobile && <InviteDialog mode={mode} />}
