@@ -110,10 +110,15 @@ export const BreakoutActiveView = ({
         await action()
         return true
       } catch (error) {
-        setActionFailure(classifyActionFailure(error))
+        const failure = classifyActionFailure(error)
+        // Refetch BEFORE showing the message. This invalidation is itself what
+        // bumps the revision on a 409, and the revision effect above clears the
+        // message on any bump — so setting it first made the conflict alert,
+        // the flagship case of D15, flash and vanish before it could be read.
         await queryClient.invalidateQueries({
           queryKey: breakoutSessionKey(roomUuid),
         })
+        setActionFailure(failure)
         return false
       }
     },
@@ -158,9 +163,8 @@ export const BreakoutActiveView = ({
 
       setBroadcastText('')
       setBroadcastSuccess(true)
+      setTimeout(() => setBroadcastSuccess(false), 4000)
     })
-
-    setTimeout(() => setBroadcastSuccess(false), 4000)
   }, [sessionId, roomUuid, broadcastText, sendBroadcast, runAction])
 
   // In-flight reassignment: move participant from current room to target room (or main room)
