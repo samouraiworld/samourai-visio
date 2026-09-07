@@ -2,6 +2,7 @@
 """Unit tests for BreakoutService."""
 
 import asyncio
+import uuid
 from datetime import UTC, datetime, timedelta
 from threading import Event, Thread
 from types import SimpleNamespace
@@ -11,7 +12,10 @@ from django.db import connections
 from django.utils import timezone
 
 import pytest
-from livekit.api import TwirpError
+from livekit.api import (  # pylint: disable=no-name-in-module
+    RoomParticipantIdentity,
+    TwirpError,
+)
 
 from core import utils
 from core.breakout.models import (
@@ -1238,3 +1242,47 @@ def test_close_cancels_open_help_even_when_livekit_fails(service, delete_fails):
     assert pending.status == BreakoutHelpRequest.Status.CANCELLED
     assert pending.cancelled_at is not None
     assert acknowledged.status == BreakoutHelpRequest.Status.ACKNOWLEDGED
+
+
+def _lkapi_with_remove(side_effect=None):
+    lkapi = mock.MagicMock()
+    lkapi.room.list_participants = mock.AsyncMock(
+        side_effect=AssertionError("removal must not list participants first")
+    )
+    lkapi.room.remove_participant = mock.AsyncMock(side_effect=side_effect)
+    lkapi.aclose = mock.AsyncMock()
+    return lkapi
+
+
+def test_remove_participant_ignores_vanished_room_or_participant():
+    """A join that races a close must not turn into a 500 and a webhook retry."""
+    lkapi = _lkapi_with_remove(
+        side_effect=TwirpError("not_found", "room not found", status=404)
+    )
+    with mock.patch("core.utils.create_livekit_client", return_value=lkapi):
+        BreakoutService()._remove_participant("breakout_x_0", "participant-1")  # pylint: disable=protected-access
+
+    lkapi.room.remove_participant.assert_awaited_once_with(
+        RoomParticipantIdentity(room="breakout_x_0", identity="participant-1")
+    )
+    lkapi.aclose.assert_awaited_once()
+
+
+def test_remove_participant_surfaces_other_upstream_errors():
+    lkapi = _lkapi_with_remove(side_effect=TwirpError("internal", "boom", status=500))
+    with (
+        mock.patch("core.utils.create_livekit_client", return_value=lkapi),
+        pytest.raises(TwirpError),
+    ):
+        BreakoutService()._remove_participant("breakout_x_0", "participant-1")  # pylint: disable=protected-access
+
+
+def test_enforce_access_never_removes_from_an_unknown_breakout_room():
+    """Defence in depth: even if receive() lets an unknown room through, do not act."""
+    service = BreakoutService()
+    with mock.patch.object(service, "_remove_participant") as remove:
+        authorized = service.enforce_breakout_participant_access(
+            f"breakout_{uuid.uuid4()}_0", "participant-1"
+        )
+    assert authorized is False
+    remove.assert_not_called()

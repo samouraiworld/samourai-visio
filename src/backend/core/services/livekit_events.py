@@ -6,12 +6,14 @@ import re
 import uuid
 from enum import Enum
 from logging import getLogger
+from typing import Optional
 
 from django.conf import settings
 
 from livekit import api
 
 from core import models
+from core.breakout.models import BreakoutRoom
 from core.breakout.services import BreakoutService
 from core.recording.services.metadata_collector import (
     MetadataCollectorException,
@@ -159,13 +161,14 @@ class LiveKitEventsService:
             )
             return
 
-        # Breakout participant admission is a security boundary and must not be
-        # disabled by a parent-room naming filter.
-        if (
-            not self._is_breakout_room(room_name)
-            and self._filter_regex
-            and not self._filter_regex.search(room_name)
-        ):
+        scope_name = self._resolve_scope_name(room_name)
+        if scope_name is None:
+            logger.warning(
+                "Ignoring webhook event for breakout room '%s' not owned here",
+                room_name,
+            )
+            return
+        if self._filter_regex and not self._filter_regex.search(scope_name):
             logger.info("Filtered webhook event for room '%s'", room_name)
             return
 
@@ -262,7 +265,26 @@ class LiveKitEventsService:
     @staticmethod
     def _is_breakout_room(room_name: str) -> bool:
         """Return True for namespaced ephemeral breakout rooms."""
-        return room_name.startswith("breakout_")
+        return BreakoutRoom.is_breakout_room_name(room_name)
+
+    @staticmethod
+    def _resolve_scope_name(room_name: str) -> Optional[str]:
+        """Return the name the deployment scope filter applies to.
+
+        A breakout room is scoped by its parent meeting, so that a media
+        server shared between deployments never lets one of them act on the
+        other's breakout rooms. ``None`` means the room is unknown here. The
+        lookup hits the unique index on ``livekit_room_name``; the handler
+        repeats it, which is accepted for one point read per join.
+        """
+        if not BreakoutRoom.is_breakout_room_name(room_name):
+            return room_name
+        parent_room_id = (
+            BreakoutRoom.objects.filter(livekit_room_name=room_name)
+            .values_list("session__room_id", flat=True)
+            .first()
+        )
+        return str(parent_room_id) if parent_room_id else None
 
     def _handle_room_started(self, data):
         """Handle 'room_started' event."""

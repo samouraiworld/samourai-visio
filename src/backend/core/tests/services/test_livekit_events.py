@@ -9,6 +9,8 @@ from unittest import mock
 import pytest
 from livekit.api import EgressStatus
 
+from core.breakout.services import BreakoutService
+from core.breakout.tests.factories import BreakoutRoomFactory
 from core.factories import RecordingFactory, RoomFactory
 from core.recording.services.recording_events import RecordingEventsService
 from core.services.livekit_events import (
@@ -851,7 +853,7 @@ def test_receive_enforces_breakout_participant_join_before_room_filter(
     request.headers = {"Authorization": "test_token"}
     request.body = b"{}"
     data = mock.MagicMock()
-    data.room.name = f"breakout_{uuid.uuid4()}_0"
+    data.room.name = BreakoutRoomFactory().livekit_room_name
     data.participant.identity = "participant-1"
     data.event = "participant_joined"
     mock_receive.return_value = data
@@ -859,6 +861,55 @@ def test_receive_enforces_breakout_participant_join_before_room_filter(
     LiveKitEventsService().receive(request)
 
     mock_enforce.assert_called_once_with(data.room.name, "participant-1")
+
+
+@mock.patch.object(BreakoutService, "enforce_breakout_participant_access")
+@mock.patch.object(api.WebhookReceiver, "receive")
+def test_receive_drops_breakout_events_for_rooms_this_deployment_does_not_own(
+    mock_receive, mock_enforce, mock_livekit_config, settings
+):
+    """A breakout room with no local row belongs to another tenant: never evict."""
+    settings.LIVEKIT_WEBHOOK_EVENTS_FILTER_REGEX = None
+    request = mock.MagicMock()
+    request.headers = {"Authorization": "test_token"}
+    request.body = b"{}"
+    data = mock.MagicMock()
+    data.room.name = f"breakout_{uuid.uuid4()}_0"
+    data.participant.identity = "participant-1"
+    data.event = "participant_joined"
+    mock_receive.return_value = data
+
+    LiveKitEventsService().receive(request)
+
+    mock_enforce.assert_not_called()
+
+
+@mock.patch.object(BreakoutService, "enforce_breakout_participant_access")
+@mock.patch.object(api.WebhookReceiver, "receive")
+def test_receive_scopes_breakout_events_by_parent_room(
+    mock_receive, mock_enforce, mock_livekit_config, settings
+):
+    """The scope regex is applied to the parent meeting id, not the breakout name."""
+    breakout_room = BreakoutRoomFactory()
+    parent_id = str(breakout_room.session.room_id)
+    request = mock.MagicMock()
+    request.headers = {"Authorization": "test_token"}
+    request.body = b"{}"
+    data = mock.MagicMock()
+    data.room.name = breakout_room.livekit_room_name
+    data.participant.identity = "participant-1"
+    data.event = "participant_joined"
+    mock_receive.return_value = data
+
+    settings.LIVEKIT_WEBHOOK_EVENTS_FILTER_REGEX = f"^{uuid.uuid4()}$"
+    LiveKitEventsService().receive(request)
+    mock_enforce.assert_not_called()
+
+    settings.LIVEKIT_WEBHOOK_EVENTS_FILTER_REGEX = f"^{parent_id}$"
+    LiveKitEventsService().receive(request)
+    mock_enforce.assert_called_once_with(
+        breakout_room.livekit_room_name, "participant-1"
+    )
 
 
 @mock.patch("core.services.presence.cache.delete")

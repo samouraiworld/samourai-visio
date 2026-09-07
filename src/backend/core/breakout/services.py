@@ -941,19 +941,18 @@ class BreakoutService:
 
     @async_to_sync
     async def _remove_participant(self, room_name: str, identity: str) -> None:
-        """Remove an identity from its previous LiveKit room if still connected."""
+        """Remove an identity from a LiveKit room; a vanished room or participant is a no-op."""
         lkapi = utils.create_livekit_client()
         try:
-            participants = await lkapi.room.list_participants(
-                ListParticipantsRequest(room=room_name)
+            await lkapi.room.remove_participant(
+                RoomParticipantIdentity(room=room_name, identity=identity)
             )
-            if any(
-                participant.identity == identity
-                for participant in participants.participants
-            ):
-                await lkapi.room.remove_participant(
-                    RoomParticipantIdentity(room=room_name, identity=identity)
-                )
+        except TwirpError as error:
+            if error.code != "not_found":
+                raise
+            logger.info(
+                "Nothing to remove: %s is not in LiveKit room %s", identity, room_name
+            )
         finally:
             await lkapi.aclose()
 
@@ -1029,6 +1028,9 @@ class BreakoutService:
 
         Join JWTs cannot be revoked after issuance. The authenticated LiveKit
         webhook is therefore the post-admission guard for cached tokens.
+
+        Returns True when ``identity`` may stay in ``room_name``; an unknown
+        room is a no-op.
         """
         breakout_room = (
             BreakoutRoom.objects.select_related("session__room")
@@ -1055,7 +1057,18 @@ class BreakoutService:
                     user and breakout_room.session.room.is_administrator_or_owner(user)
                 )
 
+        if breakout_room is None:
+            logger.info(
+                "Ignoring join to breakout room %s with no local session", room_name
+            )
+            return False
         if not authorized:
+            logger.warning(
+                "Evicting %s from %s: not assigned to session %s",
+                identity,
+                room_name,
+                breakout_room.session_id,
+            )
             self._remove_participant(room_name, identity)
         return authorized
 

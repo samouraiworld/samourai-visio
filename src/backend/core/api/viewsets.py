@@ -43,6 +43,7 @@ from rest_framework.settings import api_settings
 from core import analytics, enums, models, utils
 from core.api import throttling
 from core.api.filters import ListFileFilter
+from core.breakout.models import BreakoutRoom
 from core.enums import MEDIA_STORAGE_URL_PATTERN
 from core.recording.enums import FileExtension
 from core.recording.event.authentication import RecordingProcessWebhookAuthentication
@@ -259,6 +260,10 @@ class RoomViewSet(
             if not settings.ALLOW_UNREGISTERED_ROOMS:
                 raise
             slug = slugify(self.kwargs["pk"])
+            if BreakoutRoom.is_breakout_room_name(slug):
+                # A breakout room is never an unregistered meeting: its token
+                # comes only from the assignment-checked join endpoint.
+                raise
             username = request.query_params.get("username", None)
             data = {
                 "id": None,

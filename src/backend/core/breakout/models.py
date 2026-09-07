@@ -132,6 +132,8 @@ class BreakoutRoom(BaseModel):
     ``Room`` record is created.
     """
 
+    LIVEKIT_ROOM_PREFIX = "breakout_"
+
     session = models.ForeignKey(
         BreakoutSession,
         on_delete=models.CASCADE,
@@ -166,15 +168,20 @@ class BreakoutRoom(BaseModel):
     def __str__(self):
         return f"{self.name} ({self.livekit_room_name})"
 
-    @staticmethod
-    def generate_livekit_room_name(session_id, index):
+    @classmethod
+    def is_breakout_room_name(cls, room_name: str) -> bool:
+        """Return True for LiveKit rooms created by this feature."""
+        return room_name.startswith(cls.LIVEKIT_ROOM_PREFIX)
+
+    @classmethod
+    def generate_livekit_room_name(cls, session_id, index):
         """Generate a namespaced LiveKit room name.
 
         Format: ``breakout_{session_uuid}_{index}``
         This ensures no collision with main room UUIDs and makes breakout
         rooms instantly identifiable in logs and LiveKit admin.
         """
-        return f"breakout_{session_id}_{index}"
+        return f"{cls.LIVEKIT_ROOM_PREFIX}{session_id}_{index}"
 
 
 class BreakoutAssignment(BaseModel):

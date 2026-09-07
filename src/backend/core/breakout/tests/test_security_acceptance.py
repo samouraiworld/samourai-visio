@@ -244,3 +244,19 @@ def test_direct_public_guest_can_read_and_join_own_assignment():
         )
     assert join.status_code == 200
     assert join.json()["livekit"]["token"] == "breakout-token"
+
+
+def test_breakout_room_names_are_never_served_as_unregistered_rooms(settings):
+    """Knowing a breakout room's name must not be enough to mint a token for it."""
+    settings.ALLOW_UNREGISTERED_ROOMS = True
+    breakout_room = BreakoutRoomFactory(
+        session=BreakoutSessionFactory(status=BreakoutSession.Status.ACTIVE)
+    )
+
+    with mock.patch("core.utils.generate_token") as token:
+        response = APIClient().get(
+            f"/api/v1.0/rooms/{breakout_room.livekit_room_name}/"
+        )
+
+    assert response.status_code == 404
+    token.assert_not_called()
