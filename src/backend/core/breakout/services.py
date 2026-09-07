@@ -128,12 +128,7 @@ class BreakoutService:
                 type(room).objects.select_for_update().get(pk=room.pk)
                 if BreakoutSession.objects.filter(
                     room=room,
-                    status__in=[
-                        BreakoutSession.Status.CONFIGURING,
-                        BreakoutSession.Status.ACTIVATING,
-                        BreakoutSession.Status.ACTIVE,
-                        BreakoutSession.Status.CLOSING,
-                    ],
+                    status__in=BreakoutSession.OPEN_STATUSES,
                 ).exists():
                     raise SessionAlreadyActiveError(
                         "This room already has an active or configuring breakout session."
@@ -281,12 +276,7 @@ class BreakoutService:
             session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
             if session.is_closed:
                 return session
-            if session.status not in [
-                BreakoutSession.Status.CONFIGURING,
-                BreakoutSession.Status.ACTIVATING,
-                BreakoutSession.Status.ACTIVE,
-                BreakoutSession.Status.CLOSING,
-            ]:
+            if session.status not in BreakoutSession.OPEN_STATUSES:
                 raise InvalidSessionStateError(
                     f"Cannot close session in '{session.status}' status."
                 )

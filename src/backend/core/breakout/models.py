@@ -30,6 +30,13 @@ class BreakoutSession(BaseModel):
         CLOSING = "closing", _("Closing")
         CLOSED = "closed", _("Closed")
 
+    OPEN_STATUSES = [
+        Status.CONFIGURING,
+        Status.ACTIVATING,
+        Status.ACTIVE,
+        Status.CLOSING,
+    ]
+
     room = models.ForeignKey(
         "core.Room",
         on_delete=models.CASCADE,

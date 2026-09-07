@@ -1,12 +1,12 @@
 """API endpoints for the breakout rooms feature.
 
 Nested under ``/api/v1.0/rooms/{room_id}/breakout-sessions/``.
-All endpoints return 404 when the feature flag is disabled.
+Only session creation and activation are gated by the feature flag; open
+sessions stay manageable.
 """
 
 from logging import getLogger
 
-from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.http import Http404
 from django.shortcuts import get_object_or_404
@@ -48,12 +48,6 @@ from .services import (
 logger = getLogger(__name__)
 
 
-def _check_feature_flag():
-    """Raise Http404 if the breakout rooms feature flag is disabled."""
-    if not FeatureFlag.flag_is_active("breakout_rooms"):
-        raise Http404
-
-
 class BreakoutSessionViewSet(viewsets.ViewSet):
     """ViewSet for managing breakout sessions within a room.
 
@@ -68,12 +62,8 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     """
 
     def _get_room(self, room_id):
-        """Resolve the parent room and check feature flag."""
-        _check_feature_flag()
-        try:
-            return core_models.Room.objects.get(pk=room_id)
-        except (core_models.Room.DoesNotExist, ValidationError, ValueError):
-            return get_object_or_404(core_models.Room, slug=room_id)
+        """Resolve the parent room by primary key (the URL only matches a UUID)."""
+        return get_object_or_404(core_models.Room, pk=room_id)
 
     def _can_manage(self, room, user):
         return room.is_administrator_or_owner(user)
@@ -96,6 +86,7 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
 
     # ── POST /rooms/{room_id}/breakout-sessions/ ──────────────────────
 
+    @FeatureFlag.require("breakout_rooms")
     def create(self, request, room_id=None):
         """Create a new breakout session."""
         room = self._get_room(room_id)
@@ -171,12 +162,7 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
 
         sessions = BreakoutSession.objects.filter(
             room=room,
-            status__in=[
-                BreakoutSession.Status.CONFIGURING,
-                BreakoutSession.Status.ACTIVATING,
-                BreakoutSession.Status.ACTIVE,
-                BreakoutSession.Status.CLOSING,
-            ],
+            status__in=BreakoutSession.OPEN_STATUSES,
         ).prefetch_related("breakout_rooms__assignments")
 
         return Response(BreakoutSessionSerializer(sessions, many=True).data)
@@ -197,6 +183,13 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         serializer.is_valid(raise_exception=True)
 
         target_status = serializer.validated_data["status"]
+        if (
+            target_status == BreakoutSession.Status.ACTIVE
+            and not FeatureFlag.flag_is_active("breakout_rooms")
+        ):
+            # Activation starts a new live session; it needs the scheduler the
+            # flag guarantees. Closing and retrying never do.
+            raise Http404
         service = BreakoutService()
 
         try:

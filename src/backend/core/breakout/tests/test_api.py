@@ -35,22 +35,48 @@ def enable_feature_flag(settings):
     settings.SECRET_KEY = "test-secret-key-for-testing-purposes-only"
 
 
-def test_feature_flag_disabled_returns_404(settings):
-    """When feature flag is disabled, all breakout endpoints return 404."""
+def test_feature_flag_disabled_blocks_creation_and_activation_only(settings):
+    """Turning the flag off must never strand a session that is already open."""
     settings.MEET_BREAKOUT_ROOMS_ENABLED = False
     room = RoomFactory()
+    other_room = RoomFactory()
     user = UserFactory()
     room.accesses.create(user=user, role=RoleChoices.ADMIN)
-
+    other_room.accesses.create(user=user, role=RoleChoices.ADMIN)
+    active = BreakoutSessionFactory(room=room, status=BreakoutSession.Status.ACTIVE)
+    configuring = BreakoutSessionFactory(
+        room=other_room, status=BreakoutSession.Status.CONFIGURING
+    )
     client = APIClient()
     client.force_login(user)
 
-    response = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
-    assert response.status_code == 404
+    created = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/",
+        {"num_rooms": 2},
+        format="json",
+    )
+    listed = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
+    activated = client.patch(
+        f"/api/v1.0/rooms/{other_room.id}/breakout-sessions/{configuring.id}/",
+        {"status": "active"},
+        format="json",
+    )
+    with mock.patch.object(BreakoutService, "close_session", return_value=active):
+        closed = client.patch(
+            f"/api/v1.0/rooms/{room.id}/breakout-sessions/{active.id}/",
+            {"status": "closed"},
+            format="json",
+        )
+
+    assert created.status_code == 404
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()] == [str(active.id)]
+    assert activated.status_code == 404
+    assert closed.status_code == 200
 
 
 def test_feature_flag_requires_celery_scheduler(settings):
-    """Breakout APIs stay disabled without authoritative timed cleanup."""
+    """Creation stays disabled without authoritative timed cleanup."""
     settings.MEET_BREAKOUT_ROOMS_ENABLED = True
     settings.CELERY_ENABLED = False
     room = RoomFactory()
@@ -59,11 +85,14 @@ def test_feature_flag_requires_celery_scheduler(settings):
     client = APIClient()
     client.force_login(admin)
 
-    response = client.get(f"/api/v1.0/rooms/{room.id}/breakout-sessions/")
+    created = client.post(
+        f"/api/v1.0/rooms/{room.id}/breakout-sessions/",
+        {"num_rooms": 2},
+        format="json",
+    )
     config_response = client.get("/api/v1.0/config/")
 
-    assert response.status_code == 404
-    assert config_response.status_code == 200
+    assert created.status_code == 404
     assert config_response.json()["breakout_rooms"]["is_enabled"] is False
 
 
