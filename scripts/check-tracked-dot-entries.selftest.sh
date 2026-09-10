@@ -7,12 +7,18 @@
 #
 # The cases build throwaway repositories and stage files into them. Staging is
 # enough -- `git ls-files` reads the index -- so nothing here commits.
+#
+# The final count is computed from the passes, not written as a literal. A
+# hardcoded "N cases OK" is a number that goes stale the first time someone
+# deletes a case, and it goes stale silently -- reporting a coverage the file
+# no longer has.
 set -uo pipefail
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(git rev-parse --show-toplevel)"
 check="$here/scripts/check-tracked-dot-entries.sh"
 work="$(mktemp -d)"
 fails=0
+passes=0
 
 cleanup() { [ -n "${work:-}" ] && [ -d "$work" ] && rm -r "$work"; }
 trap cleanup EXIT
@@ -45,7 +51,7 @@ expect_fail_saying() {
     printf '%s\n' "$out" | sed 's/^/    /'
     fails=$((fails+1)); return
   fi
-  echo "ok: refused saying \"$want\""
+  passes=$((passes+1)); echo "ok: refused saying \"$want\""
 }
 
 # --- case 1: a tool directory swept in by `git add .` ------------------------
@@ -57,7 +63,7 @@ git -C "$d" add -A >/dev/null 2>&1
 expect_fail_saying "$d" "tracked dot-entry not on the allowlist" IGNORE=1
 out=$(cd "$d" && bash "$check" 2>&1)
 if grep -qF ".sometool" <<<"$out"; then
-  echo "ok: the offending entry is named in the message"
+  passes=$((passes+1)); echo "ok: the offending entry is named in the message"
 else
   echo "FAIL: refused without naming the offending entry"; fails=$((fails+1))
 fi
@@ -91,7 +97,7 @@ expect_fail_saying "$d" "declares no entries" IGNORE=1
 # A check that refuses everything is not a check.
 if out=$(cd "$here" && bash "$check" 2>&1); then
   if grep -q "none unvouched" <<<"$out"; then
-    echo "ok: the real repository is accepted -- $out"
+    passes=$((passes+1)); echo "ok: the real repository is accepted -- $out"
   else
     echo "FAIL: accepted, but without reporting what it scanned"; fails=$((fails+1))
   fi
@@ -103,4 +109,4 @@ if [ $fails -ne 0 ]; then
   echo "check-tracked-dot-entries.selftest: $fails case(s) failed"
   exit 1
 fi
-echo "check-tracked-dot-entries.selftest: 7 cases OK"
+echo "check-tracked-dot-entries.selftest: $passes cases OK"
