@@ -15,11 +15,13 @@
 #   scripts/preflight.sh config    # files on disk; run BEFORE `docker compose up`
 #   scripts/preflight.sh stack     # containers running; resolved settings
 #   scripts/preflight.sh public    # DNS + TLS; the public surface
-#   scripts/preflight.sh all       # all three, in order (default)
+#   scripts/preflight.sh edge      # the response-header subset of `public`
+#   scripts/preflight.sh all       # config, stack, public, in order (default)
 #
 # Run from the deploy directory on the host (the one holding compose.yaml),
-# or set VISIO_DIR. VISIO_ETC overrides /etc for the host-file checks — the
-# self-test uses it to point them at a fixture. Never prints a secret.
+# or set VISIO_DIR. VISIO_ETC overrides /etc for the host-file checks, and
+# VISIO_PUBLIC_ORIGIN overrides https://<MEET_HOST> for `edge` — the
+# self-test uses both to point checks at a fixture. Never prints a secret.
 
 set -uo pipefail
 
@@ -214,18 +216,74 @@ phase_config() {
       bad "gateway no longer 404s /admin" \
           "Django admin has no MFA and no brute-force protection, and reaches every account and room"
     fi
+    # Anchored on the server level's own indentation (four spaces): the same
+    # four headers are repeated deeper inside `location = /`, and a loose
+    # anchor would let that copy vouch for a server-level line that is gone.
     local hmiss=""
     for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options Referrer-Policy; do
-      grep -qE "^[[:space:]]*add_header ${h} " nginx/default.conf.template || hmiss="$hmiss $h"
+      grep -qE "^    add_header ${h} " nginx/default.conf.template || hmiss="$hmiss $h"
     done
-    # Two upstream layers each emit HSTS; without both hides the 60-second one
-    # wins (RFC 6797 takes the FIRST header).
-    local hides; hides="$(grep -c 'proxy_hide_header Strict-Transport-Security' nginx/default.conf.template)"
-    if [ -z "$hmiss" ] && [ "$hides" -ge 2 ]; then
-      ok "gateway emits one HSTS policy plus CSP, nosniff and Referrer-Policy"
+    # Django's SecurityMiddleware emits all three of these on every /api
+    # response, so each must be hidden in BOTH proxy blocks or it arrives
+    # twice: RFC 6797 takes the FIRST HSTS (the 60-second one), and browsers
+    # take the LAST Referrer-Policy (the looser one, when the values differ).
+    local hshort="" hides
+    for h in Strict-Transport-Security X-Content-Type-Options Referrer-Policy; do
+      hides="$(grep -c "proxy_hide_header ${h};" nginx/default.conf.template)"
+      [ "${hides:-0}" -ge 2 ] || hshort="$hshort $h(x${hides:-0})"
+    done
+    if [ -z "$hmiss" ] && [ -z "$hshort" ]; then
+      ok "gateway emits one HSTS policy plus CSP, nosniff and Referrer-Policy, each exactly once"
     else
-      bad "response-header block incomplete (missing:${hmiss:- none}; proxy_hide_header count $hides, expected 2)" \
-          "a second HSTS header from Django wins over ours, and framing/sniffing protection disappears"
+      bad "response-header block incomplete (missing add_header:${hmiss:- none}; proxy_hide_header short of 2:${hshort:- none})" \
+          "a second copy from Django wins over ours — the 60-second HSTS, or the looser Referrer-Policy"
+    fi
+    # The gateway's value must be the one Django sets: with Django's copy
+    # hidden, a looser gateway value would now be the only one a browser sees.
+    if grep -qE '^    add_header Referrer-Policy "same-origin" always;' nginx/default.conf.template; then
+      ok "gateway Referrer-Policy is same-origin (Django's value — no conflict left to lose)"
+    else
+      bad "gateway Referrer-Policy is not same-origin" \
+          "Django emits same-origin on /api; hiding its copy behind a looser gateway value loosens the policy silently"
+    fi
+    # The share-card redirect lives in an `if` block, which is its own
+    # add_header scope: a Cache-Control there alone drops every server-level
+    # header from the 302 — the first response a cookieless visitor receives.
+    local rootblk; rootblk="$(sed -n '/^    location = \/ {/,/^    }/p' nginx/default.conf.template)"
+    local rmiss=""
+    for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options Referrer-Policy; do
+      printf '%s\n' "$rootblk" | grep -qE "^[[:space:]]*add_header ${h} " || rmiss="$rmiss $h"
+    done
+    # And each copy must carry the server level's exact value: the block is
+    # a hand-kept duplicate, so a value edited in one place and not the other
+    # ships two policies from one file.
+    local rdrift="" sv rv
+    for h in Strict-Transport-Security Content-Security-Policy X-Content-Type-Options Referrer-Policy; do
+      sv="$(grep -E "^    add_header ${h} " nginx/default.conf.template | head -1 | sed 's/^ *//')"
+      rv="$(printf '%s\n' "$rootblk" | grep -E "^ *add_header ${h} " | head -1 | sed 's/^ *//')"
+      [ -n "$rv" ] && [ "$sv" != "$rv" ] && rdrift="$rdrift $h"
+    done
+    if [ -n "$rootblk" ] && [ -z "$rmiss" ] && [ -z "$rdrift" ]; then
+      ok "the / redirect re-emits HSTS, CSP, nosniff and Referrer-Policy inside its if-block, same values"
+    elif [ -n "$rdrift" ]; then
+      bad "the / redirect's copy of these headers differs from the server level:$rdrift" \
+          "one file, two policies — the 302 and every other response would disagree"
+    else
+      bad "the / redirect drops security headers (missing:${rmiss:- the whole location = / block})" \
+          "add_header inside an if-block inherits nothing from the server level; the 302 would ship no HSTS"
+    fi
+    # security.txt (RFC 9116) answered from the template, and everything else
+    # under /.well-known/ a 404 — the SPA fallback would answer 200 text/html
+    # for any such path, making a missing file look like a served one.
+    local stblk; stblk="$(sed -n '/^    location = \/\.well-known\/security\.txt {/,/^    }/p' nginx/default.conf.template)"
+    if printf '%s\n' "$stblk" | grep -q 'default_type text/plain' &&
+       printf '%s\n' "$stblk" | grep -q 'Contact: mailto:' &&
+       printf '%s\n' "$stblk" | grep -q 'Expires: ' &&
+       grep -qE '^[[:space:]]*location /\.well-known/ \{ return 404; \}' nginx/default.conf.template; then
+      ok "gateway serves /.well-known/security.txt as text/plain and 404s the rest of /.well-known/"
+    else
+      bad "security.txt block incomplete, or the /.well-known/ 404 catch-all is missing" \
+          "RFC 9116 needs Contact and Expires as text/plain; without the catch-all the SPA shell answers any well-known path"
     fi
   else
     bad "nginx/default.conf.template missing or empty" \
@@ -686,6 +744,90 @@ PY
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
+# The response-header surface of one origin — no DNS, TLS or Clerk. `public`
+# runs it against https://<MEET_HOST>; the `edge` phase runs it alone, where
+# VISIO_PUBLIC_ORIGIN can point it at a stub. That is how
+# preflight-selftest.sh proves each of these checks can fail: the live host
+# is the one thing a self-test must never mutate.
+edge_headers() {
+  local origin="$1"
+  head_ "EDGE — response headers at $origin"
+
+  # ── The / redirect: the first response a cookieless visitor receives ─────
+  # An `if` block in nginx is its own add_header scope, so this 302 shipped
+  # no HSTS and no CSP until the template repeated them inside the block.
+  local rh; rh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin/" 2>/dev/null | tr -d '\r')"
+  local rmiss="" h
+  for h in strict-transport-security content-security-policy x-content-type-options referrer-policy; do
+    printf '%s\n' "$rh" | grep -qi "^$h:" || rmiss="$rmiss $h"
+  done
+  local rhn; rhn="$(printf '%s\n' "$rh" | grep -ci '^strict-transport-security:')"
+  local rmax; rmax="$(printf '%s\n' "$rh" | grep -i '^strict-transport-security:' | head -1 | grep -oE 'max-age=[0-9]+' | cut -d= -f2)"
+  if [ -z "$rmiss" ] && [ "$rhn" = "1" ] && [ "${rmax:-0}" -ge 15552000 ]; then
+    ok "the / redirect carries HSTS (max-age=${rmax}), CSP, nosniff and Referrer-Policy"
+  else
+    bad "the / redirect ships an incomplete header set (missing:${rmiss:- none}; HSTS x${rhn}, max-age=${rmax:-none})" \
+        "the gateway's location = / if-block must repeat the server-level headers; add_header inherits nothing there"
+  fi
+
+  # ── /api: Django sets these two as well; each must arrive exactly once ───
+  # Browsers take the LAST Referrer-Policy they see, so a second, looser
+  # value from the gateway silently replaced Django's same-origin.
+  local ah; ah="$(curl -sS -D- -o /dev/null --max-time 15 "$origin/api/v1.0/config/" 2>/dev/null | tr -d '\r')"
+  local rpn; rpn="$(printf '%s\n' "$ah" | grep -ci '^referrer-policy:')"
+  local ctn; ctn="$(printf '%s\n' "$ah" | grep -ci '^x-content-type-options:')"
+  local rpv; rpv="$(printf '%s\n' "$ah" | grep -i '^referrer-policy:' | head -1 | cut -d: -f2- | tr -d ' ')"
+  if [ "$rpn" = "1" ] && [ "$ctn" = "1" ] && [ "$rpv" = "same-origin" ]; then
+    ok "/api carries one Referrer-Policy (same-origin) and one X-Content-Type-Options"
+  else
+    bad "duplicate or conflicting headers on /api (referrer-policy x${rpn} '${rpv:-none}', x-content-type-options x${ctn})" \
+        "Django and the gateway both emit them; proxy_hide_header in both proxy blocks, and one value"
+  fi
+
+  # ── security.txt (RFC 9116): as text, with the two mandatory fields ──────
+  # Content-type, not status: the SPA fallback answers 200 text/html for any
+  # missing file, so a status assertion would pass on a file that is absent.
+  local st; st="$(curl -sS -o /dev/null -w '%{http_code} %{content_type}' --max-time 15 "$origin/.well-known/security.txt" 2>/dev/null)"
+  local stb; stb="$(curl -sS --max-time 15 "$origin/.well-known/security.txt" 2>/dev/null | tr -d '\r')"
+  local stexp; stexp="$(printf '%s\n' "$stb" | grep '^Expires:' | head -1 | cut -d: -f2- | tr -d ' ')"
+  case "$st" in
+    "200 text/plain"*)
+      if printf '%s\n' "$stb" | grep -q '^Contact: ' && [ -n "$stexp" ]; then
+        ok "/.well-known/security.txt is served as text/plain with Contact and Expires"
+      else
+        bad "security.txt answers 200 text/plain but lacks Contact or Expires (both mandatory)"
+      fi ;;
+    *) bad "security.txt answers '${st:-nothing}', expected 200 text/plain" \
+           "a missing file comes back as the SPA shell (200 text/html); the gateway template answers this path itself" ;;
+  esac
+  # Expires is the one calendar date the RFC forces. A lapsed file must not
+  # be trusted (RFC 9116 §2.5.5), so thirty days of notice to renew it.
+  if [ -n "$stexp" ]; then
+    if python3 - "$stexp" <<'PYEXP' 2>/dev/null
+import sys, datetime as d
+e = d.datetime.fromisoformat(sys.argv[1].replace("Z", "+00:00"))
+sys.exit(0 if e - d.datetime.now(d.timezone.utc) > d.timedelta(days=30) else 1)
+PYEXP
+    then
+      ok "security.txt Expires ($stexp) is more than 30 days away"
+    else
+      bad "security.txt expires within 30 days, has lapsed, or is malformed ($stexp)" \
+          "renew the Expires line in the gateway template (under a year ahead) and recreate the frontend"
+    fi
+  else
+    skip "security.txt Expires cannot be evaluated" "no Expires field was served — see the failure above"
+  fi
+
+  # ── Anything else under /.well-known/ is a 404, not the SPA shell ────────
+  local wk; wk="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$origin/.well-known/preflight-probe-$$" 2>/dev/null)"
+  case "$wk" in
+    404) ok "an unknown /.well-known/ path is a 404 (not the SPA shell)" ;;
+    *)   bad "an unknown /.well-known/ path answers HTTP ${wk:-nothing}, expected 404" \
+             "the SPA fallback would answer 200 text/html and make any missing well-known file look served" ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
 phase_public() {
   head_ "PUBLIC — DNS, TLS and the live surface"
 
@@ -995,6 +1137,9 @@ phase_public() {
     bad "configured OIDC endpoint no longer matches Clerk discovery" "re-derive env.d/common from the live document"
   fi
 
+  # ── Response headers on /, /api and /.well-known/ ────────────────────────
+  edge_headers "https://${MEET_HOST}"
+
   # ── Things this script structurally cannot prove ─────────────────────────
   skip "UDP reachability (7882, 443, relay range)" "'nc -zu' reports success against a DROPping firewall; and run from the host it tests loopback. Prove it with a real call and read LiveKit's selected ICE candidate pair."
   skip "Scaleway security group" "a second filter ufw cannot see. Check it in the console."
@@ -1008,8 +1153,9 @@ case "$PHASE" in
   config) phase_config ;;
   stack)  phase_stack ;;
   public) phase_public ;;
+  edge)   edge_headers "${VISIO_PUBLIC_ORIGIN:-https://${MEET_HOST}}" ;;
   all)    phase_config; phase_stack; phase_public ;;
-  *)      echo "usage: $0 [config|stack|public|all]"; exit 2 ;;
+  *)      echo "usage: $0 [config|stack|public|edge|all]"; exit 2 ;;
 esac
 
 printf '\n\033[1m%d passed, %d failed, %d skipped\033[0m\n' "$pass" "$failed" "$skipped"

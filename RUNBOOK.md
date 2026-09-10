@@ -524,10 +524,12 @@ files-without-a-URL case it is designed to catch.
 > anything under `landing/` links to them, and the gateway override
 > ([`deploy/nginx/default.conf.template`](deploy/nginx/default.conf.template))
 > answers all three routes with a **301 to our pages** before the SPA can —
-> (the same file also carries three other marked blocks: the trailing-slash
-> completions for our own pages, the `/admin` 404, and the response-header
-> set — one HSTS policy, CSP `frame-ancestors`, `nosniff`, `Referrer-Policy`)
-> `preflight.sh public` asserts the redirects, and
+> (the same file also carries four other marked blocks: the trailing-slash
+> completions for our own pages, the `/admin` 404, the response-header set —
+> one HSTS policy, CSP `frame-ancestors`, `nosniff`, `Referrer-Policy`, each
+> emitted exactly once and repeated inside the `/` redirect — and
+> `/.well-known/security.txt` with a 404 for the rest of `/.well-known/`)
+> `preflight.sh public` asserts the redirects and the headers, and
 > `check-upstream-contract.sh` pins the template against upstream so gateway
 > drift cannot ship silently on a version bump (§10).
 
