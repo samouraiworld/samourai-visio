@@ -169,6 +169,24 @@ badlink=$(grep -rlE 'href="/(mentions-legales|conditions-utilisation)' landing/ 
 [ -n "$badlink" ] && legal="${legal}links to upstream's DINUM legal pages: $badlink"$'\n'
 check "legal pages are ours, and nothing links to upstream's" "${legal%$'\n'}"
 
+# ── Tool configuration directories must not be committed ────────────────────
+# Development tooling keeps local configuration in a dot-directory at the root.
+# It is not ours, it is not in .gitignore, and one `git add .` commits it into
+# a public repository. Locally these are excluded through .git/info/exclude,
+# which is per-clone: it protects the workstation it was typed on and nobody
+# else's. The check below travels with the repository.
+#
+# Delegated to its own script because it has its own self-test — a gate nobody
+# has watched reject a bad input is a comment, not a gate, and this file has
+# no self-test of its own yet.
+dotentries=$(scripts/check-tracked-dot-entries.sh 2>&1)
+if [ $? -eq 0 ]; then
+  pass "every tracked dot-entry is on the allowlist (${dotentries#*: })"
+else
+  bad "tracked dot-entries"
+  printf '        %s\n' "$dotentries"
+fi
+
 # ── Scripts stay executable and syntactically valid ─────────────────────────
 badsh=""
 for s in $(git ls-files 'scripts/*.sh'); do
