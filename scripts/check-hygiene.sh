@@ -179,8 +179,7 @@ check "legal pages are ours, and nothing links to upstream's" "${legal%$'\n'}"
 # Delegated to its own script because it has its own self-test — a gate nobody
 # has watched reject a bad input is a comment, not a gate, and this file has
 # no self-test of its own yet.
-dotentries=$(scripts/check-tracked-dot-entries.sh 2>&1)
-if [ $? -eq 0 ]; then
+if dotentries=$(scripts/check-tracked-dot-entries.sh 2>&1); then
   pass "every tracked dot-entry is on the allowlist (${dotentries#*: })"
 else
   bad "tracked dot-entries"
