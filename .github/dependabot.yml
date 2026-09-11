@@ -37,8 +37,21 @@ updates:
     # lost in the pile.
     groups:
       actions:
+        # Capped on purpose. `patterns` with no `update-types` collects majors
+        # into the weekly bundle, which is how console #50 arrived as one pull
+        # request carrying six major steps under a header promising that a major
+        # is never merged as opened. The configuration was manufacturing the
+        # thing it forbids.
+        #
+        # A cap is not an `ignore` and does not reintroduce what this change
+        # removes: Dependabot still opens the major, on its own, outside the
+        # group, which is the signal the header asks for. Measured in this
+        # organisation rather than read from documentation: console's npm `lint`
+        # group is capped the same way and the eslint 9 -> 10 major arrived as
+        # two individual pull requests (console #53 and #55), not suppressed.
         patterns:
           - "*"
+        update-types: ["minor", "patch"]
 
   # `requirements-icons.txt`: the hash-pinned Pillow the icon generator draws
   # with. It arrived without an entry here, which left a pinned file nobody
