@@ -141,8 +141,22 @@ def findings(path):
         # Matched case-insensitively: these are words, and capitalisation
         # carries no meaning in them.
         low = payload.lower()
-        for needle in VENDOR + NAMESPACE:
+        for needle in VENDOR:
             if needle in low:
+                note(needle.decode() + suffix)
+        # The namespace needle is FOUR bytes, and four bytes over base64's
+        # alphabet collide by chance: on 2026-09-11 it refused an npm lockfile
+        # whose only crime was a sha512- integrity hash containing those four
+        # characters. One such collision exists across every branch of the nine
+        # repositories today, which reads as a freak and is in fact a rate.
+        #
+        # So it is recognised only where a manifest actually puts it: as a
+        # declared XML namespace, or as a namespace-qualified name. This is the
+        # same treatment the PNG chunk types already get, and for the same
+        # stated reason -- their four letters are ordinary words, so they are
+        # matched at a real boundary rather than anywhere in the bytes.
+        for needle in NAMESPACE:
+            if b"xmlns:" + needle in low or needle + b":" in low:
                 note(needle.decode() + suffix)
 
     scan(raw)
@@ -168,6 +182,17 @@ def findings(path):
     return sorted(set(hits))
 
 
+def path_findings(rel):
+    """Findings in the repo-relative PATH itself, directory components included.
+
+    A file whose NAME is the marker publishes it as loudly as one whose contents
+    do, and a scan of contents alone cannot see it -- which is exactly the shape
+    of the artefact the rule names first.
+    """
+    low = rel.lower().encode("utf-8", "surrogateescape")
+    return [n.decode() + " (in the path)" for n in VENDOR if n in low]
+
+
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     allow = load_allowlist()
@@ -187,12 +212,16 @@ def main():
         rel = blob.decode("utf-8", "surrogateescape")
         if rel in allow:
             continue
+        hits = path_findings(rel)
         try:
-            hits = findings(os.path.join(root, rel))
-        except OSError:
-            continue
+            hits += findings(os.path.join(root, rel))
+        except OSError as exc:
+            # A tracked path that could not be read is not a path known to be
+            # clean. Skipping it here reported a clean tree and exited 0 for a
+            # file at mode 000 and for a dangling symlink alike.
+            hits.append(f"could not be read ({exc.strerror})")
         if hits:
-            bad[rel] = hits
+            bad[rel] = sorted(set(hits))
 
     for rel, hits in sorted(bad.items()):
         print(f"::error file={rel}::carries {', '.join(hits)}")

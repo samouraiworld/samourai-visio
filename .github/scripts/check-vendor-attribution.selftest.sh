@@ -35,38 +35,57 @@ fail() { echo "self-test FAILED: $1" >&2; exit 1; }
 # Stages whatever the fixture left behind and returns the check's output. The
 # exit status is deliberately discarded rather than returned: nothing in this
 # file is allowed to assert on it.
+_out=""
+_status=0
 run() {
   git -C "$work" add -A
-  python3 "$check" "$work" 2>&1 || true
+  if _out="$(python3 "$check" "$work" 2>&1)"; then _status=0; else _status=$?; fi
+  printf '%s\n' "$_out"
+}
+
+# The message tells the branches apart; the exit status is the only thing CI
+# consumes. Asserting one without the other is how a refusal flipped to a pass
+# went unnoticed: the 13 message assertions all still passed with the checker's
+# `return 1` changed to `return 0`.
+#
+# The EXACT status, not merely non-zero: a traceback also exits non-zero, and
+# "could not look" must never read as "found something".
+expect_status() {
+  [ "$_status" -eq "$2" ] || fail "$1
+  expected exit status: $2
+  actual exit status:   $_status
+  actual output: $_out"
 }
 
 # The whole line, matched literally. Substring-matching the reason alone would
 # also accept a line that carried a second, unexpected reason beside it.
 expect_line() {
   local label="$1" want="$2" out
-  out="$(run)"
+  run; out="$_out"
   if ! printf '%s\n' "$out" | grep -qxF -- "$want"; then
     fail "$label
   expected line: $want
   actual output: $out"
   fi
+  expect_status "$label: reported the finding but exited wrong" 1
   printf '  ok  %s\n' "$label"
 }
 
 expect_text() {
   local label="$1" want="$2" out
-  out="$(run)"
+  run; out="$_out"
   if ! printf '%s\n' "$out" | grep -qF -- "$want"; then
     fail "$label
   expected text: $want
   actual output: $out"
   fi
+  expect_status "$label: reported the finding but exited wrong" 1
   printf '  ok  %s\n' "$label"
 }
 
 expect_clean() {
   local label="$1" out
-  out="$(run)"
+  run; out="$_out"
   if ! printf '%s\n' "$out" | grep -qxF -- 'no tracked file carries assistant attribution'; then
     fail "$label
   expected the clean-tree message
@@ -78,6 +97,7 @@ expect_clean() {
     fail "$label
   reported a finding on a clean tree: $out"
   fi
+  expect_status "$label: said clean but exited wrong" 0
   printf '  ok  %s\n' "$label"
 }
 
@@ -180,7 +200,7 @@ printf 'a %s\n' "$needle" > "$work/a-first.txt"
 printf 'z %s\n' "$needle" > "$work/z-last.txt"
 expect_text "the summary counts the files it found" \
   "2 tracked files carry attribution"
-ordered="$(run)"
+run; ordered="$_out"
 first="$(printf '%s\n' "$ordered" | grep -n 'a-first.txt' | cut -d: -f1)"
 last="$(printf '%s\n' "$ordered" | grep -n 'z-last.txt' | cut -d: -f1)"
 if [ -z "$first" ] || [ -z "$last" ] || [ "$first" -ge "$last" ]; then
@@ -226,6 +246,91 @@ if ! printf '%s\n' "$commented" | grep -qxF -- "::error file=exempt.txt::carries
 fi
 printf '  ok  %s\n' "a commented-out allowlist entry exempts nothing"
 
+# ── the PATH is published as loudly as the contents ──────────────────────────
+# The rule names a filename explicitly, and a scan of contents alone cannot see
+# one. Each fixture below is innocuous INSIDE, so only the path scan can catch it.
+rm -f "$work"/*.txt "$work"/*.md 2>/dev/null || true
+git -C "$work" add -A >/dev/null 2>&1 || true
+
+printf 'nothing to declare\n' > "$work/$needle.md"
+expect_line "the marker in a filename is caught" \
+  "::error file=$needle.md::carries $needle (in the path)"
+rm "$work/$needle.md"
+
+mkdir -p "$work/docs/$needle-assets"
+printf 'nothing to declare\n' > "$work/docs/$needle-assets/readme.txt"
+expect_line "the marker in a directory component is caught" \
+  "::error file=docs/$needle-assets/readme.txt::carries $needle (in the path)"
+rm -r "$work/docs"
+
+upper="$(printf '%s' "$needle" | tr '[:lower:]' '[:upper:]')"
+printf 'nothing to declare\n' > "$work/$upper.md"
+expect_line "an uppercase filename is caught, and reported lower-cased" \
+  "::error file=$upper.md::carries $needle (in the path)"
+rm "$work/$upper.md"
+
+# ...and the path scan must not MASK the content scan: a clean path with dirty
+# contents still reports the content reason, with no "(in the path)" suffix.
+printf 'x %s\n' "$needle" > "$work/plain.txt"
+expect_line "a clean path with dirty contents reports only the content reason" \
+  "::error file=plain.txt::carries $needle"
+rm "$work/plain.txt"
+expect_clean "the tree is clean once the path fixtures are removed"
+
+# ── "could not look" must not read as "clean" ────────────────────────────────
+# Both of these reported a clean tree and exited 0 before this change.
+printf 'readable for now\n' > "$work/locked.txt"
+git -C "$work" add -A >/dev/null
+chmod 000 "$work/locked.txt"
+# Invoked directly rather than through run(): run() re-stages, and `git add`
+# itself fails on a mode-000 file, so the harness would never reach the checker.
+# The file is already tracked, which is the only precondition that matters here.
+if _out="$(python3 "$check" "$work" 2>&1)"; then _status=0; else _status=$?; fi
+if ! printf '%s\n' "$_out" | grep -q 'locked.txt.*could not be read'; then
+  chmod 644 "$work/locked.txt"; rm -f "$work/locked.txt"
+  fail "an unreadable tracked file was not reported
+  actual output: $_out"
+fi
+expect_status "an unreadable tracked file is reported, not skipped" 1
+printf '  ok  %s\n' "an unreadable tracked file is reported, not skipped"
+chmod 644 "$work/locked.txt"; rm "$work/locked.txt"
+
+ln -s nowhere/at/all "$work/ghost.txt"
+run
+if ! printf '%s\n' "$_out" | grep -q 'ghost.txt.*could not be read'; then
+  rm -f "$work/ghost.txt"
+  fail "a dangling symlink was not reported
+  actual output: $_out"
+fi
+expect_status "a dangling symlink is reported, not skipped" 1
+printf '  ok  %s\n' "a dangling symlink is reported, not skipped"
+rm "$work/ghost.txt"
+expect_clean "the tree is clean once the unreadable fixtures are removed"
+
+# ── the manifest namespace, which had no fixture at all ──────────────────────
+# It is FOUR bytes. Matched as a bare substring it collides with base64: it
+# refused an npm lockfile whose only crime was an integrity hash containing
+# those four characters. Both directions are asserted, because an anchor that
+# is too tight stops catching real manifests and no existing case would notice.
+ns="$(printf '\x63\x32\x70\x61')"
+printf '<svg xmlns:%s="http://example.invalid/ns"><g/></svg>\n' "$ns" > "$work/manifest.svg"
+expect_line "a declared manifest namespace is caught" \
+  "::error file=manifest.svg::carries $ns"
+rm "$work/manifest.svg"
+
+printf '<x><%s:claim/></x>\n' "$ns" > "$work/qualified.xml"
+expect_line "a namespace-qualified name is caught" \
+  "::error file=qualified.xml::carries $ns"
+rm "$work/qualified.xml"
+
+# The negative, which is the one that was failing in production: the four
+# characters inside a base64 integrity hash, with no manifest anywhere.
+printf '{"integrity":"sha512-R8gLRTZeyp03ymzP6Lil28tGeGEzhx1q2k703KGWRAI1VdvPIXdG70VJ%sMw3NA6JKL5hhFu1sJX0Mnn"}\n' "$ns" > "$work/package-lock.json"
+expect_clean "four characters inside an integrity hash are not a manifest"
+rm "$work/package-lock.json"
+
 echo "self-test passed: plain text, binary metadata, base64 long and short, a"
 echo "permitted compressed chunk, a forbidden chunk type, the summary count,"
-echo "the listing order and the allowlist each proved by their own message"
+echo "the listing order, the allowlist, the path scan, the unreadable-file"
+echo "report and the manifest namespace each proved by their own message AND"
+echo "their own exit status"
