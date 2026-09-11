@@ -151,7 +151,9 @@ def findings(path):
         padded = run + b"=" * (-len(run) % 4)
         try:
             decoded = base64.b64decode(padded, validate=False)
-        except Exception:
+        except Exception:  # noqa: S112 - a run that will not decode is simply
+            # not base64. That is the common case, not an error worth logging:
+            # every long alphanumeric token in the tree reaches this line.
             continue
         scan(decoded, " (base64)")
 
@@ -169,8 +171,14 @@ def findings(path):
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     allow = load_allowlist()
-    listing = subprocess.run(
-        ["git", "-C", root, "ls-files", "-z"], capture_output=True, check=True
+    # S603/S607 are suppressed rather than fixed, with reason: the argv is a
+    # fixed list with no shell, and `root` is this script's own argument, not
+    # untrusted input. Resolving an absolute path for `git` would break the
+    # runners and developer machines that rely on PATH, which is every one.
+    listing = subprocess.run(  # noqa: S603
+        ["git", "-C", root, "ls-files", "-z"],  # noqa: S607
+        capture_output=True,
+        check=True,
     ).stdout
     bad = {}
     for blob in listing.split(b"\0"):
