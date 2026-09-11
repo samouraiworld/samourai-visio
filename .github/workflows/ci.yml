@@ -59,6 +59,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Prove the dot-entry gate can still refuse before trusting it to pass.
+      # The same reasoning the icon and preflight jobs already apply here.
+      - run: scripts/check-tracked-dot-entries.selftest.sh
       - run: scripts/check-hygiene.sh
       # The static half of the digest gate, and its self-test, need no
       # Docker; the rendered half runs in Compose merge below.
