@@ -1,0 +1,24 @@
+# Every dot-named path component this repository tracks, one per line.
+#
+# WHY AN ALLOWLIST AND NOT A DENYLIST. Development tooling keeps its local
+# configuration in a dot-directory at the repository root. Those directories
+# are not ours, they are not in .gitignore, and a single `git add .` commits
+# one. This repository is public, so what lands there is published.
+#
+# A denylist can only refuse the tool someone already thought of, and writing
+# a tool's directory name into this repository is itself the thing being
+# avoided. An allowlist refuses everything nobody has vouched for, names none
+# of them, and keeps working for tools that do not exist yet.
+#
+# ADDING A LINE IS A DECISION, not a way to make the gate quiet. A new entry
+# says: this dot-entry belongs in version control, someone looked at it, and
+# it carries nothing local, personal or machine-specific.
+#
+# Removing a tracked dot-entry means removing its line too. An entry matching
+# nothing is a stale excuse, and the check fails on it for the same reason it
+# fails on an unknown one.
+
+.editorconfig
+.github
+.gitignore
+.yamllint.yml

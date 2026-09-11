@@ -43,13 +43,25 @@ jobs:
           curl -sSfL -o /tmp/gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
-          /tmp/gitleaks detect --source . --redact --verbose --exit-code 1
+          # The history that reaches THIS ref, not every ref. fetch-depth 0
+          # brings every branch into the checkout and gitleaks defaults to
+          # `--all`, so an unrelated branch that mirrors an upstream history
+          # (test fixtures with fake keys, placeholder secrets in dist files)
+          # turned every pull request red. HEAD is the merge ref on a pull
+          # request — the PR's commits plus everything main already carries,
+          # which is exactly what a merge would bring in — and main itself on
+          # push. A branch's own history is scanned when a PR proposes it.
+          /tmp/gitleaks detect --source . --redact --verbose --exit-code 1 \
+            --log-opts="--full-history --diff-filter=tuxdb HEAD"
 
   hygiene:
     name: Repo hygiene
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # Prove the dot-entry gate can still refuse before trusting it to pass.
+      # The same reasoning the icon and preflight jobs already apply here.
+      - run: scripts/check-tracked-dot-entries.selftest.sh
       - run: scripts/check-hygiene.sh
 
   lint:

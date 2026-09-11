@@ -55,14 +55,27 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     # Room slugs ARE the access secret, so a full-URL Referer must never leave
     # this origin — a shared room link in a Referer header is a room invite.
-    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    # `same-origin`, which is also what Django emits on every /api response
+    # (SECURE_REFERRER_POLICY default). It used to be
+    # `strict-origin-when-cross-origin` here, so /api carried BOTH values and
+    # browsers took the last one — the looser one. One value, and the proxy
+    # blocks below hide Django's copy so it is emitted exactly once. Nothing
+    # the SPA talks to cross-origin reads Referer: CORS uses the Origin
+    # header, the LiveKit websocket and the OIDC redirect carry their own
+    # parameters.
+    add_header Referrer-Policy "same-origin" always;
     # SAMOURAI-END
 
     location @proxy_to_meet_backend {
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        # SAMOURAI-BEGIN single HSTS
+        # SAMOURAI-BEGIN single header set
         proxy_hide_header Strict-Transport-Security;
+        # Django's SecurityMiddleware sets these two as well; without the
+        # hides /api answered with each of them twice (verified live), and a
+        # differing Referrer-Policy value let the looser one win.
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header Referrer-Policy;
         # SAMOURAI-END
 
         proxy_redirect off;
@@ -72,8 +85,13 @@ server {
     location @proxy_to_meet_frontend {
         proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        # SAMOURAI-BEGIN single HSTS
+        # SAMOURAI-BEGIN single header set
         proxy_hide_header Strict-Transport-Security;
+        # Django's SecurityMiddleware sets these two as well; without the
+        # hides /api answered with each of them twice (verified live), and a
+        # differing Referrer-Policy value let the looser one win.
+        proxy_hide_header X-Content-Type-Options;
+        proxy_hide_header Referrer-Policy;
         # SAMOURAI-END
 
         proxy_redirect off;
@@ -164,13 +182,41 @@ server {
     # Degrades safely: a stale cookie still reaches the SPA, which falls back
     # to its own JS redirect. no-store so a browser cannot cache the redirect
     # and keep bouncing a user who has since signed in.
+    #
+    # The four security headers are REPEATED inside the `if`: nginx inherits
+    # add_header from the enclosing level only when the current level sets
+    # none, and an `if` block is a level of its own. With Cache-Control alone
+    # here, the 302 every cookieless visit to the bare domain receives shipped
+    # no HSTS and no CSP at all (verified live). The values must stay
+    # identical to the server-level block above; preflight asserts both.
     location = / {
         if ($cookie_meet_sessionid = "") {
             add_header Cache-Control "no-store" always;
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+            add_header Content-Security-Policy "frame-ancestors 'self'" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header Referrer-Policy "same-origin" always;
             return 302 /accueil/;
         }
         try_files $uri @proxy_to_meet_frontend;
     }
+    # SAMOURAI-END
+
+    # SAMOURAI-BEGIN security.txt (RFC 9116) and the rest of /.well-known/
+    # Answered here, from the template, so it needs no extra mount and gets
+    # the server-level headers (this location sets no add_header of its own).
+    # `Expires` is the one calendar date the RFC makes mandatory; keep it
+    # under a year ahead and renew it — `preflight.sh public` goes red thirty
+    # days before it lapses. Everything else under /.well-known/ is a 404:
+    # the SPA fallback used to answer 200 text/html for any such path, which
+    # made a missing security.txt look like a served one. ACME challenges are
+    # unaffected — nginx-proxy answers /.well-known/acme-challenge/ itself
+    # and never forwards them here.
+    location = /.well-known/security.txt {
+        default_type text/plain;
+        return 200 "Contact: mailto:security@samourai.app\nExpires: 2027-09-01T00:00:00Z\nPreferred-Languages: fr, en\nCanonical: https://$http_host/.well-known/security.txt\n";
+    }
+    location /.well-known/ { return 404; }
     # SAMOURAI-END
 
     location / {
