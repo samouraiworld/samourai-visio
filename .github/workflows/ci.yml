@@ -54,6 +54,26 @@ jobs:
           /tmp/gitleaks detect --source . --redact --verbose --exit-code 1 \
             --log-opts="--full-history --diff-filter=tuxdb HEAD"
 
+  attribution:
+    name: Vendor attribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      # The self-test runs first, so every pipeline re-proves the check can
+      # still fail — and fails for the right reason. It asserts the message the
+      # check prints AND its exit status. The message because this check has
+      # several independent ways of finding something and one bit cannot tell a
+      # working branch from a silently broken one; the exit status because that
+      # one bit is the whole of what this job consumes. Asserting only the
+      # message let the refusal be flipped to a pass while all 13 cases passed.
+      - name: Prove this check can fail
+        run: .github/scripts/check-vendor-attribution.selftest.sh
+      # Reads every tracked file as bytes, decodes base64 runs and inflates
+      # compressed PNG text chunks: both of the ways attribution actually
+      # arrived in this org are invisible to a recursive grep.
+      - name: No tracked file carries assistant attribution
+        run: python3 .github/scripts/check-vendor-attribution.py .
+
   hygiene:
     name: Repo hygiene
     runs-on: ubuntu-latest
