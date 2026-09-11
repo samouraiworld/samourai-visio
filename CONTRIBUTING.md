@@ -34,6 +34,13 @@ All four run in CI on every push and pull request, and are required to merge.
 job is advisory, and a failure there means the next version bump needs a fresh
 drift analysis, not that your PR is broken.
 
+## Assistant attribution — hard rule
+- Never name an AI assistant, its vendor, or a model anywhere in this repository: not in a tracked file, a filename, a commit message, a PR title or body, a branch name, a tag, or a release note. No vendor-named instruction file — conventions live in `AGENTS.md` — no `Co-Authored-By:` trailer, no "generated with" footer or badge, no link to a vendor's site.
+- **It covers binary and encoded content too.** Attribution has reached these repositories inside PNG text chunks and base64-encoded provenance manifests, where a recursive grep cannot see it: `grep -ri` skips binaries, and an encoded name is not text at all. A grep is not sufficient evidence.
+- **Verify before pushing:** `python3 .github/scripts/check-vendor-attribution.py .`. If this repository does not have the script yet, copy it and its self-test from `samourai-internal` — the rule applies here whether or not CI enforces it here.
+- Naming a *third-party* tool is fine: a competitor in a pricing benchmark, or an editor a template supports. What is forbidden is attribution of the assistant used to produce the work.
+- This is a hard rule, not a style preference. It is not waivable in review, and it holds on every branch and in every repository in this org.
+
 ## Deploy preflight
 
 `scripts/preflight.sh {config|stack|public}` runs on the host at deploy time —
