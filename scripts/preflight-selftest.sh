@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Self-test for preflight.sh `config` phase.
+# Self-test for preflight.sh: the `config` phase against a fixture on disk,
+# and the `edge` phase (the response-header subset of `public`) against a
+# local HTTP stub.
 #
 # The entire premise of preflight is that its checks can FAIL when the thing
 # they test is broken. This proves it: build a good fixture, assert it passes,
@@ -7,16 +9,17 @@
 # If a mutation stops tripping its check, preflight has silently rotted into
 # the very thing it exists to prevent — a check that always passes.
 #
-# Runs in CI. Needs docker compose (for the merge/pinning checks) and the repo
-# templates; no host, no secrets, no network beyond fetching upstream compose.
+# Runs in CI. Needs the repo templates and python3 (for the stub); no host,
+# no secrets, no network beyond fetching upstream compose.
 
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 1
 
 WORK="$(mktemp -d)"
+STUB_PID=""
 # Inlined rather than a named function: shellcheck flags an unreachable trap
 # body (SC2317/SC2329) differently across versions, and this avoids both.
-trap 'chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
+trap '[ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null; chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
 
 export VISIO_DIR="$WORK"
 rc=0
@@ -146,6 +149,27 @@ mutate 's|^    location ~ \^/admin .*||' nginx/default.conf.template "admin 404 
 mutate 's|\$cookie_meet_sessionid|$cookie_sessionid|' nginx/default.conf.template "share-card redirect keyed on the wrong session cookie name"
 mutate 's|^    add_header Content-Security-Policy .*||' nginx/default.conf.template "CSP frame-ancestors header dropped"
 mutate 's|^        proxy_hide_header Strict-Transport-Security;||' nginx/default.conf.template "HSTS no longer hidden from upstream (the 60s policy would win)"
+# The header set Django also emits. Each mutation targets one line of one
+# scope, so the indentation anchors matter: 4 spaces is the server level, 8
+# the proxy blocks, 12 the if-block inside `location = /`.
+mutate_re 's|^        proxy_hide_header Referrer-Policy;||' nginx/default.conf.template \
+  'proxy_hide_header short' "Django's Referrer-Policy no longer hidden (two values on /api; the browser takes the last)"
+mutate_re 's|^        proxy_hide_header X-Content-Type-Options;||' nginx/default.conf.template \
+  'proxy_hide_header short' "Django's X-Content-Type-Options no longer hidden (arrives twice on /api)"
+mutate_re 's|^    add_header Referrer-Policy "same-origin"|    add_header Referrer-Policy "strict-origin-when-cross-origin"|' \
+  nginx/default.conf.template 'Referrer-Policy is not same-origin' \
+  "gateway Referrer-Policy loosened away from Django's value (with Django's copy hidden, the loose one is all that is left)"
+mutate_re 's|^            add_header Strict-Transport-Security .*||' nginx/default.conf.template \
+  'the / redirect drops' "HSTS dropped from the / redirect's if-block (the scope bug that shipped a bare 302)"
+mutate_re 's|^            add_header Referrer-Policy "same-origin"|            add_header Referrer-Policy "no-referrer-when-downgrade"|' \
+  nginx/default.conf.template "redirect's copy of these headers differs" \
+  "the / redirect's Referrer-Policy copy edited on its own (one file, two policies)"
+mutate_re 's|^        default_type text/plain;||' nginx/default.conf.template \
+  'security.txt block incomplete' "security.txt without default_type (it would go out as the SPA's text/html)"
+mutate_re 's|Contact: mailto:|Contact: |' nginx/default.conf.template \
+  'security.txt block incomplete' "security.txt Contact no longer a mailto: URI"
+mutate_re 's|^    location /\.well-known/ { return 404; }||' nginx/default.conf.template \
+  'security.txt block incomplete' "the /.well-known/ 404 catch-all removed (the SPA shell answers any well-known path again)"
 mutate '\|nginx/default.conf.template|d' compose.override.yaml "gateway mount dropped (upstream's template would silently mount instead)"
 mutate 's/^MaxRetentionSec=7day/MaxRetentionSec=1month/' etc/systemd/journald.conf.d/visio-retention.conf "journal retention loosened beyond the published 7 days"
 mutate 's/"log-driver": "journald"/"log-driver": "json-file"/' etc/docker/daemon.json "docker default log driver reverted to json-file"
@@ -228,6 +252,112 @@ mv "$WORK/visio-retention.conf.hidden" "$WORK/etc/systemd/journald.conf.d/visio-
 echo "final: fixture restored"
 n="$(fails)"
 if [ "$n" -eq 0 ]; then ok "0 failures after all reverts"; else err "fixture not clean after reverts ($n)"; fi
+
+# ── edge: the public response-header checks, against a local stub ───────────
+# `preflight.sh public` runs against the live host, which a self-test must
+# never mutate. Its header subset is reachable alone as the `edge` phase with
+# VISIO_PUBLIC_ORIGIN pointed at this stub, whose MODE file breaks one thing
+# per request — the same one-mutation-at-a-time shape as the fixture above.
+# Good mode answers exactly what the gateway template is written to answer:
+# a 302 on / with the four headers, /api with each header once, security.txt
+# as text/plain with a future Expires, and a 404 for any other well-known path.
+echo "edge: header checks against a local stub"
+cat > "$WORK/stub.py" <<'PYSTUB'
+import datetime, http.server, sys
+MODE_FILE = sys.argv[1]
+
+
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def mode(self):
+        try:
+            return open(MODE_FILE).read().strip()
+        except OSError:
+            return ""
+
+    def sec(self, hsts=True):
+        if hsts:
+            self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")
+
+    def body(self, code, ctype, data, extra=()):
+        self.send_response(code)
+        if ctype:
+            self.send_header("Content-Type", ctype)
+        self.sec()
+        for k, v in extra:
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        m = self.mode()
+        if self.path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/accueil/")
+            self.send_header("Cache-Control", "no-store")
+            self.sec(hsts=(m != "root-no-hsts"))
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if self.path == "/api/v1.0/config/":
+            extra = [("Referrer-Policy", "strict-origin-when-cross-origin")] if m == "api-dup-referrer" else []
+            return self.body(200, "application/json", b"{}", extra)
+        if self.path == "/.well-known/security.txt" and m != "securitytxt-missing":
+            if m == "securitytxt-expired":
+                exp = "2000-01-01T00:00:00Z"
+            else:
+                exp = (datetime.datetime.now(datetime.timezone.utc)
+                       + datetime.timedelta(days=200)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            text = f"Contact: mailto:security@example.org\nExpires: {exp}\nPreferred-Languages: fr, en\n"
+            ctype = "text/html" if m == "securitytxt-html" else "text/plain; charset=utf-8"
+            return self.body(200, ctype, text.encode())
+        if self.path.startswith("/.well-known/") and m != "wellknown-spa":
+            return self.body(404, "text/plain", b"")
+        return self.body(200, "text/html", b"<html>spa shell</html>")
+
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+print(srv.server_address[1], flush=True)
+srv.serve_forever()
+PYSTUB
+: > "$WORK/stub.mode"
+python3 "$WORK/stub.py" "$WORK/stub.mode" > "$WORK/stub.port" 2>/dev/null &
+STUB_PID=$!
+for _ in $(seq 1 50); do [ -s "$WORK/stub.port" ] && break; sleep 0.1; done
+if [ ! -s "$WORK/stub.port" ]; then
+  err "the header stub never reported a port — the edge checks were not exercised"
+else
+  VISIO_PUBLIC_ORIGIN="http://127.0.0.1:$(cat "$WORK/stub.port")"
+  export VISIO_PUBLIC_ORIGIN
+  efails() { bash scripts/preflight.sh edge 2>/dev/null | grep -c 'FAIL'; }
+  n="$(efails)"
+  if [ "$n" -eq 0 ]; then ok "stub in good mode: 0 failures"; else
+    err "stub in good mode reported $n failure(s) — the stub or a check is wrong"
+    bash scripts/preflight.sh edge 2>/dev/null | grep FAIL
+  fi
+  # emutate <mode> <fail-text-regex> <label>: the FAIL text is asserted, as
+  # in mutate_re, so an unrelated red cannot vouch for a check that never fired.
+  emutate() {
+    printf '%s\n' "$1" > "$WORK/stub.mode"
+    local hit; hit="$(bash scripts/preflight.sh edge 2>/dev/null | grep 'FAIL' | grep -c "$2")"
+    if [ "$hit" -ge 1 ]; then ok "detected: $3"; else err "NOT detected: $3"; fi
+    : > "$WORK/stub.mode"
+  }
+  emutate root-no-hsts        'the / redirect ships'      "HSTS missing from the / redirect (the if-block scope bug, as served)"
+  emutate api-dup-referrer    'duplicate or conflicting'  "a second, looser Referrer-Policy on /api (the browser takes the last)"
+  emutate securitytxt-html    'security.txt answers'      "security.txt served as text/html (the SPA fallback shape)"
+  emutate securitytxt-missing 'security.txt answers'      "security.txt absent (404)"
+  emutate securitytxt-expired 'security.txt expires'      "security.txt past its Expires date (must not be trusted)"
+  emutate wellknown-spa       'well-known/ path answers'  "an unknown /.well-known/ path answered by the SPA shell"
+  n="$(efails)"
+  if [ "$n" -eq 0 ]; then ok "stub back in good mode: 0 failures"; else err "stub not clean after the last mutation ($n)"; fi
+fi
 
 echo
 if [ "$rc" -eq 0 ]; then echo "preflight self-test passed: every check can still fail."
