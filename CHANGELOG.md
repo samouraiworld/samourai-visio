@@ -22,6 +22,7 @@ and this project adheres to
 
 ### Fixed
 
+- 🐛(breakout) leave the meeting before joining a breakout room #63
 - 🐛(breakout) preserve media intent and help state during recovery
 - 🐛(backend) serialize metadata updates and tolerate expired breakout rooms
 - 🐛(backend) allow any printable ASCII characters in user sub field #1673

@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { useLocalParticipant } from '@livekit/components-react'
+import { useLocalParticipant, useRoomContext } from '@livekit/components-react'
 import { useSnapshot } from 'valtio'
 import { fetchApi } from '@/api/fetchApi'
 import { requestEntry } from '@/features/rooms/api/requestEntry'
@@ -11,6 +11,7 @@ import {
   triggerRoomSwap,
 } from '../stores/breakout'
 import { captureMediaIntent } from '../utils/mediaIntent'
+import { swapRoomConnection } from '../utils/roomLifecycle'
 
 interface RoomConnection {
   token: string
@@ -28,6 +29,7 @@ export const useBreakoutRoomSwap = ({
 }: UseBreakoutRoomSwapParams = {}) => {
   const { username } = useSnapshot(userStore)
   const { localParticipant } = useLocalParticipant()
+  const room = useRoomContext()
 
   const beginTransition = useCallback(() => {
     breakoutStore.transitionError = null
@@ -36,11 +38,16 @@ export const useBreakoutRoomSwap = ({
   }, [localParticipant])
 
   const applyConnection = useCallback(
-    (connection: RoomConnection) => {
-      if (setActiveRoomConnection) setActiveRoomConnection(connection)
-      else triggerRoomSwap(connection)
+    async (connection: RoomConnection) => {
+      // Room.connect() returns immediately when the room object is already
+      // connected and never looks at the token, so the meeting has to be left
+      // before the remount hands the breakout token over. See roomLifecycle.
+      await swapRoomConnection(room, connection, (next) => {
+        if (setActiveRoomConnection) setActiveRoomConnection(next)
+        else triggerRoomSwap(next)
+      })
     },
-    [setActiveRoomConnection]
+    [room, setActiveRoomConnection]
   )
 
   const failTransition = useCallback((error: unknown) => {
@@ -75,7 +82,7 @@ export const useBreakoutRoomSwap = ({
         }
         breakoutStore.mainRoomSlug =
           currentRoomSlug ?? breakoutStore.mainRoomSlug
-        applyConnection({
+        await applyConnection({
           token: response.livekit.token,
           roomName: response.livekit.room,
         })
@@ -93,10 +100,10 @@ export const useBreakoutRoomSwap = ({
       const mainSlug = breakoutStore.mainRoomSlug
       if (!mainSlug) return
 
-      // A same-room token swap never reconnects (Room.connect returns early
-      // when already connected), so a "return" from main would leave the
-      // transition overlay up forever. The lost-connection recovery path keeps
-      // currentBreakoutRoomLkName set, so it still passes here.
+      // Nothing to return from: a participant already in the meeting would
+      // otherwise be disconnected and reconnected to the room they are in.
+      // The lost-connection recovery path keeps currentBreakoutRoomLkName set,
+      // so it still passes here.
       if (!breakoutStore.currentBreakoutRoomLkName) return
 
       beginTransition()
@@ -118,7 +125,7 @@ export const useBreakoutRoomSwap = ({
           return
         }
         breakoutStore.isModeratorVisiting = false
-        applyConnection({
+        await applyConnection({
           token: response.livekit.token,
           roomName: response.livekit.room,
         })
