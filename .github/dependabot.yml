@@ -9,11 +9,12 @@ version: 2
 # for ("majors: issue with migration note"), and the migration lands as its
 # own reviewed change.
 #
-# Workflow actions only. The images in deploy/greffon/visio/1.0/docker-compose.yml
-# belong to the mirror-and-pin pipeline described in SUPPLY_CHAIN_POLICY sections
-# 1 to 3, which resolves them by digest with a scan step of its own; a docker
-# ecosystem here would give two sources for the same number. There is no npm
-# entry because this repository ships no JavaScript manifest.
+# Workflow actions and the icon generator's Python only. The images in
+# deploy/compose.override.yaml and deploy/greffon/visio/1.0/docker-compose.yml
+# are pinned by digest and gated by scripts/check-image-digests.sh; a bump is
+# a reviewed change made with scripts/resolve-image-digest.sh (RUNBOOK §10),
+# and a docker ecosystem here would give two sources for the same number.
+# There is no npm entry because this repository ships no JavaScript manifest.
 updates:
   # Every `uses:` in this repository is pinned to a full commit SHA with the
   # readable version in a trailing comment, per samourai-core

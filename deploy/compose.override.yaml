@@ -14,10 +14,17 @@
 #
 # NEVER run bare `docker compose config` against this: it expands env_file and
 # prints every secret. Use --no-env-resolution, or --images for tags.
+#
+# Every image is `tag@sha256:digest`. The tag says which release it is; the
+# digest is what Docker verifies, and it is the only part a registry owner
+# cannot move under a running deployment. Resolve a new one with
+# scripts/resolve-image-digest.sh (RUNBOOK §10); CI refuses a reference
+# without one (scripts/check-image-digests.sh), and so does
+# `preflight.sh stack`.
 ---
 services:
   postgresql:
-    image: postgres:16
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
     restart: unless-stopped
     # journald, not json-file: the privacy policy promises IP-bearing logs are
     # deleted after 7 days, and json-file rotates by SIZE only — at low
@@ -41,7 +48,7 @@ services:
     #
     # noeviction because this Redis holds sessions: under an LRU policy Redis
     # would silently evict logged-in users to reclaim memory.
-    image: redis:7.4-alpine
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:
@@ -54,7 +61,7 @@ services:
     logging: *logging
 
   backend:
-    image: lasuite/meet-backend:v1.24.0
+    image: lasuite/meet-backend:v1.24.0@sha256:7bce6e6100e8ee56373763580fbfcb2aedb0137e7a70dc7f9d2862fcecc44f92
     restart: unless-stopped
     volumes:
       # MEDIA_ROOT ONLY — never the whole /data.
@@ -79,7 +86,7 @@ services:
     logging: *logging
 
   frontend:
-    image: lasuite/meet-frontend:v1.24.0
+    image: lasuite/meet-frontend:v1.24.0@sha256:96a12f920d31fd686f90021999c23a5d22b96af075f7a8a687173925da8b0b5b
     restart: unless-stopped
     environment:
       - VIRTUAL_HOST=${MEET_HOST}
@@ -147,7 +154,7 @@ services:
     logging: *logging
 
   livekit:
-    image: livekit/livekit-server:v1.13.4
+    image: livekit/livekit-server:v1.13.4@sha256:189f7c81b704a36642bc5c7e2d3e1ae83744627c11978a23a251bf19fbec64e0
     restart: unless-stopped
     environment:
       - VIRTUAL_HOST=${LIVEKIT_HOST}

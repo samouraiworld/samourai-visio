@@ -8,6 +8,8 @@ version: "3"
 #   - No recording in v1: no MinIO, no Celery, no object storage.
 #   - Pins v1.24.0 (demo is v1.19.0) and applies our verified config fixes
 #     (profile scope, comma-separated OIDC lists, preferred_username, PKCE).
+#   - Every image is tag@sha256:digest, the same rule and the same gate as
+#     deploy/compose.override.yaml (scripts/check-image-digests.sh).
 #   - Our theme is injected at /custom/style.css.
 #
 # Single public origin (Greffon terminates TLS and fronts the gateway):
@@ -21,7 +23,7 @@ services:
     # Declared FIRST: the greffer enumerates ports in service order, and the
     # CI smoke harness probes the first one — it must land on this HTTP gateway,
     # not livekit's L4 media port.
-    image: nginx:1.25
+    image: nginx:1.25@sha256:a484819eb60211f5299034ac80f6a681b06f89e65866ce91f356ed7c72af059c
     restart: on-failure
     depends_on:
       - backend
@@ -33,7 +35,7 @@ services:
       - "8083:8083"
 
   postgresql:
-    image: postgres:16
+    image: postgres:16@sha256:f1c3376c26f2609ab9f29f71f824103fe2fcd8ee0346485cb6122a4f93df6f94
     restart: on-failure
     environment:
       POSTGRES_DB: meet
@@ -45,14 +47,14 @@ services:
   redis:
     # 7-alpine + appendonly: sessions are cache-backed into Redis, so an
     # unpersisted Redis would log everyone out on restart.
-    image: redis:7.4-alpine
+    image: redis:7.4-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     restart: on-failure
     command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
     volumes:
       - redis_data:/data
 
   livekit:
-    image: livekit/livekit-server:v1.13.4
+    image: livekit/livekit-server:v1.13.4@sha256:189f7c81b704a36642bc5c7e2d3e1ae83744627c11978a23a251bf19fbec64e0
     restart: on-failure
     command: ["--config", "/etc/livekit.yaml"]
     volumes:
@@ -63,7 +65,7 @@ services:
       - "7882:7882/udp"
 
   backend:
-    image: lasuite/meet-backend:v1.24.0
+    image: lasuite/meet-backend:v1.24.0@sha256:7bce6e6100e8ee56373763580fbfcb2aedb0137e7a70dc7f9d2862fcecc44f92
     restart: on-failure
     command: >
       sh -c "python manage.py migrate --no-input &&
@@ -131,7 +133,7 @@ services:
       DJANGO_EMAIL_USE_SSL: '{{ "true" if smtp.tls_mode == "tls" else "false" }}'
 
   frontend:
-    image: lasuite/meet-frontend:v1.24.0
+    image: lasuite/meet-frontend:v1.24.0@sha256:96a12f920d31fd686f90021999c23a5d22b96af075f7a8a687173925da8b0b5b
     restart: on-failure
     depends_on:
       - backend
