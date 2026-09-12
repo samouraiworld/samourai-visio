@@ -6,17 +6,37 @@
 # different failure domain than the instance's local disk, which is the
 # point of "off-box". Create the bucket first (private, fr-par).
 #
-# RCLONE_CONFIG_VISIO_* is rclone's environment-variable remote syntax: it
-# defines a remote named `visio` with no rclone.conf on disk. backup.sh
-# exports exactly these keys — it never sources this file.
+# Two remotes on the same bucket, two API keys, two IAM policies. rclone's
+# environment-variable syntax defines each with no rclone.conf on disk;
+# backup.sh exports exactly one block per run and never sources this file.
+#
+# `visio` — the WRITE key. Used by the nightly `backup.sh` (upload, verify
+# by size, list for the retention invariant) and by restore-drill.sh
+# --remote (list, download). Its policy grants read and write on objects
+# and NOT delete: a key that is handled every night, in the process that
+# also holds the database dump, can then add to the bucket but never empty
+# it. RUNBOOK §8ter shows how to prove the refusal before relying on it.
 RCLONE_CONFIG_VISIO_TYPE=s3
 RCLONE_CONFIG_VISIO_PROVIDER=Scaleway
 RCLONE_CONFIG_VISIO_ENDPOINT=s3.fr-par.scw.cloud
 RCLONE_CONFIG_VISIO_REGION=fr-par
-RCLONE_CONFIG_VISIO_ACCESS_KEY_ID=<Scaleway API access key>
-RCLONE_CONFIG_VISIO_SECRET_ACCESS_KEY=<Scaleway API secret key with Object Storage rights>
+RCLONE_CONFIG_VISIO_ACCESS_KEY_ID=<Scaleway API access key: objects read + write, no delete>
+RCLONE_CONFIG_VISIO_SECRET_ACCESS_KEY=<its secret key>
 
-# remote:bucket/prefix — the `visio` remote defined above.
+# `visioprune` — the DELETE key. Used only by `backup.sh prune` (delete past
+# retention, list for the invariant). A different key from the one above:
+# preflight.sh config refuses the same access key in both blocks, because
+# one key that can write and delete is the single point this split removes.
+RCLONE_CONFIG_VISIOPRUNE_TYPE=s3
+RCLONE_CONFIG_VISIOPRUNE_PROVIDER=Scaleway
+RCLONE_CONFIG_VISIOPRUNE_ENDPOINT=s3.fr-par.scw.cloud
+RCLONE_CONFIG_VISIOPRUNE_REGION=fr-par
+RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=<Scaleway API access key: objects read + delete>
+RCLONE_CONFIG_VISIOPRUNE_SECRET_ACCESS_KEY=<its secret key>
+
+# remote:bucket/prefix — through the `visio` remote. The prune addresses the
+# same bucket/prefix through `visioprune`; backup.sh derives it, so the path
+# is written once.
 BACKUP_REMOTE_PATH=visio:<bucket name>/pg
 
 # Pruning. The privacy policy's retention table publishes the remote number
