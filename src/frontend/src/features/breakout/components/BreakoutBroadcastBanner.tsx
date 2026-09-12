@@ -21,10 +21,7 @@ export const BreakoutBroadcastBanner = ({
   return (
     <div
       className={css({
-        position: 'absolute',
-        top: 4,
-        insetInline: 0,
-        marginInline: 'auto',
+        pointerEvents: 'auto',
         display: 'flex',
         alignItems: 'center',
         flexWrap: 'wrap',

@@ -89,3 +89,8 @@ docker/livekit/rootCA.pem
 
 # Frontend rollup-plugin-visualizer
 /src/frontend/rollup-plugin-visualizer/*
+
+# Local CI and browser acceptance artifacts
+/artifacts/
+/src/e2e/test-results/
+/src/e2e/playwright-report/

@@ -265,6 +265,14 @@ test-breakout-helm: ## prove breakout Helm runtime invariants
 	./src/helm/meet/tests/test-breakout-runtime.sh
 .PHONY: test-breakout-helm
 
+test-ci-local: ## run upstream CI checks and browser acceptance locally
+	./bin/test-ci-local $(ARGS)
+.PHONY: test-ci-local
+
+test-e2e-local: ## run local browser acceptance with isolated services
+	./bin/test-e2e-local $(ARGS)
+.PHONY: test-e2e-local
+
 test-summary: ## run summary tests (pass extra pytest args via ARGS)
 	@args="$(ARGS) $(filter-out $@,$(MAKECMDGOALS))" && \
 	bin/pytest-summary $${args}

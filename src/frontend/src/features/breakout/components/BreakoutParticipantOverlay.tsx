@@ -14,7 +14,6 @@ import { useRequestBreakoutHelp } from '../api/useRequestBreakoutHelp'
 import { useCancelBreakoutHelp } from '../api/useCancelBreakoutHelp'
 import { useCurrentBreakoutAssignment } from '../api/useCurrentBreakoutAssignment'
 import { BreakoutTimer } from './BreakoutTimer'
-import { BreakoutRecallBanner } from './BreakoutRecallBanner'
 import {
   RiArrowGoBackLine,
   RiQuestionLine,
@@ -71,17 +70,8 @@ export const BreakoutParticipantOverlay = ({
 
   return (
     <>
-      <BreakoutRecallBanner
-        onRecall={onReturnToMain}
-        timing={assignmentState}
-        canRecall={isInBreakout}
-      />
       <div
         className={css({
-          position: 'absolute',
-          top: 0.75,
-          insetInline: 0,
-          marginInline: 'auto',
           display: 'flex',
           alignItems: 'center',
           flexWrap: 'wrap',
@@ -165,10 +155,7 @@ export const BreakoutParticipantOverlay = ({
         <div
           role="alert"
           className={css({
-            position: 'absolute',
-            top: 4,
-            insetInline: 0,
-            marginInline: 'auto',
+            pointerEvents: 'auto',
             width: 'fit',
             maxWidth: 'full',
             padding: 0.5,

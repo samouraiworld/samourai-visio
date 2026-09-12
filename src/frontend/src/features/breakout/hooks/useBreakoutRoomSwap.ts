@@ -126,7 +126,7 @@ export const useBreakoutRoomSwap = ({
       try {
         const response = await requestEntry({
           roomId: mainSlug,
-          username: username ?? '',
+          username: username || localParticipant.name || 'anonymous',
         })
         // Record the deliberate-return intent first: the re-entry path below
         // must keep it, or the watcher moves the participant straight back.
@@ -148,7 +148,13 @@ export const useBreakoutRoomSwap = ({
         throw error
       }
     },
-    [applyConnection, beginTransition, failTransition, username]
+    [
+      applyConnection,
+      beginTransition,
+      failTransition,
+      localParticipant,
+      username,
+    ]
   )
 
   const returnToMainRoom = useCallback(

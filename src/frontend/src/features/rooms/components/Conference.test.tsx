@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import type { ComponentProps, ReactNode } from 'react'
+import { useEffect } from 'react'
 import { act, cleanup, render, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { LiveKitRoom } from '@livekit/components-react'
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   data: { id: 'main', livekit: { room: 'main', token: 'initial' } },
   choices: { audioEnabled: false, videoEnabled: false },
   navigate: vi.fn(),
+  connect: vi.fn(),
 }))
 vi.mock('@tanstack/react-query', () => ({
   useQuery: () => ({ status: 'success', data: mocks.data }),
@@ -30,6 +32,19 @@ vi.mock('../api/createRoom', () => ({
 vi.mock('@livekit/components-react', () => ({
   LiveKitRoom: (props: ComponentProps<typeof LiveKitRoom>) => {
     mocks.props = props
+    const connectOptions = JSON.stringify(props.connectOptions)
+    // Mirror the SDK's connection effect: onError is a connection dependency.
+    // An inline callback would reconnect the previous room on store updates.
+    useEffect(() => {
+      if (props.connect) mocks.connect(props.room, props.token)
+    }, [
+      props.connect,
+      props.token,
+      connectOptions,
+      props.room,
+      props.onError,
+      props.serverUrl,
+    ])
     return <div />
   },
   usePersistentUserChoices: () => ({ userChoices: mocks.choices }),
@@ -95,17 +110,28 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-it('uses a fresh Room transport for every token, including same-room reconnects', async () => {
+it('uses a fresh transport for every attempt even when retry tokens are identical', async () => {
   render(<Conference roomId="main" />)
   await waitFor(() => expect(mocks.props?.connect).toBe(true))
   const initialRoom = mocks.props?.room
+  mocks.connect.mockClear()
   act(() =>
     triggerRoomSwap({ roomName: 'breakout_one', token: 'breakout-token' })
   )
   const breakoutRoom = mocks.props?.room
   expect(breakoutRoom).not.toBe(initialRoom)
-  act(() => triggerRoomSwap({ roomName: 'breakout_one', token: 'retry-token' }))
+  expect(mocks.connect).toHaveBeenCalledTimes(1)
+  expect(mocks.connect).toHaveBeenLastCalledWith(breakoutRoom, 'breakout-token')
+  // Tokens minted within the same second can be byte-for-byte identical.
+  act(() =>
+    triggerRoomSwap({ roomName: 'breakout_one', token: 'breakout-token' })
+  )
   expect(mocks.props?.room).not.toBe(breakoutRoom)
+  expect(mocks.connect).toHaveBeenCalledTimes(2)
+  expect(mocks.connect).toHaveBeenLastCalledWith(
+    mocks.props?.room,
+    'breakout-token'
+  )
 })
 
 it('starts bounded recovery when the requested media connection fails', async () => {
@@ -120,4 +146,28 @@ it('starts bounded recovery when the requested media connection fails', async ()
   expect(breakoutStore.connectionLost).toBe(true)
   act(() => vi.advanceTimersByTime(15000))
   expect(mocks.navigate).toHaveBeenCalledTimes(1)
+})
+
+it('does not reconnect a removed room while breakout state prepares its replacement', async () => {
+  render(<Conference roomId="main" />)
+  await waitFor(() => expect(mocks.props?.connect).toBe(true))
+  const previousRoom = mocks.props?.room
+  const previousErrorHandler = mocks.props?.onError
+  mocks.connect.mockClear()
+
+  // LiveKit has removed this connection during reassignment; the watcher
+  // updates the store before the next token request has completed.
+  await act(async () => {
+    breakoutStore.activeSessionId = 'session'
+    breakoutStore.connectionLost = true
+    breakoutStore.isTransitioning = true
+    breakoutStore.pendingMediaIntent = { camera: false, microphone: false }
+  })
+  expect(mocks.connect).not.toHaveBeenCalled()
+  expect(mocks.props?.onError).toBe(previousErrorHandler)
+
+  act(() => triggerRoomSwap({ roomName: 'breakout_one', token: 'next-token' }))
+  expect(mocks.connect).toHaveBeenCalledTimes(1)
+  expect(mocks.connect).toHaveBeenCalledWith(mocks.props?.room, 'next-token')
+  expect(mocks.props?.room).not.toBe(previousRoom)
 })

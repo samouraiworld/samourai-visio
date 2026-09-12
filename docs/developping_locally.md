@@ -143,3 +143,9 @@ $ make start-tilt-keycloak
 ```
 
 Monitor Tilt’s progress at [http://localhost:10350/](http://localhost:10350/). After Tilt actions finish, you can access the app at [https://meet.127.0.0.1.nip.io/](https://meet.127.0.0.1.nip.io/).
+
+## Local CI and browser acceptance
+
+Run `make test-ci-local` to execute the upstream-derived CI checks and browser
+acceptance in isolated local services. See [Local CI](local-ci.md) for prerequisites,
+results, and workflow correspondence.

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
@@ -58,6 +58,7 @@ import {
 } from '@/features/breakout/stores/breakout'
 import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
 import { BreakoutParticipantOverlay } from '@/features/breakout/components/BreakoutParticipantOverlay'
+import { BreakoutRecallBanner } from '@/features/breakout/components/BreakoutRecallBanner'
 import { BreakoutBroadcastBanner } from '@/features/breakout/components/BreakoutBroadcastBanner'
 import { BreakoutHelpAlertBanner } from '@/features/breakout/components/BreakoutHelpAlertBanner'
 import { useBreakoutMetadataWatcher } from '@/features/breakout/hooks/useBreakoutMetadataWatcher'
@@ -155,21 +156,69 @@ const BreakoutActions = ({
   return (
     <>
       {snap.activeSessionId && snap.assignedRoomId && (
-        <BreakoutParticipantOverlay
-          roomId={mainRoomId}
-          onReturnToMain={returnToMainRoom}
-          onReturnToAssigned={() => {
-            const assignment = assignmentState?.assignment
-            if (!assignment || !snap.activeSessionId) return
-            void moveToBreakoutRoom(
-              assignment.breakout_room_id,
-              snap.activeSessionId,
-              mainRoomId,
-              assignment.breakout_room_name
-            ).catch(() => undefined)
-          }}
+        <BreakoutRecallBanner
+          onRecall={returnToMainRoom}
+          timing={assignmentState}
+          canRecall={!!snap.currentBreakoutRoomLkName}
         />
       )}
+      <div
+        className={css({
+          position: 'absolute',
+          top: 0.75,
+          insetInline: 0,
+          marginInline: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 0.625,
+          width: 'full',
+          maxWidth: 'room-side-panel',
+          zIndex: 100,
+          pointerEvents: 'none',
+        })}
+      >
+        {snap.activeSessionId && snap.assignedRoomId && (
+          <BreakoutParticipantOverlay
+            roomId={mainRoomId}
+            onReturnToMain={returnToMainRoom}
+            onReturnToAssigned={() => {
+              const assignment = assignmentState?.assignment
+              if (!assignment || !snap.activeSessionId) return
+              void moveToBreakoutRoom(
+                assignment.breakout_room_id,
+                snap.activeSessionId,
+                mainRoomId,
+                assignment.breakout_room_name
+              ).catch(() => undefined)
+            }}
+          />
+        )}
+        {snap.transitionError && !snap.assignedRoomId && (
+          <div
+            role="alert"
+            className={css({
+              pointerEvents: 'auto',
+              width: 'fit',
+              maxWidth: 'full',
+              padding: 0.5,
+              borderRadius: '8',
+              backgroundColor: 'danger',
+              color: 'danger.text',
+            })}
+          >
+            {t('actionError')}
+          </div>
+        )}
+        {snap.broadcastAnnouncement && (
+          <BreakoutBroadcastBanner
+            message={snap.broadcastAnnouncement.message}
+            onDismiss={() => {
+              breakoutStore.broadcastAnnouncement = null
+            }}
+          />
+        )}
+      </div>
       {helpRequest && (
         <BreakoutHelpAlertBanner
           roomName={helpRequest.breakout_room_name}
@@ -203,26 +252,6 @@ const BreakoutActions = ({
           }}
           onDismiss={handleAcknowledge}
         />
-      )}
-      {snap.transitionError && !snap.assignedRoomId && (
-        <div
-          role="alert"
-          className={css({
-            position: 'fixed',
-            top: 4,
-            insetInline: 0,
-            marginInline: 'auto',
-            width: 'fit',
-            maxWidth: 'full',
-            padding: 0.5,
-            borderRadius: '8',
-            backgroundColor: 'danger',
-            color: 'danger.text',
-            zIndex: 'toast',
-          })}
-        >
-          {t('actionError')}
-        </div>
       )}
     </>
   )
@@ -286,29 +315,41 @@ export const Conference = ({
   })
 
   // ── Breakout rooms: in-component room swap ──
-  const [activeRoomConnection, setActiveRoomConnection] = useState<{
+  const [activeRoomConnection, setRoomConnectionState] = useState<{
     token: string | undefined
     roomName: string | undefined
-  }>({ token: undefined, roomName: undefined })
+    attempt: number
+  }>({ token: undefined, roomName: undefined, attempt: 0 })
+
+  const setActiveRoomConnection = useCallback(
+    (connection: { token: string; roomName: string }) => {
+      setRoomConnectionState((previous) => ({
+        ...connection,
+        attempt: previous.attempt + 1,
+      }))
+    },
+    []
+  )
 
   useEffect(() => {
-    return registerRoomSwapHandler(
-      setActiveRoomConnection as (conn: {
-        token: string
-        roomName: string
-      }) => void
-    )
+    return registerRoomSwapHandler(setActiveRoomConnection)
   }, [setActiveRoomConnection])
 
   // Sync initial token from API data
   useEffect(() => {
     if (data?.livekit && !activeRoomConnection.token) {
-      setActiveRoomConnection({
-        token: data.livekit.token,
-        roomName: data.livekit.room,
-      })
+      const initialConnection = data.livekit
+      setRoomConnectionState((previous) =>
+        previous.token
+          ? previous
+          : {
+              token: initialConnection.token,
+              roomName: initialConnection.room,
+              attempt: previous.attempt,
+            }
+      )
     }
-  }, [data?.livekit, activeRoomConnection.token, setActiveRoomConnection])
+  }, [data?.livekit, activeRoomConnection.token])
 
   // Sync main room UUID and slug into breakout store
   useEffect(() => {
@@ -351,13 +392,14 @@ export const Conference = ({
     userConfig.audioOutputDeviceId,
   ])
 
-  // Each token gets its own transport: an old provider's unmount cleanup
-  // must never disconnect the replacement connection, even for the same room.
+  // Each attempt gets its own transport, even when same-second JWTs match.
+  // Old provider cleanup must never disconnect the replacement connection.
   const connectionToken = activeRoomConnection.token ?? data?.livekit?.token
+  const connectionAttempt = activeRoomConnection.attempt
   const room = useMemo(() => {
-    void connectionToken
+    void connectionAttempt
     return new Room(roomOptions)
-  }, [roomOptions, connectionToken])
+  }, [roomOptions, connectionAttempt])
 
   useEffect(() => {
     /**
@@ -410,6 +452,30 @@ export const Conference = ({
 
   const { recoverSession, stopRecovery } = useBreakoutRecovery(roomId)
 
+  // LiveKit's connection effect depends on onError. Keep it stable while the
+  // store changes during a swap, or the old token reconnects the room we left.
+  const handleRoomError = useCallback(
+    (error: Error) => {
+      const failure = getMediaDeviceFailure(error)
+      if (failure && failure !== MediaDeviceFailure.Other) return
+
+      if (
+        error instanceof ConnectionError &&
+        error.reason === ConnectionErrorReason.Cancelled
+      ) {
+        void captureEvent('connection-cancelled')
+        return
+      }
+
+      const wasTransitioning = breakoutStore.isTransitioning
+      failBreakoutConnection(error)
+      if (wasTransitioning && room.state !== 'connected') recoverSession()
+
+      reportError('livekit_room_error', error, { path: 'connect_publish' })
+    },
+    [recoverSession, room]
+  )
+
   /*
    * Ensure stable WebSocket connection URL. This is critical for legacy browser compatibility
    * (Firefox <124, Chrome <125, Edge <125) where HTTPS URLs in WebSocket() constructor
@@ -448,7 +514,7 @@ export const Conference = ({
         <LiveKitRoom
           room={room}
           serverUrl={serverUrl}
-          key={connectionToken}
+          key={connectionAttempt}
           token={connectionToken}
           connect={isConnectionWarmedUp}
           audio={
@@ -466,27 +532,7 @@ export const Conference = ({
           className={css({
             backgroundColor: 'primaryDark.50 !important',
           })}
-          onError={(e) => {
-            const failure = getMediaDeviceFailure(e)
-            if (failure && failure !== MediaDeviceFailure.Other) return
-
-            // connect() was aborted by a disconnect() before the join completed
-            if (
-              e instanceof ConnectionError &&
-              e.reason === ConnectionErrorReason.Cancelled
-            ) {
-              void captureEvent('connection-cancelled')
-              return
-            }
-
-            const wasTransitioning = breakoutStore.isTransitioning
-            failBreakoutConnection(e)
-            if (wasTransitioning && room.state !== 'connected') recoverSession()
-
-            reportError('livekit_room_error', e, {
-              path: 'connect_publish',
-            })
-          }}
+          onError={handleRoomError}
           onConnected={async () => {
             const connectedRoomName = room.name
             breakoutStore.currentBreakoutRoomLkName =
@@ -604,14 +650,6 @@ export const Conference = ({
           />
           {(breakoutSnap.isTransitioning || breakoutSnap.connectionLost) && (
             <BreakoutTransition />
-          )}
-          {breakoutSnap.broadcastAnnouncement && (
-            <BreakoutBroadcastBanner
-              message={breakoutSnap.broadcastAnnouncement.message}
-              onDismiss={() => {
-                breakoutStore.broadcastAnnouncement = null
-              }}
-            />
           )}
           {/* BreakoutActions owns useBreakoutRoomSwap — must stay inside <LiveKitRoom> */}
           <BreakoutActions

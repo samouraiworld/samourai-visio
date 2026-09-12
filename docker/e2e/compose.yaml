@@ -1,0 +1,130 @@
+x-backend: &backend
+  image: visio-e2e-backend:${E2E_IMAGE_TAG:-local}
+  build:
+    context: ../..
+    dockerfile: docker/e2e/Dockerfile.backend
+  environment:
+    PYTHONPATH: /e2e/backend
+    DJANGO_SETTINGS_MODULE: settings
+    DJANGO_CONFIGURATION: E2E
+    DJANGO_SECRET_KEY: local-e2e-only-django-secret-key-padded
+    DB_HOST: postgres
+    DB_PORT: 5432
+    DB_NAME: meet
+    DB_USER: meet
+    DB_PASSWORD: local-e2e-only-password
+    REDIS_URL: redis://redis:6379/1
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_ENABLED: "true"
+    CELERY_TASK_ALWAYS_EAGER: "false"
+    MEET_BREAKOUT_ROOMS_ENABLED: "true"
+    LIVEKIT_API_URL: http://livekit:7880
+    LIVEKIT_API_KEY: devkey-padded-for-minimum-len!-livekit
+    LIVEKIT_API_SECRET: secret-key-padded-for-minimum-len!-livekit
+    OIDC_OP_JWKS_ENDPOINT: http://unused-identity-provider.invalid/jwks
+    OIDC_RP_CLIENT_SECRET: local-e2e-only-oidc-client-secret
+    OIDC_RS_CLIENT_SECRET: local-e2e-only-resource-client-secret
+    OIDC_OP_URL: http://unused-identity-provider.invalid
+    STORAGES_STATICFILES_BACKEND: django.contrib.staticfiles.storage.StaticFilesStorage
+    E2E_SEED_PATH: /artifacts/seed.json
+  volumes:
+    - ../../src/e2e:/e2e:ro
+    - ${E2E_ARTIFACTS_DIR:?Set E2E_ARTIFACTS_DIR}:/artifacts
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: meet
+      POSTGRES_USER: meet
+      POSTGRES_PASSWORD: local-e2e-only-password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U meet -d meet"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  redis:
+    image: redis:5
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+  backend:
+    <<: *backend
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        python manage.py migrate --noinput
+        python manage.py shell < /e2e/backend/seed.py
+        exec python manage.py runserver --noreload 0.0.0.0:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/__lbheartbeat__', timeout=2); urllib.request.urlopen('http://livekit:7880', timeout=2)"
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+  worker:
+    <<: *backend
+    command: [celery, -A, meet.celery_app, worker, --loglevel=INFO, --pool=solo]
+    depends_on:
+      backend:
+        condition: service_healthy
+  beat:
+    <<: *backend
+    command: [celery, -A, meet.celery_app, beat, --loglevel=INFO, --schedule=/var/run/celery/beat-schedule]
+    volumes:
+      - ../../src/e2e:/e2e:ro
+      - beat-data:/var/run/celery
+    depends_on:
+      backend:
+        condition: service_healthy
+  runner:
+    image: visio-e2e-runner:${E2E_IMAGE_TAG:-local}
+    build:
+      context: ../..
+      dockerfile: docker/e2e/Dockerfile.runner
+    init: true
+    shm_size: 1gb
+    environment:
+      CI: "1"
+      E2E_ARTIFACTS_DIR: /artifacts
+      E2E_SEED_PATH: /artifacts/seed.json
+    volumes:
+      - ${E2E_ARTIFACTS_DIR:?Set E2E_ARTIFACTS_DIR}:/artifacts
+    depends_on:
+      backend:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      beat:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  redis-data:
+  beat-data:

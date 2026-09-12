@@ -2,6 +2,7 @@
 
 # pylint: disable=abstract-method,no-name-in-module
 import logging
+import re
 from os.path import splitext
 from typing import Literal
 from urllib.parse import quote
@@ -307,8 +308,16 @@ class RequestEntrySerializer(BaseValidationOnlySerializer):
 class ParticipantEntrySerializer(BaseValidationOnlySerializer):
     """Validate participant entry decision data."""
 
-    participant_id = serializers.UUIDField(required=True)
+    participant_id = serializers.CharField(
+        required=True, max_length=46, trim_whitespace=False
+    )
     allow_entry = serializers.BooleanField(required=True)
+
+    def validate_participant_id(self, value):
+        """Accept scoped guest identities and normalize historical UUID identities."""
+        if re.fullmatch(r"guest_[0-9a-f]{40}", value):
+            return value
+        return str(serializers.UUIDField().run_validation(value))
 
 
 class CreationCallbackSerializer(BaseValidationOnlySerializer):

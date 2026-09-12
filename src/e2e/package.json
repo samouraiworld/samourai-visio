@@ -1,0 +1,15 @@
+{
+  "name": "meet-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "24.12.4",
+    "livekit-server-sdk": "2.19.0",
+    "typescript": "6.0.3"
+  }
+}

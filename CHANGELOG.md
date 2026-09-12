@@ -10,6 +10,7 @@ and this project adheres to
 
 ### Added
 
+- 🧪(ci) run upstream checks and real breakout browser tests locally #63
 - ✨(frontend) add breakout rooms for sub-group sessions #63
 - ✨(backend) add breakout session models, API and services #63
 - ✨(frontend) add 1080p sending resolution option #1660
@@ -23,6 +24,11 @@ and this project adheres to
 
 ### Fixed
 
+- 🐛(backend) admit scoped guest identities from the waiting-room API #63
+- 🐛(ci) build mail templates from the committed npm lockfile
+- 🐛(breakout) keep announcements clear of participant controls #63
+- 🐛(breakout) preserve host names on recall #63
+- 🐛(breakout) retry connections without reconnecting stale transports #63
 - 🐛(breakout) recover connections and preserve scoped participant access #63
 
 - 🐛(ci) judge the print-statement rule on added lines only

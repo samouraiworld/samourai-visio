@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { userStore } from '@/stores/user'
 import { breakoutStore, clearBreakoutState } from '../stores/breakout'
 import { useBreakoutRoomSwap } from './useBreakoutRoomSwap'
 
@@ -12,7 +13,11 @@ const mocks = vi.hoisted(() => ({
     state: 'connected',
     disconnect: vi.fn<() => Promise<void>>(),
   },
-  participant: { isCameraEnabled: false, isMicrophoneEnabled: true },
+  participant: {
+    name: 'Account name',
+    isCameraEnabled: false,
+    isMicrophoneEnabled: true,
+  },
 }))
 vi.mock('@livekit/components-react', () => ({
   useLocalParticipant: () => ({ localParticipant: mocks.participant }),
@@ -30,6 +35,8 @@ vi.mock('@/stores/user', async () => {
 beforeEach(() => {
   clearBreakoutState()
   vi.clearAllMocks()
+  userStore.username = 'Alice'
+  mocks.participant.name = 'Account name'
   mocks.room.name = 'main'
   mocks.room.state = 'connected'
   mocks.fetch.mockResolvedValue({
@@ -132,3 +139,32 @@ it('retains the original media intent when a disconnected retry cannot fetch a t
     microphone: true,
   })
 })
+
+it.each(['Account name', ''])(
+  'returns an unchanged account name to main (%s)',
+  async (name) => {
+    userStore.username = ''
+    mocks.participant.name = name
+    breakoutStore.mainRoomSlug = 'main'
+    breakoutStore.currentBreakoutRoomLkName = 'breakout_one'
+    mocks.room.name = 'breakout_one'
+    mocks.entry.mockResolvedValue({
+      livekit: { token: 'main-token', room: 'main' },
+    })
+    const apply = vi.fn()
+    const { result } = renderHook(() =>
+      useBreakoutRoomSwap({ setActiveRoomConnection: apply })
+    )
+    await act(async () => {
+      await result.current.returnToMainRoomAfterClose()
+    })
+    expect(mocks.entry).toHaveBeenCalledWith({
+      roomId: 'main',
+      username: name || 'anonymous',
+    })
+    expect(apply).toHaveBeenCalledWith({
+      token: 'main-token',
+      roomName: 'main',
+    })
+  }
+)

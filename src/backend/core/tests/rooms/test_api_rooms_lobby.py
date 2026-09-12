@@ -515,6 +515,100 @@ def test_allow_participant_to_enter_invalid_data():
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize("authenticated", [False, True])
+@pytest.mark.parametrize("allow_entry", [False, True])
+def test_lobby_decision_accepts_returned_guest_identity(authenticated, allow_entry):
+    """Managers can decide actual requests using the identity returned by the lobby."""
+    owner = UserFactory()
+    room = RoomFactory(access_level=RoomAccessLevel.RESTRICTED)
+    room.accesses.create(user=owner, role="owner")
+    participant = APIClient()
+    if authenticated:
+        participant.force_login(UserFactory())
+    manager = APIClient()
+    manager.force_login(owner)
+
+    with mock.patch.object(utils, "notify_participants"):
+        requested = participant.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/", {"username": "Guest"}
+        )
+    assert requested.status_code == 200
+    participant_id = requested.json()["id"]
+    assert participant_id.startswith("guest_")
+
+    waiting = manager.get(f"/api/v1.0/rooms/{room.id}/waiting-participants/")
+    assert waiting.status_code == 200
+    assert waiting.json()["participants"][0]["id"] == participant_id
+    decision_url = f"/api/v1.0/rooms/{room.id}/enter/"
+    payload = {"participant_id": participant_id, "allow_entry": allow_entry}
+    refused = participant.post(decision_url, payload)
+    assert refused.status_code == (403 if authenticated else 401)
+
+    decided = manager.post(decision_url, payload)
+    assert decided.status_code == 200, decided.json()
+    with mock.patch.object(
+        utils, "generate_livekit_config", return_value={"token": "accepted-token"}
+    ):
+        polled = participant.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/", {"username": "Guest"}
+        )
+    assert polled.status_code == 200
+    assert polled.json()["id"] == participant_id
+    assert polled.json()["status"] == ("accepted" if allow_entry else "denied")
+    assert polled.json()["livekit"] == (
+        {"token": "accepted-token"} if allow_entry else None
+    )
+
+
+@pytest.mark.parametrize(
+    "participant_id",
+    [
+        "guest_invalid",
+        "guest_" + "a" * 39,
+        "guest_" + "a" * 41,
+        "guest_" + "G" * 40,
+        " guest_" + "a" * 40,
+        "guest_" + "a" * 40 + "\n",
+    ],
+)
+def test_lobby_decision_rejects_malformed_guest_identity(participant_id):
+    """Only the exact server-issued guest identity format is accepted."""
+    room = RoomFactory(access_level=RoomAccessLevel.RESTRICTED)
+    owner = UserFactory()
+    room.accesses.create(user=owner, role="owner")
+    manager = APIClient()
+    manager.force_login(owner)
+    response = manager.post(
+        f"/api/v1.0/rooms/{room.id}/enter/",
+        {"participant_id": participant_id, "allow_entry": True},
+    )
+    assert response.status_code == 400
+
+
+def test_lobby_decision_cannot_admit_guest_from_another_room():
+    """A valid guest identity remains authorized only within its parent lobby."""
+    owner = UserFactory()
+    rooms = [RoomFactory(access_level=RoomAccessLevel.RESTRICTED) for _ in range(2)]
+    for room in rooms:
+        room.accesses.create(user=owner, role="owner")
+    participant = APIClient()
+    with mock.patch.object(utils, "notify_participants"):
+        requested = participant.post(
+            f"/api/v1.0/rooms/{rooms[0].id}/request-entry/", {"username": "Guest"}
+        )
+    assert requested.status_code == 200
+    participant_id = requested.json()["id"]
+    manager = APIClient()
+    manager.force_login(owner)
+    response = manager.post(
+        f"/api/v1.0/rooms/{rooms[1].id}/enter/",
+        {"participant_id": participant_id, "allow_entry": True},
+    )
+    assert response.status_code == 404
+    waiting = manager.get(f"/api/v1.0/rooms/{rooms[0].id}/waiting-participants/")
+    assert waiting.json()["participants"][0]["status"] == "waiting"
+
+
 # Tests for list_waiting_participants endpoint
 
 
