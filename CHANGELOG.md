@@ -20,6 +20,7 @@ and this project adheres to
 
 ### Fixed
 
+- 🐛(ci) judge the print-statement rule on added lines only
 - 🐛(frontend) keep the sending resolution picked while the camera is off #1667
 
 ## [1.30.0] - 2026-09-01
