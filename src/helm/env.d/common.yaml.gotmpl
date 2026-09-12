@@ -232,6 +232,9 @@ backend:
   podSecurityContext: *podSecurityContext
   securityContext: *securityContext
 
+celeryBeat:
+  enabled: true
+
 frontend:
   replicas: 1
   podSecurityContext: *podSecurityContext

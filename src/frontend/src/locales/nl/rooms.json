@@ -60,6 +60,7 @@
       "subTitle": "Configureer de effecten van uw camera."
     },
     "heading": "Deelnemen aan de vergadering",
+    "breakoutReentry": "Uw toegang tot de hoofdruimte is verlopen. Neem opnieuw deel aan de vergadering; mogelijk moet de host u toelaten.",
     "joinLabel": "Deelnemen",
     "joinMeeting": "Deelnemen aan de vergadering",
     "toggleOff": "Klik om uit te schakelen",
@@ -335,7 +336,8 @@
         "exit": "Stop volledig scherm stand"
       },
       "support": "Contact ondersteuning",
-      "documentation": "Documentatie"
+      "documentation": "Documentatie",
+      "breakoutRooms": "Groepsruimtes"
     }
   },
   "effects": {
@@ -423,7 +425,8 @@
       "screenRecording": "Opnemen",
       "admin": "Beheerdersbediening",
       "tools": "Meer tools",
-      "info": "Vergaderinformatie"
+      "info": "Vergaderinformatie",
+      "breakout": "Groepsruimtes"
     },
     "content": {
       "participants": "deelnemers",
@@ -433,7 +436,8 @@
       "transcript": "transcriberen",
       "admin": "beheerdersbediening",
       "tools": "meer tools",
-      "info": "vergaderinformatie"
+      "info": "vergaderinformatie",
+      "breakout": "groepsruimtes"
     },
     "closeButton": "Verberg {{content}} (Escape)",
     "escapeHint": "Druk op Escape om te sluiten"
@@ -798,5 +802,103 @@
   },
   "participantTile": {
     "screenShare": "{{name}} scherm"
+  },
+  "breakout": {
+    "menuItem": "Groepsruimtes",
+    "heading": "Groepsruimtes",
+    "setup": {
+      "roomCount": "Aantal ruimtes",
+      "roomCountOption": "{{count}} ruimtes",
+      "create": "Groepsruimtes aanmaken",
+      "randomize": "Willekeurig indelen",
+      "unassigned": "{{count}} niet toegewezen",
+      "openAll": "Alle ruimtes openen",
+      "cancel": "Annuleren",
+      "duration": "Duur",
+      "durationOptions": {
+        "none": "Geen timer",
+        "2min": "2 minuten",
+        "5min": "5 minuten",
+        "10min": "10 minuten",
+        "15min": "15 minuten",
+        "20min": "20 minuten",
+        "30min": "30 minuten",
+        "45min": "45 minuten",
+        "1h": "1 uur",
+        "1h30": "1 uur 30 minuten",
+        "2h": "2 uur",
+        "3h": "3 uur",
+        "4h": "4 uur"
+      },
+      "noParticipants": "Geen deelnemers toegewezen",
+      "assignParticipants": "Deelnemers toewijzen",
+      "unassignedOption": "Niet toegewezen",
+      "allAssigned": "Alle deelnemers toegewezen",
+      "unassignParticipant": "Toewijzing van {{name}} verwijderen",
+      "assignParticipant": "{{name}} aan een ruimte toewijzen",
+      "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
+      "retrySynchronization": "Synchronisatie opnieuw proberen",
+      "synchronizing": "Groepsruimtes worden gesynchroniseerd…",
+      "disabled": "Het aanmaken van groepsruimtes is uitgeschakeld op deze dienst."
+    },
+    "active": {
+      "closeAll": "Alle ruimtes sluiten",
+      "visitRoom": "Bezoeken",
+      "returnToMain": "Terug naar de hoofdruimte",
+      "broadcastTitle": "Aankondiging sturen",
+      "broadcastPlaceholder": "Typ een aankondiging voor alle ruimtes...",
+      "broadcastSent": "Aankondiging verzonden naar alle ruimtes!",
+      "youAreHere": "U bent hier",
+      "leaveRoom": "Verlaten",
+      "mainRoom": "Hoofdruimte",
+      "assignTo": "Toewijzen aan...",
+      "noParticipants": "Geen deelnemers in deze ruimte",
+      "statusUnknown": "Livestatus niet beschikbaar",
+      "sendBroadcast": "Aankondiging verzenden",
+      "reassignParticipant": "{{name}} naar een andere ruimte verplaatsen",
+      "syncFailed": "De synchronisatie van de ruimtes is mislukt.",
+      "retrySynchronization": "Synchronisatie opnieuw proberen",
+      "closing": "Groepsruimtes worden gesloten…",
+      "flagDisabled": "Nieuwe groepsruimtes zijn uitgeschakeld op deze dienst. U kunt deze sessie nog steeds sluiten.",
+      "actionFailed": {
+        "conflict": "De ruimtes zijn intussen gewijzigd. Ze zijn vernieuwd, probeer het opnieuw.",
+        "upstream": "De videoserver heeft niet gereageerd. Probeer het zo meteen opnieuw.",
+        "forbidden": "U kunt de groepsruimtes van deze vergadering niet meer beheren.",
+        "gone": "Deze groepssessie is al gesloten.",
+        "generic": "De actie is mislukt. Probeer het opnieuw."
+      }
+    },
+    "participant": {
+      "currentRoom": "U bevindt zich in {{room}}",
+      "returnButton": "Terug naar de hoofdruimte",
+      "returningIn": "Terugkeren naar de hoofdruimte in {{seconds}}s",
+      "askForHelp": "Om hulp vragen",
+      "askForHelpTooltip": "De host informeren dat u hulp nodig heeft",
+      "cancelHelp": "Hulpverzoek annuleren",
+      "returnAssigned": "Terug naar toegewezen ruimte",
+      "actionError": "De actie is mislukt. Probeer het opnieuw.",
+      "unknownRoom": "Groepsruimte"
+    },
+    "timer": {
+      "remaining": "Resterende tijd: {{time}}",
+      "elapsed": "Verstreken tijd: {{time}}",
+      "open": "{{time}} (open)"
+    },
+    "transition": {
+      "movingTo": "Verplaatsen naar {{room}}…",
+      "returningToMain": "Terugkeren naar de hoofdruimte…",
+      "reconnecting": "Opnieuw verbinden…",
+      "unknownRoom": "een groepsruimte"
+    },
+    "helpAlert": {
+      "title": "Hulp aangevraagd",
+      "body": "{{participantName}} in {{roomName}} vraagt om hulp",
+      "joinRoom": "Ruimte betreden",
+      "dismiss": "Melding sluiten"
+    },
+    "broadcast": {
+      "title": "Aankondiging van de host",
+      "dismiss": "Aankondiging sluiten"
+    }
   }
 }

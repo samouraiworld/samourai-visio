@@ -1,4 +1,12 @@
-{{- $envVars := include "meet.common.env" (list . .Values.backend) -}}
+{{- $backendEnv := deepCopy (default dict .Values.backend.envVars) -}}
+{{- if hasKey $backendEnv "MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- fail "Use breakoutRooms.enabled instead of backend.envVars.MEET_BREAKOUT_ROOMS_ENABLED" -}}
+{{- end -}}
+{{- $_ := set $backendEnv "MEET_BREAKOUT_ROOMS_ENABLED" .Values.breakoutRooms.enabled -}}
+{{- if or .Values.breakoutRooms.enabled .Values.celeryBeat.enabled -}}
+{{- $_ := set $backendEnv "CELERY_ENABLED" true -}}
+{{- end -}}
+{{- $envVars := include "meet.env.transformDict" $backendEnv -}}
 {{- $fullName := include "meet.backend.fullname" . -}}
 {{- $component := "backend" -}}
 apiVersion: apps/v1

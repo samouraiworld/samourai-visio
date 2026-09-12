@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
 import { useSnapshot } from 'valtio'
@@ -10,6 +10,7 @@ import { Form, Text } from '@/primitives'
 import { Spinner } from '@/primitives/Spinner'
 import { keys } from '@/api/queryKeys'
 import { queryClient } from '@/api/queryClient'
+import { STORAGE_KEYS } from '@/features/breakout/utils/constants'
 import { useLoginHint } from '@/hooks/useLoginHint'
 import { useUser } from '@/features/auth/api/useUser'
 import { useConfig } from '@/api/useConfig'
@@ -88,6 +89,24 @@ export const Lobby = ({
     enterRoom()
   }
 
+  const [isBreakoutReentry] = useState(() => {
+    try {
+      return sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_REENTRY) === '1'
+    } catch {
+      return false
+    }
+  })
+  // Clear in an effect, never in the initializer: StrictMode double-invokes
+  // initializers and commits the second pass, so a read-and-clear there makes
+  // the note vanish in development.
+  useEffect(() => {
+    try {
+      sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_REENTRY)
+    } catch {
+      // Best effort.
+    }
+  }, [])
+
   switch (status) {
     case ApiLobbyStatus.TIMEOUT:
       return (
@@ -143,6 +162,11 @@ export const Lobby = ({
             <H lvl={1} margin="sm" centered>
               {t('heading')}
             </H>
+            {isBreakoutReentry && (
+              <Text as="p" variant="note" role="status" centered>
+                {t('breakoutReentry')}
+              </Text>
+            )}
             {(!isLoggedIn ||
               configData?.authenticated_users_can_edit_display_name) && (
               <Field

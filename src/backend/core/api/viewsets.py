@@ -43,6 +43,7 @@ from rest_framework.settings import api_settings
 from core import analytics, enums, models, utils
 from core.api import throttling
 from core.api.filters import ListFileFilter
+from core.breakout.models import BreakoutRoom
 from core.enums import MEDIA_STORAGE_URL_PATTERN
 from core.recording.enums import FileExtension
 from core.recording.event.authentication import RecordingProcessWebhookAuthentication
@@ -75,11 +76,7 @@ from core.services.participants_management import (
     ParticipantsManagementException,
 )
 from core.services.room_creation import RoomCreation
-from core.services.room_management import (
-    RoomManagement,
-    RoomManagementException,
-    RoomNotFoundException,
-)
+from core.services.room_management import RoomManagement
 from core.services.room_roles import (
     RoomRoleError,
     RoomRoleService,
@@ -263,6 +260,10 @@ class RoomViewSet(
             if not settings.ALLOW_UNREGISTERED_ROOMS:
                 raise
             slug = slugify(self.kwargs["pk"])
+            if BreakoutRoom.is_breakout_room_name(slug):
+                # A breakout room is never an unregistered meeting: its token
+                # comes only from the assignment-checked join endpoint.
+                raise
             username = request.query_params.get("username", None)
             data = {
                 "id": None,
@@ -280,7 +281,12 @@ class RoomViewSet(
         else:
             data = self.get_serializer(instance).data
 
-        return drf_response.Response(data)
+        response = drf_response.Response(data)
+        if LobbyService.has_pending_guest_cookie(request):
+            # A token plus a Set-Cookie must never be served from a shared cache.
+            response["Cache-Control"] = "no-store"
+            LobbyService.prepare_response(response, None, request=request)
+        return response
 
     def list(self, request, *args, **kwargs):
         """Limit listed rooms to the ones related to the authenticated user."""
@@ -356,26 +362,7 @@ class RoomViewSet(
         ):
             return
 
-        metadata = {
-            "configuration": room.configuration,
-            "access_level": room.access_level,
-        }
-
-        try:
-            RoomManagement().update_metadata(
-                room_name=str(room.id),
-                metadata=metadata,
-            )
-        except RoomNotFoundException:
-            logger.info(
-                "LiveKit room %s does not exist yet, skipping metadata sync",
-                room.id,
-            )
-        except RoomManagementException:
-            logger.warning(
-                "Failed to sync metadata to LiveKit for room %s",
-                room.id,
-            )
+        RoomManagement.sync_room_metadata(room)
 
     @decorators.action(
         detail=True,
@@ -513,7 +500,7 @@ class RoomViewSet(
             **serializer.validated_data,
         )
         response = drf_response.Response({**participant.to_dict(), "livekit": livekit})
-        lobby_service.prepare_response(response, participant.id)
+        lobby_service.prepare_response(response, participant.id, request=request)
 
         return response
 

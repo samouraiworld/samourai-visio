@@ -60,6 +60,7 @@
       "subTitle": "Konfiguriere die Effekte deiner Kamera."
     },
     "heading": "Dem Meeting beitreten?",
+    "breakoutReentry": "Dein Zugang zum Hauptraum ist abgelaufen. Tritt dem Meeting erneut bei; der Gastgeber muss dich eventuell zulassen.",
     "joinLabel": "Beitreten",
     "joinMeeting": "Meeting beitreten",
     "toggleOff": "Klicken, um auszuschalten",
@@ -335,7 +336,8 @@
         "exit": "Vollbildmodus verlassen"
       },
       "support": "Support kontaktieren",
-      "documentation": "Dokumentation"
+      "documentation": "Dokumentation",
+      "breakoutRooms": "Gruppenräume"
     }
   },
   "effects": {
@@ -423,7 +425,8 @@
       "screenRecording": "Aufzeichnen",
       "admin": "Admin-Einstellungen",
       "tools": "Weitere Tools",
-      "info": "Meeting-Informationen"
+      "info": "Meeting-Informationen",
+      "breakout": "Gruppenräume"
     },
     "content": {
       "participants": "Teilnehmende",
@@ -433,7 +436,8 @@
       "screenRecording": "aufzeichnen",
       "admin": "Admin-Einstellungen",
       "tools": "Weitere Tools",
-      "info": "Meeting-Informationen"
+      "info": "Meeting-Informationen",
+      "breakout": "Gruppenräume"
     },
     "closeButton": "{{content}} ausblenden (Escape)",
     "escapeHint": "Escape drücken zum Schließen"
@@ -798,5 +802,103 @@
   },
   "participantTile": {
     "screenShare": "{{name}}’s Bildschirm"
+  },
+  "breakout": {
+    "menuItem": "Gruppenräume",
+    "heading": "Gruppenräume",
+    "setup": {
+      "roomCount": "Anzahl der Räume",
+      "roomCountOption": "{{count}} Räume",
+      "create": "Gruppenräume erstellen",
+      "randomize": "Zufällig zuweisen",
+      "unassigned": "{{count}} nicht zugewiesen",
+      "openAll": "Alle Räume öffnen",
+      "cancel": "Abbrechen",
+      "duration": "Dauer",
+      "durationOptions": {
+        "none": "Kein Timer",
+        "2min": "2 Minuten",
+        "5min": "5 Minuten",
+        "10min": "10 Minuten",
+        "15min": "15 Minuten",
+        "20min": "20 Minuten",
+        "30min": "30 Minuten",
+        "45min": "45 Minuten",
+        "1h": "1 Stunde",
+        "1h30": "1 Stunde 30 Minuten",
+        "2h": "2 Stunden",
+        "3h": "3 Stunden",
+        "4h": "4 Stunden"
+      },
+      "noParticipants": "Keine Teilnehmer zugewiesen",
+      "assignParticipants": "Teilnehmer zuweisen",
+      "unassignedOption": "Nicht zugewiesen",
+      "allAssigned": "Alle Teilnehmer zugewiesen",
+      "unassignParticipant": "Zuweisung von {{name}} aufheben",
+      "assignParticipant": "{{name}} einem Raum zuweisen",
+      "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
+      "retrySynchronization": "Synchronisierung wiederholen",
+      "synchronizing": "Gruppenräume werden synchronisiert…",
+      "disabled": "Das Erstellen von Gruppenräumen ist auf diesem Dienst deaktiviert."
+    },
+    "active": {
+      "closeAll": "Alle Räume schließen",
+      "visitRoom": "Besuchen",
+      "returnToMain": "Zurück zum Hauptraum",
+      "broadcastTitle": "Ankündigung senden",
+      "broadcastPlaceholder": "Ankündigung an alle Räume eingeben...",
+      "broadcastSent": "Ankündigung an alle Räume gesendet!",
+      "youAreHere": "Sie sind hier",
+      "leaveRoom": "Verlassen",
+      "mainRoom": "Hauptraum",
+      "assignTo": "Zuweisen zu...",
+      "noParticipants": "Keine Teilnehmer in diesem Raum",
+      "statusUnknown": "Live-Status nicht verfügbar",
+      "sendBroadcast": "Ankündigung senden",
+      "reassignParticipant": "{{name}} in einen anderen Raum verschieben",
+      "syncFailed": "Die Raumsynchronisierung ist fehlgeschlagen.",
+      "retrySynchronization": "Synchronisierung wiederholen",
+      "closing": "Gruppenräume werden geschlossen…",
+      "flagDisabled": "Neue Gruppenräume sind auf diesem Dienst deaktiviert. Sie können diese Sitzung weiterhin schließen.",
+      "actionFailed": {
+        "conflict": "Die Räume wurden zwischenzeitlich geändert. Sie wurden aktualisiert, bitte versuchen Sie es erneut.",
+        "upstream": "Der Videoserver hat nicht geantwortet. Bitte versuchen Sie es in Kürze erneut.",
+        "forbidden": "Sie können die Gruppenräume dieses Meetings nicht mehr verwalten.",
+        "gone": "Diese Gruppensitzung wurde bereits geschlossen.",
+        "generic": "Die Aktion ist fehlgeschlagen. Bitte versuchen Sie es erneut."
+      }
+    },
+    "participant": {
+      "currentRoom": "Sie sind in {{room}}",
+      "returnButton": "Zurück zum Hauptraum",
+      "returningIn": "Rückkehr zum Hauptraum in {{seconds}}s",
+      "askForHelp": "Um Hilfe bitten",
+      "askForHelpTooltip": "Den Gastgeber um Unterstützung bitten",
+      "cancelHelp": "Hilfeanfrage abbrechen",
+      "returnAssigned": "Zum zugewiesenen Raum zurückkehren",
+      "actionError": "Die Aktion ist fehlgeschlagen. Bitte erneut versuchen.",
+      "unknownRoom": "Gruppenraum"
+    },
+    "timer": {
+      "remaining": "Verbleibende Zeit: {{time}}",
+      "elapsed": "Vergangene Zeit: {{time}}",
+      "open": "{{time}} (offen)"
+    },
+    "transition": {
+      "movingTo": "Wechsel zu {{room}}…",
+      "returningToMain": "Rückkehr zum Hauptraum…",
+      "reconnecting": "Verbindung wird wiederhergestellt…",
+      "unknownRoom": "einem Gruppenraum"
+    },
+    "helpAlert": {
+      "title": "Hilfe angefordert",
+      "body": "{{participantName}} in {{roomName}} braucht Hilfe",
+      "joinRoom": "Raum beitreten",
+      "dismiss": "Meldung schließen"
+    },
+    "broadcast": {
+      "title": "Ankündigung des Gastgebers",
+      "dismiss": "Ankündigung schließen"
+    }
   }
 }

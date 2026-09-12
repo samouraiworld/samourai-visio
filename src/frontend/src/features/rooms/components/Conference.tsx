@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
   LiveKitRoom,
+  useRoomContext,
   usePersistentUserChoices,
 } from '@livekit/components-react'
 import {
@@ -34,6 +35,7 @@ import {
   reportError,
 } from '@/features/analytics/telemetry'
 import { useConfig } from '@/api/useConfig'
+import { useIsAdminOrOwner } from '@/features/rooms/livekit/hooks/useIsAdminOrOwner'
 import { isFireFox } from '@/utils/livekit'
 import { useIsMobile } from '@/utils/useIsMobile'
 import { navigateTo } from '@/navigation/navigateTo'
@@ -45,6 +47,186 @@ import { userStore } from '@/stores/user'
 import { WatchMediaDeviceErrors } from './WatchMediaDeviceErrors'
 import { MeetDevtools } from '@/features/devtools'
 import { VOICE_AUDIO_CONSTRAINTS } from '@/features/rooms/livekit/utils/constants'
+import {
+  bindBreakoutToMainRoom,
+  breakoutStore,
+  clearBreakoutState,
+  clearMatchingPendingHelpAcknowledgement,
+  completeBreakoutTransition,
+  failBreakoutConnection,
+  registerRoomSwapHandler,
+} from '@/features/breakout/stores/breakout'
+import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
+import { BreakoutParticipantOverlay } from '@/features/breakout/components/BreakoutParticipantOverlay'
+import { BreakoutBroadcastBanner } from '@/features/breakout/components/BreakoutBroadcastBanner'
+import { BreakoutHelpAlertBanner } from '@/features/breakout/components/BreakoutHelpAlertBanner'
+import { useBreakoutMetadataWatcher } from '@/features/breakout/hooks/useBreakoutMetadataWatcher'
+import { useBreakoutDataMessages } from '@/features/breakout/hooks/useBreakoutDataMessages'
+import { useBreakoutRoomSwap } from '@/features/breakout/hooks/useBreakoutRoomSwap'
+import {
+  acknowledgeBreakoutHelp,
+  breakoutHelpRequestsKey,
+  useAcknowledgeBreakoutHelp,
+  useBreakoutHelpRequests,
+} from '@/features/breakout/api/useBreakoutHelpRequests'
+import {
+  fetchCurrentBreakoutAssignment,
+  useCurrentBreakoutAssignment,
+} from '@/features/breakout/api/useCurrentBreakoutAssignment'
+import {
+  isRemovalAReassignment,
+  resolveDisconnectAction,
+} from '@/features/breakout/utils/disconnectActions'
+import { useBreakoutRecovery } from '@/features/breakout/hooks/useBreakoutRecovery'
+import { finishBreakoutConnection } from '@/features/breakout/utils/connectionLifecycle'
+import { acknowledgeConnectedHelp } from '@/features/breakout/utils/helpAcknowledgement'
+
+const BreakoutWatcher = ({
+  currentRoomSlug,
+  setActiveRoomConnection,
+  mainRoomId,
+}: {
+  currentRoomSlug: string
+  setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
+  mainRoomId: string
+}) => {
+  useBreakoutMetadataWatcher({
+    currentRoomSlug,
+    setActiveRoomConnection,
+    mainRoomId,
+  })
+  useBreakoutDataMessages()
+  return null
+}
+
+/**
+ * Inner component rendered inside <LiveKitRoom> that owns the hooks requiring
+ * a room provider context (useLocalParticipant via useBreakoutRoomSwap) and
+ * the overlays driven by those hooks.
+ *
+ * Must NOT be called at Conference component scope — it would be above
+ * <LiveKitRoom> in the render tree and throw: "No room provided".
+ */
+const BreakoutActions = ({
+  roomId,
+  setActiveRoomConnection,
+  mainRoomId,
+}: {
+  roomId: string
+  setActiveRoomConnection: (conn: { token: string; roomName: string }) => void
+  mainRoomId: string
+}) => {
+  const { t } = useTranslation('rooms', {
+    keyPrefix: 'breakout.participant',
+  })
+  const { returnToMainRoom, moveToBreakoutRoom } = useBreakoutRoomSwap({
+    currentRoomSlug: roomId,
+    setActiveRoomConnection,
+  })
+  const snap = useSnapshot(breakoutStore)
+  const connectedRoom = useRoomContext()
+  const isAdminOrOwner = useIsAdminOrOwner()
+  // Breakout tokens are minted with role "member"; keep the host's controls
+  // while they visit a room.
+  const canManageBreakout = isAdminOrOwner || snap.isModeratorVisiting
+  const { data: helpRequests = [] } = useBreakoutHelpRequests(
+    mainRoomId,
+    snap.activeSessionId ?? undefined,
+    canManageBreakout
+  )
+  const { mutate: acknowledgeHelp } = useAcknowledgeBreakoutHelp()
+  const helpRequest = helpRequests[0]
+  const { data: assignmentState } = useCurrentBreakoutAssignment(
+    mainRoomId,
+    snap.activeSessionId ?? undefined
+  )
+
+  const handleAcknowledge = () => {
+    if (!snap.activeSessionId || !helpRequest) return
+    breakoutStore.pendingHelpAcknowledgement = null
+    acknowledgeHelp({
+      roomId: mainRoomId,
+      sessionId: snap.activeSessionId,
+      helpRequestId: helpRequest.id,
+      expectedBreakoutRoomId: helpRequest.breakout_room,
+      expectedAssignmentRevision: helpRequest.assignment_revision,
+    })
+  }
+  return (
+    <>
+      {snap.activeSessionId && snap.assignedRoomId && (
+        <BreakoutParticipantOverlay
+          roomId={mainRoomId}
+          onReturnToMain={returnToMainRoom}
+          onReturnToAssigned={() => {
+            const assignment = assignmentState?.assignment
+            if (!assignment || !snap.activeSessionId) return
+            void moveToBreakoutRoom(
+              assignment.breakout_room_id,
+              snap.activeSessionId,
+              mainRoomId,
+              assignment.breakout_room_name
+            ).catch(() => undefined)
+          }}
+        />
+      )}
+      {helpRequest && (
+        <BreakoutHelpAlertBanner
+          roomName={helpRequest.breakout_room_name}
+          participantName={helpRequest.requester_name}
+          onJoinRoom={() => {
+            void moveToBreakoutRoom(
+              helpRequest.breakout_room,
+              helpRequest.session,
+              mainRoomId,
+              helpRequest.breakout_room_name,
+              true
+            )
+              .then((expectedLivekitRoomName) => {
+                if (
+                  connectedRoom.state === 'connected' &&
+                  connectedRoom.name === expectedLivekitRoomName
+                ) {
+                  handleAcknowledge()
+                  return
+                }
+                breakoutStore.pendingHelpAcknowledgement = {
+                  roomId: mainRoomId,
+                  sessionId: helpRequest.session,
+                  helpRequestId: helpRequest.id,
+                  expectedBreakoutRoomId: helpRequest.breakout_room,
+                  expectedLivekitRoomName,
+                  assignmentRevision: helpRequest.assignment_revision,
+                }
+              })
+              .catch(() => undefined)
+          }}
+          onDismiss={handleAcknowledge}
+        />
+      )}
+      {snap.transitionError && !snap.assignedRoomId && (
+        <div
+          role="alert"
+          className={css({
+            position: 'fixed',
+            top: 4,
+            insetInline: 0,
+            marginInline: 'auto',
+            width: 'fit',
+            maxWidth: 'full',
+            padding: 0.5,
+            borderRadius: '8',
+            backgroundColor: 'danger',
+            color: 'danger.text',
+            zIndex: 'toast',
+          })}
+        >
+          {t('actionError')}
+        </div>
+      )}
+    </>
+  )
+}
 
 export const Conference = ({
   roomId,
@@ -60,6 +242,7 @@ export const Conference = ({
   const { userChoices: userConfig } = usePersistentUserChoices() as {
     userChoices: LocalUserChoices
   }
+  const breakoutSnap = useSnapshot(breakoutStore)
 
   const { username } = useSnapshot(userStore)
 
@@ -102,6 +285,43 @@ export const Conference = ({
     retry: false,
   })
 
+  // ── Breakout rooms: in-component room swap ──
+  const [activeRoomConnection, setActiveRoomConnection] = useState<{
+    token: string | undefined
+    roomName: string | undefined
+  }>({ token: undefined, roomName: undefined })
+
+  useEffect(() => {
+    return registerRoomSwapHandler(
+      setActiveRoomConnection as (conn: {
+        token: string
+        roomName: string
+      }) => void
+    )
+  }, [setActiveRoomConnection])
+
+  // Sync initial token from API data
+  useEffect(() => {
+    if (data?.livekit && !activeRoomConnection.token) {
+      setActiveRoomConnection({
+        token: data.livekit.token,
+        roomName: data.livekit.room,
+      })
+    }
+  }, [data?.livekit, activeRoomConnection.token, setActiveRoomConnection])
+
+  // Sync main room UUID and slug into breakout store
+  useEffect(() => {
+    if (data?.id) {
+      bindBreakoutToMainRoom(data.id, roomId)
+    }
+  }, [data?.id, roomId])
+
+  // NOTE: useBreakoutRoomSwap is intentionally NOT called here.
+  // It calls useLocalParticipant() internally, which requires a LiveKit room
+  // provider context. This hook is called inside <BreakoutActions> below,
+  // which is rendered inside <LiveKitRoom>.
+
   const roomOptions = useMemo((): RoomOptions => {
     return {
       adaptiveStream: true,
@@ -131,7 +351,13 @@ export const Conference = ({
     userConfig.audioOutputDeviceId,
   ])
 
-  const room = useMemo(() => new Room(roomOptions), [roomOptions])
+  // Each token gets its own transport: an old provider's unmount cleanup
+  // must never disconnect the replacement connection, even for the same room.
+  const connectionToken = activeRoomConnection.token ?? data?.livekit?.token
+  const room = useMemo(() => {
+    void connectionToken
+    return new Room(roomOptions)
+  }, [roomOptions, connectionToken])
 
   useEffect(() => {
     /**
@@ -182,6 +408,8 @@ export const Conference = ({
 
   const hasAutoMutedRef = useRef(false)
 
+  const { recoverSession, stopRecovery } = useBreakoutRecovery(roomId)
+
   /*
    * Ensure stable WebSocket connection URL. This is critical for legacy browser compatibility
    * (Firefox <124, Chrome <125, Edge <125) where HTTPS URLs in WebSocket() constructor
@@ -220,10 +448,14 @@ export const Conference = ({
         <LiveKitRoom
           room={room}
           serverUrl={serverUrl}
-          token={data?.livekit?.token}
+          key={connectionToken}
+          token={connectionToken}
           connect={isConnectionWarmedUp}
-          audio={userConfig.audioEnabled}
+          audio={
+            breakoutSnap.pendingMediaIntent ? false : userConfig.audioEnabled
+          }
           video={
+            !breakoutSnap.pendingMediaIntent &&
             userConfig.videoEnabled && {
               processor: BackgroundProcessorFactory.fromProcessorConfig(
                 userConfig.processorConfig
@@ -247,11 +479,58 @@ export const Conference = ({
               return
             }
 
+            const wasTransitioning = breakoutStore.isTransitioning
+            failBreakoutConnection(e)
+            if (wasTransitioning && room.state !== 'connected') recoverSession()
+
             reportError('livekit_room_error', e, {
               path: 'connect_publish',
             })
           }}
           onConnected={async () => {
+            const connectedRoomName = room.name
+            breakoutStore.currentBreakoutRoomLkName =
+              connectedRoomName && connectedRoomName !== data?.livekit?.room
+                ? connectedRoomName
+                : null
+            breakoutStore.connectionLost = false
+            stopRecovery()
+            const pendingHelp = breakoutStore.pendingHelpAcknowledgement
+            const acknowledgePendingHelp = async () => {
+              if (
+                !pendingHelp ||
+                connectedRoomName !== pendingHelp.expectedLivekitRoomName
+              ) {
+                return
+              }
+              await acknowledgeConnectedHelp({
+                pending: pendingHelp,
+                connectedRoomName,
+                acknowledge: (request) => acknowledgeBreakoutHelp(request),
+                invalidate: (roomId, sessionId) =>
+                  queryClient.invalidateQueries({
+                    queryKey: breakoutHelpRequestsKey(roomId, sessionId),
+                  }),
+              })
+              clearMatchingPendingHelpAcknowledgement(pendingHelp)
+            }
+            const mediaIntent = breakoutStore.pendingMediaIntent
+            const restoredTransition = await finishBreakoutConnection({
+              mediaIntent,
+              setCameraEnabled: (enabled) =>
+                room.localParticipant.setCameraEnabled(enabled),
+              setMicrophoneEnabled: (enabled) =>
+                room.localParticipant.setMicrophoneEnabled(enabled),
+              onMediaRestoreError: (error) => {
+                breakoutStore.transitionError =
+                  error instanceof Error
+                    ? error.message
+                    : 'media_restore_failed'
+              },
+              completeTransition: completeBreakoutTransition,
+              afterTransition: acknowledgePendingHelp,
+            })
+            if (restoredTransition) return
             if (!apiConfig) return
             if (
               userPreferencesSnap.is_auto_mute_large_room_enabled &&
@@ -265,37 +544,81 @@ export const Conference = ({
             }
           }}
           onDisconnected={(e) => {
-            const metadata = {
-              room_id: roomId,
+            const leaveMeeting = () => {
+              clearBreakoutState()
+              const metadata = { room_id: roomId }
+              switch (e) {
+                case DisconnectReason.CLIENT_INITIATED:
+                  navigateTo('feedback', {}, { state: { ...metadata } })
+                  return
+                default:
+                  // Everything else, INCLUDING a disconnect with no reason at
+                  // all, must still land somewhere. Reconnect exhaustion and
+                  // token-expiry joins arrive with no reason, and the switch
+                  // previously matched nothing for them: the participant was
+                  // left on a dead conference with no overlay and no exit.
+                  navigateTo(
+                    'feedback',
+                    {},
+                    { state: { reason: e, ...metadata } }
+                  )
+              }
             }
 
-            switch (e) {
-              case DisconnectReason.CLIENT_INITIATED:
-                navigateTo(
-                  'feedback',
-                  {},
-                  {
-                    state: { ...metadata },
-                  }
-                )
-                return
-              case DisconnectReason.DUPLICATE_IDENTITY:
-              case DisconnectReason.PARTICIPANT_REMOVED:
-                navigateTo(
-                  'feedback',
-                  {},
-                  {
-                    state: {
-                      reason: e,
-                      ...metadata,
-                    },
-                  }
-                )
-                return
+            const action = resolveDisconnectAction({
+              reason: e,
+              isTransitioning: breakoutStore.isTransitioning,
+              activeSessionId: breakoutStore.activeSessionId,
+              currentBreakoutRoomLkName:
+                breakoutStore.currentBreakoutRoomLkName,
+            })
+
+            if (action === 'ignore') return
+            if (action === 'recover-session') {
+              recoverSession(e)
+              return
             }
+            if (action === 'verify-assignment') {
+              const sessionId = breakoutStore.activeSessionId
+              const previous = breakoutStore.currentBreakoutRoomLkName
+              if (!sessionId || !data?.id) {
+                leaveMeeting()
+                return
+              }
+              void fetchCurrentBreakoutAssignment(data.id, sessionId)
+                .then((fresh) => {
+                  if (isRemovalAReassignment(previous, fresh)) recoverSession(e)
+                  else leaveMeeting()
+                })
+                .catch(() => leaveMeeting())
+              return
+            }
+            leaveMeeting()
           }}
         >
           <WatchMediaDeviceErrors />
+          <BreakoutWatcher
+            currentRoomSlug={roomId}
+            setActiveRoomConnection={setActiveRoomConnection}
+            mainRoomId={data?.id ?? ''}
+          />
+          {(breakoutSnap.isTransitioning || breakoutSnap.connectionLost) && (
+            <BreakoutTransition />
+          )}
+          {breakoutSnap.broadcastAnnouncement && (
+            <BreakoutBroadcastBanner
+              message={breakoutSnap.broadcastAnnouncement.message}
+              onDismiss={() => {
+                breakoutStore.broadcastAnnouncement = null
+              }}
+            />
+          )}
+          {/* BreakoutActions owns useBreakoutRoomSwap — must stay inside <LiveKitRoom> */}
+          <BreakoutActions
+            roomId={roomId}
+            setActiveRoomConnection={setActiveRoomConnection}
+            mainRoomId={data?.id ?? ''}
+          />
           <VideoConference />
           {!isMobile && <InviteDialog mode={mode} />}
           <PictureInPictureConference />

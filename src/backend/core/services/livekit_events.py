@@ -6,12 +6,15 @@ import re
 import uuid
 from enum import Enum
 from logging import getLogger
+from typing import Optional
 
 from django.conf import settings
 
 from livekit import api
 
 from core import models
+from core.breakout.models import BreakoutRoom, BreakoutSession
+from core.breakout.services import BreakoutService
 from core.recording.services.metadata_collector import (
     MetadataCollectorException,
     MetadataCollectorService,
@@ -100,6 +103,7 @@ class LiveKitEventsService:
             "egress_ended": self._handle_egress_ended,
             "room_started": self._handle_room_started,
             "room_finished": self._handle_room_finished,
+            "participant_joined": self._handle_participant_joined,
             "participant_left": self._handle_participant_left,
         }
 
@@ -147,7 +151,24 @@ class LiveKitEventsService:
             )
             return
 
-        if self._filter_regex and not self._filter_regex.search(room_name):
+        if self._is_breakout_room(room_name) and data.event in {
+            LiveKitWebhookEventType.ROOM_STARTED.value,
+            LiveKitWebhookEventType.ROOM_FINISHED.value,
+        }:
+            logger.info(
+                "Acknowledging lifecycle webhook for breakout room '%s'.",
+                room_name,
+            )
+            return
+
+        scope_name = self._resolve_scope_name(room_name)
+        if scope_name is None:
+            logger.warning(
+                "Ignoring webhook event for breakout room '%s' not owned here",
+                room_name,
+            )
+            return
+        if self._filter_regex and not self._filter_regex.search(scope_name):
             logger.info("Filtered webhook event for room '%s'", room_name)
             return
 
@@ -192,7 +213,7 @@ class LiveKitEventsService:
 
         try:
             room_name = str(recording.room.id)
-            RoomManagement().update_metadata(
+            RoomManagement.update_metadata(
                 room_name, remove_keys=["recording_mode", "recording_status"]
             )
         except RoomNotFoundException:
@@ -241,6 +262,30 @@ class LiveKitEventsService:
         """Return True for ephemeral rooms created by the connection test endpoint."""
         return room_name.startswith(settings.CONNECTION_TEST_ROOM_PREFIX)
 
+    @staticmethod
+    def _is_breakout_room(room_name: str) -> bool:
+        """Return True for namespaced ephemeral breakout rooms."""
+        return BreakoutRoom.is_breakout_room_name(room_name)
+
+    @staticmethod
+    def _resolve_scope_name(room_name: str) -> Optional[str]:
+        """Return the name the deployment scope filter applies to.
+
+        A breakout room is scoped by its parent meeting, so that a media
+        server shared between deployments never lets one of them act on the
+        other's breakout rooms. ``None`` means the room is unknown here. The
+        lookup hits the unique index on ``livekit_room_name``; the handler
+        repeats it, which is accepted for one point read per join.
+        """
+        if not BreakoutRoom.is_breakout_room_name(room_name):
+            return room_name
+        parent_room_id = (
+            BreakoutRoom.objects.filter(livekit_room_name=room_name)
+            .values_list("session__room_id", flat=True)
+            .first()
+        )
+        return str(parent_room_id) if parent_room_id else None
+
     def _handle_room_started(self, data):
         """Handle 'room_started' event."""
 
@@ -257,6 +302,8 @@ class LiveKitEventsService:
             room = models.Room.objects.get(id=room_id)
         except models.Room.DoesNotExist as err:
             raise ActionFailedError(f"Room with ID {room_id} does not exist") from err
+
+        BreakoutService().restore_parent_metadata(room)
 
         if settings.ROOM_TELEPHONY_ENABLED or settings.ROOMKIT_ENABLED:
             try:
@@ -288,6 +335,17 @@ class LiveKitEventsService:
 
         self.presence_cache.clear_room(room_id)
 
+        # A session stuck in an open status keeps these entries alive until
+        # LOBBY_ACCEPTED_TIMEOUT (6 h) expires them; that TTL is the backstop.
+        if BreakoutSession.objects.filter(
+            room_id=room_id, status__in=BreakoutSession.OPEN_STATUSES
+        ).exists():
+            logger.info(
+                "Keeping lobby admissions for room %s: a breakout session is open",
+                room_id,
+            )
+            return
+
         try:
             self.lobby_service.clear_room_cache(room_id)
         except Exception as e:
@@ -314,3 +372,20 @@ class LiveKitEventsService:
         if not identity:
             return
         self.presence_cache.clear(data.room.name, identity)
+
+    def _handle_participant_joined(self, data):
+        """Reject cached breakout-room grants after an assignment changes."""
+        if not self._is_breakout_room(data.room.name):
+            return
+        identity = data.participant.identity
+        if not identity:
+            return
+
+        try:
+            BreakoutService().enforce_breakout_participant_access(
+                data.room.name, identity
+            )
+        except Exception as error:
+            raise ActionFailedError(
+                "Failed to enforce breakout participant assignment"
+            ) from error

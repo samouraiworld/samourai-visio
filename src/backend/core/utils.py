@@ -36,6 +36,25 @@ from livekit.api import (  # pylint: disable=E0611
 )
 
 logger = logging.getLogger(__name__)
+LIVEKIT_HTTP_TIMEOUT_SECONDS = 10
+
+
+class _LiveKitAPIWithOwnedSession:
+    """Proxy a LiveKit client and close the HTTP session created for it."""
+
+    def __init__(self, client, session):
+        self._client = client
+        self._session = session
+
+    def __getattr__(self, name):
+        return getattr(self._client, name)
+
+    async def aclose(self):
+        """Close both the LiveKit client and its owned HTTP session."""
+        try:
+            await self._client.aclose()
+        finally:
+            await self._session.close()
 
 
 def generate_color(identity: str) -> str:
@@ -69,6 +88,7 @@ def generate_token(  # noqa: PLR0917
     role: Optional[str] = None,
     participant_id: Optional[str] = None,
     ttl: Optional[timedelta] = None,
+    can_publish_data: bool = True,
 ) -> str:
     """Generate a LiveKit access token for a user in a specific room.
 
@@ -85,6 +105,7 @@ def generate_token(  # noqa: PLR0917
         participant_id (Optional[str]): Stable identifier for anonymous users;
                          used as identity when user.is_anonymous.
         ttl (Optional[timedelta]): Token validity duration. Defaults to LiveKit SDK default.
+        can_publish_data (bool): Whether the participant can publish LiveKit data.
 
     Returns:
         str: The LiveKit JWT access token.
@@ -103,6 +124,7 @@ def generate_token(  # noqa: PLR0917
         room_admin=is_admin_or_owner,
         can_update_own_metadata=False,
         can_publish=bool(sources),
+        can_publish_data=can_publish_data,
         can_publish_sources=sources,
         can_subscribe=True,
     )
@@ -225,12 +247,18 @@ def create_livekit_client(custom_configuration=None):
 
     if not settings.LIVEKIT_VERIFY_SSL:
         connector = aiohttp.TCPConnector(ssl=False)
-        custom_session = aiohttp.ClientSession(connector=connector)
+        custom_session = aiohttp.ClientSession(
+            connector=connector,
+            timeout=aiohttp.ClientTimeout(total=LIVEKIT_HTTP_TIMEOUT_SECONDS),
+        )
 
     # Use default configuration if none provided
     configuration = custom_configuration or settings.LIVEKIT_CONFIGURATION
 
-    return LiveKitAPI(session=custom_session, **configuration)
+    client = LiveKitAPI(session=custom_session, **configuration)
+    if custom_session is not None:
+        return _LiveKitAPIWithOwnedSession(client, custom_session)
+    return client
 
 
 class NotificationError(Exception):
