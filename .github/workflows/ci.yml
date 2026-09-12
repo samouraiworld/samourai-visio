@@ -6,7 +6,7 @@ on:
       - main
   pull_request:
     branches:
-      - "*"
+      - "**"
 permissions:
   contents: read
 
@@ -39,7 +39,7 @@ jobs:
       - name: Enforce absence of print statements in code
         if: always()
         run: |
-          ! git diff origin/${{ github.event.pull_request.base.ref }}..HEAD -- . ':(exclude).github/workflows/**' | grep "print("
+          ! git diff origin/${{ github.event.pull_request.base.ref }}..HEAD -- . ':(exclude).github/workflows/**' ':(exclude).github/scripts/**' | grep "print("
       - name: Check absence of fixup commits
         if: always()
         run: |
