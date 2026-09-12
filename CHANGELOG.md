@@ -16,6 +16,7 @@ and this project adheres to
 ### Changed
 
 - ⬆️(dev) pin LiveKit server to v1.13.6
+- 🔒️(assets) strip editor metadata from tracked PNG files
 
 ### Fixed
 
