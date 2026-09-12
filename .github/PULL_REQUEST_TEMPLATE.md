@@ -23,7 +23,7 @@ Tick anything this PR touches, and say how you proved it actually works:
 - [ ] A **list-valued setting** — comma-separated, never JSON. Proved it parses to the expected list.
 - [ ] A **bind-mount or asset path** — the SPA fallback returns `200 text/html` for a missing file, never 404. Proved the content type.
 - [ ] A **design token** — Panda tokens, not Cunningham. Proved the override applies to a rendered element, not just that the variable is defined.
-- [ ] An **image tag** — pinned, not floating.
+- [ ] An **image reference** — `tag@sha256:digest`, resolved with `scripts/resolve-image-digest.sh`; CI refuses a tag alone.
 - [ ] Nothing above.
 
 ## Secrets
