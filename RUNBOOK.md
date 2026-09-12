@@ -677,21 +677,46 @@ only then touches `~/backups/LAST_OK` — the freshness marker
 Local dumps keep 7 days; the bucket keeps 30 — **the number the privacy
 policy publishes**, so changing one means changing the other.
 
+**Two keys.** The nightly dump and the restore drill use a key that can
+write and read but **not delete**; `backup.sh prune` — a second cron line, a
+second process — is the only thing holding a key that can. A leaked write
+key can then add to the bucket but never empty it, which is what a backup
+has to keep against the host it protects. The nightly asserts the published
+retention as an invariant (oldest surviving object) and never deletes, so a
+prune that stopped turns the nightly red within two days.
+
 Install, on the host:
 
 ```bash
 sudo apt-get install -y rclone
 
-# 1. The remote — Scaleway Object Storage, fr-par, private bucket.
-#    Create the bucket + an API key with Object Storage rights first.
+# 1. The bucket — Scaleway Object Storage, fr-par, private — and TWO API
+#    keys, each under an IAM policy of its own (Scaleway's permission sets):
+#      write key   objects read + write   (ObjectStorageObjectsRead, ObjectStorageObjectsWrite)
+#      prune key   objects read + delete  (ObjectStorageObjectsRead, ObjectStorageObjectsDelete)
+#    If listing the prefix fails with AccessDenied on the first run, add
+#    ObjectStorageBucketsRead to both.
 cp deploy/env.d/backup.example ~/visio/env.d/backup
-vi ~/visio/env.d/backup          # fill the two keys + the bucket name
+vi ~/visio/env.d/backup          # both key pairs + the bucket name
 chmod 600 ~/visio/env.d/backup
+<repo>/scripts/preflight.sh config   # refuses the same access key in both blocks
 
-# 2. First run, by hand — this is also what proves the credentials:
-cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/backup.sh
+# 2. First runs, by hand — this is also what proves the credentials:
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/backup.sh          # write key: upload, verify, list
+cd ~/visio && VISIO_DIR=~/visio <repo>/scripts/backup.sh prune    # prune key: delete (nothing yet), list
 
-# 3. The cron. Edit <user> and the two absolute paths inside, then:
+# 3. Prove the write key CANNOT delete — the property everything above
+#    rests on, and the one no script can see from the outside. Through the
+#    `visio` remote, on a throwaway object, never on a dump:
+set -a; . ~/visio/env.d/backup; set +a
+echo probe | rclone rcat "${BACKUP_REMOTE_PATH}/permission-probe.txt"
+rclone deletefile "${BACKUP_REMOTE_PATH}/permission-probe.txt"        # must FAIL: AccessDenied
+rclone deletefile "visioprune:${BACKUP_REMOTE_PATH#*:}/permission-probe.txt"   # prune key: succeeds
+unset "${!RCLONE_CONFIG_@}" "${!BACKUP_@}"
+#    A write key that deletes the probe has too many rights: fix the IAM
+#    policy before the cron goes in.
+
+# 4. The cron — both lines. Edit <user> and the two absolute paths, then:
 sudo cp deploy/host/visio-backup.cron /etc/cron.d/visio-backup
 ```
 
@@ -831,3 +856,5 @@ No secret rotates cleanly by itself — each has a blast radius:
 | `DB_PASSWORD` | change in PostgreSQL *and* `env.d/postgresql` |
 | `OIDC_RP_CLIENT_SECRET` | regenerate in Clerk; login is broken between regeneration and restart |
 | Scaleway TEM API key | invitation emails fail silently until restart |
+| Object Storage **write** key (`RCLONE_CONFIG_VISIO_*`) | the nightly backup and `restore-drill.sh --remote` fail until `env.d/backup` carries the new key — `LAST_OK` goes stale, `preflight.sh stack` red within a day |
+| Object Storage **prune** key (`RCLONE_CONFIG_VISIOPRUNE_*`) | only `backup.sh prune` fails; the nightly's retention invariant turns red at 32 days if it is forgotten. Re-run §8ter step 3 after either rotation |
