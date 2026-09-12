@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import {
   LiveKitRoom,
+  useRoomContext,
   usePersistentUserChoices,
 } from '@livekit/components-react'
 import {
@@ -54,7 +55,6 @@ import {
   completeBreakoutTransition,
   failBreakoutConnection,
   registerRoomSwapHandler,
-  requestAssignmentRefresh,
 } from '@/features/breakout/stores/breakout'
 import { BreakoutTransition } from '@/features/breakout/components/BreakoutTransition'
 import { BreakoutParticipantOverlay } from '@/features/breakout/components/BreakoutParticipantOverlay'
@@ -77,7 +77,7 @@ import {
   isRemovalAReassignment,
   resolveDisconnectAction,
 } from '@/features/breakout/utils/disconnectActions'
-import { BREAKOUT_DEFAULTS } from '@/features/breakout/utils/constants'
+import { useBreakoutRecovery } from '@/features/breakout/hooks/useBreakoutRecovery'
 import { finishBreakoutConnection } from '@/features/breakout/utils/connectionLifecycle'
 import { acknowledgeConnectedHelp } from '@/features/breakout/utils/helpAcknowledgement'
 
@@ -124,6 +124,7 @@ const BreakoutActions = ({
     setActiveRoomConnection,
   })
   const snap = useSnapshot(breakoutStore)
+  const connectedRoom = useRoomContext()
   const isAdminOrOwner = useIsAdminOrOwner()
   // Breakout tokens are minted with role "member"; keep the host's controls
   // while they visit a room.
@@ -160,12 +161,12 @@ const BreakoutActions = ({
           onReturnToAssigned={() => {
             const assignment = assignmentState?.assignment
             if (!assignment || !snap.activeSessionId) return
-            moveToBreakoutRoom(
+            void moveToBreakoutRoom(
               assignment.breakout_room_id,
               snap.activeSessionId,
               mainRoomId,
               assignment.breakout_room_name
-            )
+            ).catch(() => undefined)
           }}
         />
       )}
@@ -182,6 +183,13 @@ const BreakoutActions = ({
               true
             )
               .then((expectedLivekitRoomName) => {
+                if (
+                  connectedRoom.state === 'connected' &&
+                  connectedRoom.name === expectedLivekitRoomName
+                ) {
+                  handleAcknowledge()
+                  return
+                }
                 breakoutStore.pendingHelpAcknowledgement = {
                   roomId: mainRoomId,
                   sessionId: helpRequest.session,
@@ -343,7 +351,13 @@ export const Conference = ({
     userConfig.audioOutputDeviceId,
   ])
 
-  const room = useMemo(() => new Room(roomOptions), [roomOptions])
+  // Each token gets its own transport: an old provider's unmount cleanup
+  // must never disconnect the replacement connection, even for the same room.
+  const connectionToken = activeRoomConnection.token ?? data?.livekit?.token
+  const room = useMemo(() => {
+    void connectionToken
+    return new Room(roomOptions)
+  }, [roomOptions, connectionToken])
 
   useEffect(() => {
     /**
@@ -394,13 +408,7 @@ export const Conference = ({
 
   const hasAutoMutedRef = useRef(false)
 
-  const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(
-    () => () => {
-      if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current)
-    },
-    []
-  )
+  const { recoverSession, stopRecovery } = useBreakoutRecovery(roomId)
 
   /*
    * Ensure stable WebSocket connection URL. This is critical for legacy browser compatibility
@@ -440,8 +448,8 @@ export const Conference = ({
         <LiveKitRoom
           room={room}
           serverUrl={serverUrl}
-          key={activeRoomConnection.roomName ?? data?.livekit?.room}
-          token={activeRoomConnection.token ?? data?.livekit?.token}
+          key={connectionToken}
+          token={connectionToken}
           connect={isConnectionWarmedUp}
           audio={
             breakoutSnap.pendingMediaIntent ? false : userConfig.audioEnabled
@@ -459,7 +467,6 @@ export const Conference = ({
             backgroundColor: 'primaryDark.50 !important',
           })}
           onError={(e) => {
-            failBreakoutConnection(e)
             const failure = getMediaDeviceFailure(e)
             if (failure && failure !== MediaDeviceFailure.Other) return
 
@@ -472,22 +479,22 @@ export const Conference = ({
               return
             }
 
+            const wasTransitioning = breakoutStore.isTransitioning
+            failBreakoutConnection(e)
+            if (wasTransitioning && room.state !== 'connected') recoverSession()
+
             reportError('livekit_room_error', e, {
               path: 'connect_publish',
             })
           }}
           onConnected={async () => {
-            const connectedRoomName =
-              activeRoomConnection.roomName ?? data?.livekit?.room
+            const connectedRoomName = room.name
             breakoutStore.currentBreakoutRoomLkName =
               connectedRoomName && connectedRoomName !== data?.livekit?.room
                 ? connectedRoomName
                 : null
             breakoutStore.connectionLost = false
-            if (recoveryTimerRef.current) {
-              clearTimeout(recoveryTimerRef.current)
-              recoveryTimerRef.current = null
-            }
+            stopRecovery()
             const pendingHelp = breakoutStore.pendingHelpAcknowledgement
             const acknowledgePendingHelp = async () => {
               if (
@@ -558,28 +565,6 @@ export const Conference = ({
               }
             }
 
-            const recoverSession = () => {
-              // The poll decides whether we go back to main or rejoin; give up
-              // to the feedback page if no connection lands in time.
-              breakoutStore.connectionLost = true
-              requestAssignmentRefresh()
-              // A second drop must restart the full grace period, not inherit
-              // the deadline of an orphaned timer.
-              if (recoveryTimerRef.current)
-                clearTimeout(recoveryTimerRef.current)
-              recoveryTimerRef.current = setTimeout(() => {
-                if (!breakoutStore.connectionLost) return
-                // leaveMeeting() only navigates for three reasons; a stale
-                // recovery must always end on the feedback page.
-                clearBreakoutState()
-                navigateTo(
-                  'feedback',
-                  {},
-                  { state: { reason: e, room_id: roomId } }
-                )
-              }, BREAKOUT_DEFAULTS.RECOVERY_TIMEOUT_MS)
-            }
-
             const action = resolveDisconnectAction({
               reason: e,
               isTransitioning: breakoutStore.isTransitioning,
@@ -590,7 +575,7 @@ export const Conference = ({
 
             if (action === 'ignore') return
             if (action === 'recover-session') {
-              recoverSession()
+              recoverSession(e)
               return
             }
             if (action === 'verify-assignment') {
@@ -602,7 +587,7 @@ export const Conference = ({
               }
               void fetchCurrentBreakoutAssignment(data.id, sessionId)
                 .then((fresh) => {
-                  if (isRemovalAReassignment(previous, fresh)) recoverSession()
+                  if (isRemovalAReassignment(previous, fresh)) recoverSession(e)
                   else leaveMeeting()
                 })
                 .catch(() => leaveMeeting())

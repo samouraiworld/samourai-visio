@@ -9,6 +9,7 @@ import {
 } from 'vitest'
 import {
   bindBreakoutToMainRoom,
+  bindBreakoutSession,
   breakoutStore,
   clearBreakoutSession,
   clearBreakoutState,
@@ -226,12 +227,15 @@ describe('bindBreakoutToMainRoom', () => {
       breakoutStore.currentBreakoutRoomLkName = 'breakout_s_0'
       breakoutStore.pausedAssignmentRevision = 4
       prepareLobbyReentry()
-      expect(breakoutStore.activeSessionId).toBeNull()
+      expect(breakoutStore.activeSessionId).toBe('session-1')
       expect(breakoutStore.currentBreakoutRoomLkName).toBeNull()
       expect(breakoutStore.pausedAssignmentRevision).toBe(4)
       expect(sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_REENTRY)).toBe('1')
       const persisted = sessionStorage.getItem(STORAGE_KEYS.BREAKOUT_STATE)
       expect(JSON.parse(persisted ?? '{}').pausedAssignmentRevision).toBe(4)
+      bindBreakoutSession('session-2')
+      expect(breakoutStore.pausedAssignmentRevision).toBeNull()
+      expect(breakoutStore.revisionHint).toBe(0)
     })
   })
 })

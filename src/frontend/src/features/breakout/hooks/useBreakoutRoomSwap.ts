@@ -7,6 +7,7 @@ import { userStore } from '@/stores/user'
 import type { BreakoutLiveKitConnection } from '../api/types'
 import {
   breakoutStore,
+  completeBreakoutTransition,
   prepareLobbyReentry,
   triggerRoomSwap,
 } from '../stores/breakout'
@@ -39,6 +40,10 @@ export const useBreakoutRoomSwap = ({
 
   const applyConnection = useCallback(
     async (connection: RoomConnection) => {
+      if (room.state === 'connected' && room.name === connection.roomName) {
+        completeBreakoutTransition()
+        return
+      }
       // Room.connect() returns immediately when the room object is already
       // connected and never looks at the token, so the meeting has to be left
       // before the remount hands the breakout token over. See roomLifecycle.
@@ -50,13 +55,16 @@ export const useBreakoutRoomSwap = ({
     [room, setActiveRoomConnection]
   )
 
-  const failTransition = useCallback((error: unknown) => {
-    breakoutStore.isTransitioning = false
-    breakoutStore.pendingMediaIntent = null
-    breakoutStore.clearAfterTransition = false
-    breakoutStore.transitionError =
-      error instanceof Error ? error.message : 'room_transition_failed'
-  }, [])
+  const failTransition = useCallback(
+    (error: unknown) => {
+      breakoutStore.isTransitioning = false
+      if (room.state === 'connected') breakoutStore.pendingMediaIntent = null
+      breakoutStore.clearAfterTransition = false
+      breakoutStore.transitionError =
+        error instanceof Error ? error.message : 'room_transition_failed'
+    },
+    [room]
+  )
 
   const moveToBreakoutRoom = useCallback(
     async (
@@ -66,6 +74,8 @@ export const useBreakoutRoomSwap = ({
       roomDisplayName?: string,
       isModeratorVisit = false
     ) => {
+      if (breakoutStore.isTransitioning)
+        throw new Error('room_transition_in_progress')
       beginTransition()
       breakoutStore.transitionTargetName = roomDisplayName ?? null
       try {
@@ -98,13 +108,17 @@ export const useBreakoutRoomSwap = ({
   const transitionToMainRoom = useCallback(
     async (clearOnConnect: boolean) => {
       const mainSlug = breakoutStore.mainRoomSlug
-      if (!mainSlug) return
+      if (!mainSlug || breakoutStore.isTransitioning) return
 
       // Nothing to return from: a participant already in the meeting would
       // otherwise be disconnected and reconnected to the room they are in.
       // The lost-connection recovery path keeps currentBreakoutRoomLkName set,
       // so it still passes here.
-      if (!breakoutStore.currentBreakoutRoomLkName) return
+      if (
+        !breakoutStore.currentBreakoutRoomLkName &&
+        !breakoutStore.connectionLost
+      )
+        return
 
       beginTransition()
       breakoutStore.clearAfterTransition = clearOnConnect

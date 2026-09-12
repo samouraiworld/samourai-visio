@@ -27,7 +27,7 @@ from timezone_field import TimeZoneField
 
 from . import fields, utils
 from .recording.enums import FileExtension
-from .validators import sub_validator
+from .validators import is_legacy_sub, sub_validator
 
 logger = getLogger(__name__)
 
@@ -240,6 +240,18 @@ class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
 
     def __str__(self):
         return self.email or self.admin_email or str(self.id)
+
+    def clean_fields(self, exclude=None):
+        """Keep unchanged historical subjects valid during profile/login saves."""
+        exclude = set(exclude or ())
+        if (
+            "sub" not in exclude
+            and is_legacy_sub(self.sub)
+            and not self._state.adding
+            and type(self).objects.filter(pk=self.pk, sub=self.sub).exists()
+        ):
+            exclude.add("sub")
+        super().clean_fields(exclude=exclude)
 
     def email_user(self, subject, message, from_email=None, **kwargs):
         """Email this user."""

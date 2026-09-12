@@ -69,4 +69,24 @@ grep -q \
   "Use breakoutRooms.enabled instead of celeryBackend.envVars.MEET_BREAKOUT_ROOMS_ENABLED" \
   "${test_dir}/legacy-error.txt"
 
+assert_beat_storage() {
+  local manifest="$1"
+  grep -q -- '--schedule=/var/run/celery/celerybeat-schedule' "${manifest}" &&
+    grep -q 'mountPath: /var/run/celery' "${manifest}" &&
+    grep -q 'emptyDir: {}' "${manifest}"
+}
+
+beat_manifest="${test_dir}/beat.yaml"
+deployment_document "${enabled_manifest}" audit-meet-celery-beat > "${beat_manifest}"
+assert_beat_storage "${beat_manifest}"
+
+# Prove each storage invariant can fail independently.
+for missing in 'schedule=' 'mountPath: /var/run/celery' 'emptyDir:'; do
+  grep -v -F -- "${missing}" "${beat_manifest}" > "${test_dir}/broken-beat.yaml"
+  if assert_beat_storage "${test_dir}/broken-beat.yaml"; then
+    echo "Missing Beat storage invariant was accepted: ${missing}" >&2
+    exit 1
+  fi
+done
+
 echo "Breakout Helm runtime invariants passed"

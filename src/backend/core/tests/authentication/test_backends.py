@@ -2,7 +2,11 @@
 
 from unittest import mock
 
-from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    SuspiciousOperation,
+    ValidationError,
+)
 
 import pytest
 
@@ -659,3 +663,36 @@ def test_marketing_signup_handles_contact_creation_errors(
 
     # Should not raise any exception
     OIDCAuthenticationBackend.signup_to_marketing_email("test@example.com")
+
+
+def test_legacy_unicode_subject_can_log_in_and_update_profile(monkeypatch, caplog):
+    """An unchanged subject accepted before the upgrade remains usable."""
+    user = UserFactory(email="legacy@example.com", full_name="Old name")
+    models.User.objects.filter(pk=user.pk).update(sub="élise")
+    monkeypatch.setattr(
+        OIDCAuthenticationBackend,
+        "get_userinfo",
+        lambda *args: {
+            "sub": "élise",
+            "email": user.email,
+            "given_name": "New",
+            "usual_name": "Name",
+        },
+    )
+    authenticated = OIDCAuthenticationBackend().get_or_create_user(
+        access_token="test-token", id_token=None, payload=None
+    )
+    assert authenticated.pk == user.pk
+    authenticated.refresh_from_db()
+    assert authenticated.full_name == "New Name"
+    assert "legacy" in caplog.text.lower()
+
+
+def test_legacy_subject_compatibility_does_not_allow_replacement():
+    """Compatibility is limited to the same previously stored subject."""
+    user = UserFactory()
+    models.User.objects.filter(pk=user.pk).update(sub="élise")
+    user.refresh_from_db()
+    user.sub = "another-é"
+    with pytest.raises(ValidationError):
+        user.save()

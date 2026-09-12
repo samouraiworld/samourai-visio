@@ -1,5 +1,7 @@
 """Custom validators for the core app."""
 
+import re
+
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
@@ -21,3 +23,12 @@ def sub_validator(value):
         raise ValidationError(
             _("Enter a valid sub. This value should be printable ASCII only.")
         )
+
+
+def is_legacy_sub(value):
+    """Identify non-ASCII subjects accepted by the historical Unicode regex."""
+    return (
+        isinstance(value, str)
+        and not value.isascii()
+        and re.fullmatch(r"[\w.@+\-]+", value) is not None
+    )

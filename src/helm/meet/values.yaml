@@ -795,13 +795,15 @@ celeryBeat:
     - "meet.celery_app"
     - "beat"
     - "--loglevel=info"
+    - "--schedule=/var/run/celery/celerybeat-schedule"
   ## @param celeryBeat.envVars Additional environment variables
   envVars:
     <<: *commonEnvVars
   ## @param celeryBeat.podAnnotations Annotations for the Beat pod
   podAnnotations: {}
   ## @param celeryBeat.podSecurityContext Pod security context
-  podSecurityContext: null
+  podSecurityContext:
+    fsGroup: 1000
   ## @param celeryBeat.securityContext Container security context
   securityContext: null
   ## @param celeryBeat.resources Resource requests and limits

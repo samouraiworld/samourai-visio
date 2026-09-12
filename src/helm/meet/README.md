@@ -294,10 +294,10 @@
 | Name                              | Description                                | Value                                             |
 | --------------------------------- | ------------------------------------------ | ------------------------------------------------- |
 | `celeryBeat.enabled`              | Deploy the Celery Beat scheduler           | `false`                                           |
-| `celeryBeat.command`              | Celery Beat command                        | `["celery","-A","meet.celery_app","beat","--loglevel=info"]` |
+| `celeryBeat.command`              | Celery Beat command                        | `["celery","-A","meet.celery_app","beat","--loglevel=info","--schedule=/var/run/celery/celerybeat-schedule"]` |
 | `celeryBeat.envVars`              | Additional environment variables           | `undefined`                                       |
 | `celeryBeat.podAnnotations`       | Annotations for the Beat pod               | `{}`                                              |
-| `celeryBeat.podSecurityContext`   | Pod security context                       | `nil`                                             |
+| `celeryBeat.podSecurityContext`   | Pod security context                       | `{"fsGroup":1000}`                                             |
 | `celeryBeat.securityContext`      | Container security context                 | `nil`                                             |
 | `celeryBeat.resources`            | Resource requests and limits               | `{}`                                              |
 | `celeryBeat.nodeSelector`         | Node selector                              | `{}`                                              |

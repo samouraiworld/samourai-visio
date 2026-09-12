@@ -23,6 +23,8 @@ and this project adheres to
 
 ### Fixed
 
+- 🐛(breakout) recover connections and preserve scoped participant access #63
+
 - 🐛(ci) judge the print-statement rule on added lines only
 - 🐛(breakout) leave the meeting before joining a breakout room #63
 - 🐛(breakout) preserve media intent and help state during recovery

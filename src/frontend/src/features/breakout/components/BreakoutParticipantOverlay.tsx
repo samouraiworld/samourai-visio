@@ -61,12 +61,12 @@ export const BreakoutParticipantOverlay = ({
   const handleAskForHelp = async () => {
     if (!sessionId || !roomId) return
 
-    await sendHelpRequest({ roomId, sessionId })
+    await sendHelpRequest({ roomId, sessionId }).catch(() => undefined)
   }
 
   const handleCancelHelp = async () => {
     if (!sessionId || !roomId) return
-    await cancelHelpRequest({ roomId, sessionId })
+    await cancelHelpRequest({ roomId, sessionId }).catch(() => undefined)
   }
 
   return (

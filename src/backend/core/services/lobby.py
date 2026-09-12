@@ -239,6 +239,21 @@ class LobbyService:
             )
         )
 
+    def can_access_room(self, room, request) -> bool:
+        """Check current room access without issuing a token or changing admission."""
+        user = request.user
+        if self.can_bypass_lobby(room, user, room.get_role(user)):
+            return True
+        # Admission cookies identify a lobby entry even for signed-in users;
+        # their LiveKit identity is a separate, opaque OIDC subject.
+        participant_id = self.get_participant_id(request, room.id)
+        if not participant_id:
+            return False
+        participant = self._get_participant(room.id, participant_id)
+        return bool(
+            participant and participant.status == LobbyParticipantStatus.ACCEPTED
+        )
+
     def request_entry(
         self,
         room: models.Room,

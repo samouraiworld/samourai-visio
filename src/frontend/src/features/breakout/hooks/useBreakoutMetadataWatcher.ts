@@ -3,7 +3,11 @@ import { useRoomInfo } from '@livekit/components-react'
 import { useSnapshot } from 'valtio'
 import type { BreakoutMetadata } from '../api/types'
 import { useCurrentBreakoutAssignment } from '../api/useCurrentBreakoutAssignment'
-import { breakoutStore, clearBreakoutSession } from '../stores/breakout'
+import {
+  bindBreakoutSession,
+  breakoutStore,
+  clearBreakoutSession,
+} from '../stores/breakout'
 import { resolveAssignmentAction } from '../utils/assignmentActions'
 import { shouldShowBroadcast } from '../utils/broadcastDisplay'
 import { useBreakoutRoomSwap } from './useBreakoutRoomSwap'
@@ -24,10 +28,9 @@ export const useBreakoutMetadataWatcher = ({
 }: UseBreakoutMetadataWatcherParams) => {
   const roomInfo = useRoomInfo()
   const snapshot = useSnapshot(breakoutStore)
-  const transitionRevision = useRef<number | null>(null)
   // One transition attempt per poll result: a refused join must wait for the
   // next poll (or the next hint), never loop on the store flag flipping back.
-  const attemptedAt = useRef(0)
+  const attemptedAt = useRef<string | null>(null)
   const { moveToBreakoutRoom, returnToMainRoom, returnToMainRoomAfterClose } =
     useBreakoutRoomSwap({ currentRoomSlug, setActiveRoomConnection })
 
@@ -52,7 +55,7 @@ export const useBreakoutMetadataWatcher = ({
   // Room metadata is server-authored: it is the only source of revisionHint.
   useEffect(() => {
     if (!metadata) return
-    breakoutStore.activeSessionId = metadata.session_id
+    bindBreakoutSession(metadata.session_id)
     breakoutStore.revisionHint = Math.max(
       breakoutStore.revisionHint,
       metadata.revision
@@ -110,9 +113,15 @@ export const useBreakoutMetadataWatcher = ({
   const assignedLkName = assignmentState?.assignment?.livekit_room_name ?? null
 
   useEffect(() => {
-    if (!status || revision === undefined || !polledSessionId) return
+    if (
+      !status ||
+      revision === undefined ||
+      !polledSessionId ||
+      polledSessionId !== sessionId
+    )
+      return
 
-    breakoutStore.activeSessionId = polledSessionId
+    bindBreakoutSession(polledSessionId)
     breakoutStore.revisionHint = Math.max(breakoutStore.revisionHint, revision)
     if (status === 'active' && !snapshot.isModeratorVisiting) {
       breakoutStore.assignedRoomId = assignedRoomId
@@ -134,7 +143,6 @@ export const useBreakoutMetadataWatcher = ({
       currentBreakoutRoomLkName: snapshot.currentBreakoutRoomLkName,
       connectionLost: snapshot.connectionLost,
       pausedAssignmentRevision: snapshot.pausedAssignmentRevision,
-      lastTransitionRevision: transitionRevision.current,
     })
 
     if (action.type === 'none') return
@@ -142,8 +150,9 @@ export const useBreakoutMetadataWatcher = ({
       clearBreakoutSession()
       return
     }
-    if (attemptedAt.current === dataUpdatedAt) return
-    attemptedAt.current = dataUpdatedAt
+    const attempt = `${polledSessionId}:${dataUpdatedAt}`
+    if (attemptedAt.current === attempt) return
+    attemptedAt.current = attempt
 
     switch (action.type) {
       case 'return-after-close':
@@ -154,7 +163,6 @@ export const useBreakoutMetadataWatcher = ({
         void returnToMainRoom().catch(() => undefined)
         return
       case 'move':
-        transitionRevision.current = action.revision
         void moveToBreakoutRoom(
           action.breakoutRoomId,
           polledSessionId,
@@ -162,7 +170,6 @@ export const useBreakoutMetadataWatcher = ({
           action.breakoutRoomName
         ).catch((error: unknown) => {
           console.warn('breakout move failed; next poll retries', error)
-          transitionRevision.current = null
         })
     }
   }, [
@@ -177,6 +184,7 @@ export const useBreakoutMetadataWatcher = ({
     returnToMainRoom,
     returnToMainRoomAfterClose,
     revision,
+    sessionId,
     snapshot.connectionLost,
     snapshot.currentBreakoutRoomLkName,
     snapshot.isModeratorVisiting,

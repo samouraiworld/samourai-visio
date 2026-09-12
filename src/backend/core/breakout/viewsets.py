@@ -12,7 +12,7 @@ from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
-from rest_framework import decorators, status, viewsets
+from rest_framework import decorators, exceptions, status, viewsets
 from rest_framework.response import Response
 
 from core import models as core_models
@@ -26,6 +26,7 @@ from .models import (
     BreakoutSession,
 )
 from .serializers import (
+    AcknowledgeHelpSerializer,
     BreakoutHelpRequestSerializer,
     BreakoutSessionSerializer,
     BreakoutSessionStatusSerializer,
@@ -61,6 +62,32 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         POST   /rooms/{room_id}/breakout-sessions/{sid}/rooms/{rid}/join/ — get LK token
     """
 
+    lookup_value_converter = "uuid"
+
+    def handle_exception(self, exc):
+        """Translate domain failures once, keeping services independent of HTTP."""
+        if isinstance(exc, BreakoutServiceError):
+            status_code = {
+                SessionAlreadyActiveError: status.HTTP_409_CONFLICT,
+                InvalidSessionStateError: status.HTTP_409_CONFLICT,
+                BreakoutUpstreamError: status.HTTP_503_SERVICE_UNAVAILABLE,
+                HelpRequestRateLimitedError: status.HTTP_429_TOO_MANY_REQUESTS,
+            }.get(type(exc), status.HTTP_400_BAD_REQUEST)
+            # Preserve the existing status-update and broadcast API contract.
+            if isinstance(exc, InvalidSessionStateError) and self.action in {
+                "partial_update",
+                "broadcast",
+            }:
+                status_code = status.HTTP_400_BAD_REQUEST
+            return Response({"detail": str(exc)}, status=status_code)
+        return super().handle_exception(exc)
+
+    def _require_manager(self, room, user):
+        if not self._can_manage(room, user):
+            raise exceptions.PermissionDenied(
+                "You must be an administrator or owner of the room."
+            )
+
     def _get_room(self, room_id):
         """Resolve the parent room by primary key (the URL only matches a UUID)."""
         return get_object_or_404(core_models.Room, pk=room_id)
@@ -91,43 +118,18 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         """Create a new breakout session."""
         room = self._get_room(room_id)
 
-        if not self._can_manage(room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(room, request.user)
 
         serializer = CreateBreakoutSessionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            session = BreakoutService().create_session(
-                room=room,
-                num_rooms=serializer.validated_data["num_rooms"],
-                created_by=request.user if request.user.is_authenticated else None,
-                duration_seconds=serializer.validated_data.get("duration_seconds"),
-                room_names=serializer.validated_data.get("room_names"),
-            )
-        except SessionAlreadyActiveError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        except BreakoutUpstreamError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except InvalidSessionStateError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        except BreakoutServiceError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        session = BreakoutService().create_session(
+            room=room,
+            num_rooms=serializer.validated_data["num_rooms"],
+            created_by=request.user if request.user.is_authenticated else None,
+            duration_seconds=serializer.validated_data.get("duration_seconds"),
+            room_names=serializer.validated_data.get("room_names"),
+        )
         session = BreakoutSession.objects.prefetch_related(
             "breakout_rooms__assignments"
         ).get(pk=session.pk)
@@ -173,11 +175,7 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         """Update a session's status (activate or close)."""
         session = self._get_session(room_id, pk)
 
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
 
         serializer = UpdateBreakoutSessionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -192,21 +190,10 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             raise Http404
         service = BreakoutService()
 
-        try:
-            if target_status == BreakoutSession.Status.ACTIVE:
-                session = service.activate_session(session)
-            elif target_status == BreakoutSession.Status.CLOSED:
-                session = service.close_session(session)
-        except InvalidSessionStateError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except BreakoutUpstreamError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        if target_status == BreakoutSession.Status.ACTIVE:
+            session = service.activate_session(session)
+        elif target_status == BreakoutSession.Status.CLOSED:
+            session = service.close_session(session)
 
         session = BreakoutSession.objects.prefetch_related(
             "breakout_rooms__assignments"
@@ -217,31 +204,20 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     def retry(self, request, room_id=None, pk=None):
         """Retry a failed LiveKit effect without duplicating domain state."""
         session = self._get_session(room_id, pk)
-        if not self._can_manage(session.room, request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        try:
-            session = BreakoutService().retry_session(session)
-        except InvalidSessionStateError as error:
-            return Response({"detail": str(error)}, status=status.HTTP_409_CONFLICT)
-        except BreakoutUpstreamError as error:
-            return Response(
-                {"detail": str(error)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        self._require_manager(session.room, request.user)
+        session = BreakoutService().retry_session(session)
         return Response(BreakoutSessionSerializer(session).data)
 
     # ── GET /rooms/{room_id}/breakout-sessions/{sid}/status/ ──────────
 
-    @decorators.action(detail=True, methods=["get"], url_path="status")
+    @decorators.action(
+        detail=True, methods=["get"], url_path="status", url_name="status"
+    )
     def live_status(self, request, room_id=None, pk=None):
         """Get live participant counts for all breakout rooms in a session."""
         session = self._get_session(room_id, pk)
 
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
 
         service = BreakoutService()
         rooms_status = service.get_live_status(session)
@@ -266,36 +242,16 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         """Bulk assign participants to breakout rooms."""
         session = self._get_session(room_id, pk)
 
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
 
         serializer = BulkAssignSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            BreakoutService().assign_participants(
-                session,
-                serializer.validated_data["assignments"],
-                expected_revision=serializer.validated_data["revision"],
-            )
-        except BreakoutUpstreamError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except InvalidSessionStateError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        except BreakoutServiceError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        BreakoutService().assign_participants(
+            session,
+            serializer.validated_data["assignments"],
+            expected_revision=serializer.validated_data["revision"],
+        )
 
         # Return updated session with prefetch
         session = BreakoutSession.objects.prefetch_related(
@@ -310,36 +266,16 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         """Randomly distribute participants across breakout rooms."""
         session = self._get_session(room_id, pk)
 
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
 
         serializer = RandomizeAssignmentsSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            BreakoutService().randomize_assignments(
-                session,
-                serializer.validated_data["participants"],
-                expected_revision=serializer.validated_data["revision"],
-            )
-        except BreakoutUpstreamError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-        except InvalidSessionStateError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        except BreakoutServiceError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        BreakoutService().randomize_assignments(
+            session,
+            serializer.validated_data["participants"],
+            expected_revision=serializer.validated_data["revision"],
+        )
 
         session = BreakoutSession.objects.prefetch_related(
             "breakout_rooms__assignments"
@@ -353,30 +289,15 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
         """Broadcast an announcement message to all breakout rooms."""
         session = self._get_session(room_id, pk)
 
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
 
         serializer = BroadcastMessageSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            recipient_count = BreakoutService().broadcast_message(
-                session,
-                serializer.validated_data["message"],
-            )
-        except InvalidSessionStateError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        except BreakoutUpstreamError as e:
-            return Response(
-                {"detail": str(e)},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
+        recipient_count = BreakoutService().broadcast_message(
+            session,
+            serializer.validated_data["message"],
+        )
 
         return Response(
             {
@@ -415,16 +336,6 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
                 {"detail": "You are not a participant in this breakout room."},
                 status=status.HTTP_403_FORBIDDEN,
             )
-        except InvalidSessionStateError as error:
-            return Response(
-                {"detail": str(error)},
-                status=status.HTTP_409_CONFLICT,
-            )
-        except HelpRequestRateLimitedError as error:
-            return Response(
-                {"detail": str(error)},
-                status=status.HTTP_429_TOO_MANY_REQUESTS,
-            )
         return Response(
             BreakoutHelpRequestSerializer(help_request).data,
             status=(status.HTTP_201_CREATED if created else status.HTTP_200_OK),
@@ -434,11 +345,7 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     def help_requests(self, request, room_id=None, pk=None):
         """List durable open help requests for an authorized manager."""
         session = self._get_session(room_id, pk)
-        if not self._can_manage(session.room, request.user):
-            return Response(
-                {"detail": "You must be an administrator or owner of the room."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
+        self._require_manager(session.room, request.user)
         requests = session.help_requests.filter(
             status=BreakoutHelpRequest.Status.OPEN
         ).select_related("breakout_room")
@@ -468,26 +375,16 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     def acknowledge_help(self, request, room_id=None, pk=None):
         """Acknowledge one help request as a manager."""
         session = self._get_session(room_id, pk)
-        if not self._can_manage(session.room, request.user):
-            return Response(status=status.HTTP_403_FORBIDDEN)
-        expected_room_id = request.data.get("expected_breakout_room_id")
-        try:
-            expected_revision = int(request.data["expected_assignment_revision"])
-        except (KeyError, TypeError, ValueError):
-            return Response(
-                {"detail": "The expected help assignment is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        if not expected_room_id:
-            return Response(
-                {"detail": "The expected help assignment is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+        self._require_manager(session.room, request.user)
+        serializer = AcknowledgeHelpSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        expected_room_id = serializer.validated_data["expected_breakout_room_id"]
+        expected_revision = serializer.validated_data["expected_assignment_revision"]
         with transaction.atomic():
             session = BreakoutSession.objects.select_for_update().get(pk=session.pk)
             help_request = get_object_or_404(
                 BreakoutHelpRequest.objects.select_for_update(),
-                pk=request.data.get("help_request_id"),
+                pk=serializer.validated_data["help_request_id"],
                 session=session,
                 status=BreakoutHelpRequest.Status.OPEN,
             )
@@ -520,6 +417,8 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             .select_related("breakout_room")
             .first()
         )
+        if not assignment and not LobbyService().can_access_room(session.room, request):
+            return Response(status=status.HTTP_403_FORBIDDEN)
         assignment_data = None
         if assignment:
             assignment_data = {
@@ -566,7 +465,8 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
     @decorators.action(
         detail=True,
         methods=["post"],
-        url_path=r"rooms/(?P<breakout_room_id>[^/.]+)/join",
+        url_path="rooms/<uuid:breakout_room_id>/join",
+        url_name="room-join",
     )
     def join_breakout_room(self, request, room_id=None, pk=None, breakout_room_id=None):
         """Get a LiveKit token for a specific breakout room.
@@ -613,14 +513,11 @@ class BreakoutSessionViewSet(viewsets.ViewSet):
             if assignment
             else (request.user.full_name or str(request.user))
         )
-        try:
-            livekit_data = BreakoutService().generate_breakout_token(
-                breakout_room=breakout_room,
-                user=request.user,
-                identity=identity,
-                display_name=display_name,
-            )
-        except InvalidSessionStateError as e:
-            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+        livekit_data = BreakoutService().generate_breakout_token(
+            breakout_room=breakout_room,
+            user=request.user,
+            identity=identity,
+            display_name=display_name,
+        )
 
         return Response({"livekit": livekit_data})

@@ -53,7 +53,9 @@ See the [LiveKit token lifecycle](https://docs.livekit.io/frontends/reference/to
 
 The latest host announcement (`last_broadcast_message`, at most 500 characters)
 is stored on the session, readable by every participant of that session
-through the assignment poll, and cleared when the session closes.
+through the assignment poll, and cleared when the session closes. An unassigned
+caller must have room access or an accepted lobby admission; a waiting or denied
+guest capability proves identity but does not grant access to announcements.
 
 ## Room transitions and media
 
@@ -65,13 +67,15 @@ disabled. Breakout tokens also preserve the main room's exact publication-source
 policy, including an explicit empty list.
 
 Transitions complete from LiveKit connection events rather than fixed delays.
-Failures remain visible and offer a retry. A same-room token change is never a
-transition. When a returning guest's lobby admission has expired, the client
+Failures remain visible and offer a retry. Each connection token owns a fresh
+LiveKit transport, including same-room reconnects, so old-provider cleanup cannot
+disconnect the replacement. Joining a help room already connected is a no-op. When a returning guest's lobby admission has expired, the client
 reloads into the lobby page with an explanation and keeps its deliberate-return
 intent. Any other unplanned disconnect inside a breakout room shows a
 reconnecting state, asks the assignment poll what to do, and leaves to the
-feedback page after 15 s without an answer. A second drop restarts that fifteen
-seconds rather than inheriting the first deadline. A disconnect that carries no
+feedback page after 15 s without an answer. After a successful connection, a later drop starts a fresh grace period. Failed
+retries within one outage do not extend its deadline. A visiting manager recovers
+to the main meeting. A disconnect that carries no
 reason at all — reconnect exhaustion, token expiry — no longer falls through
 silently in any position: outside a breakout room it ends on the feedback page
 like any other.
@@ -83,10 +87,14 @@ of an incomplete connection or initial device preferences.
 ## Lifecycle and cleanup
 
 An empty main room is valid while participants are in breakout rooms and does
-not close the session. Timed sessions use an absolute `ends_at` boundary.
+not close the session. If LiveKit recreates the main room, its start webhook
+restores session metadata under the same lock used by closing and reassignment.
+Timed sessions use an absolute `ends_at` boundary.
 Untimed sessions remain active until explicitly closed.
 
-Cleanup is an idempotent Celery task scheduled by a separate Beat process.
+Cleanup is an idempotent Celery task scheduled by a separate Beat process. Its
+schedule database uses writable storage: `/tmp` in Compose and an `emptyDir`
+mounted at `/var/run/celery` in Helm.
 LiveKit creation, authoritative metadata, participant removal, and room deletion
 failures are reported as retryable upstream failures rather than being silently
 converted into success. Advisory real-time hints are best effort because clients
@@ -165,5 +173,5 @@ disabled until the final candidate passes controlled multi-client browser tests,
 reassignment and refreshed-token replay tests, webhook delay/outage tests, media
 permission and reconnect tests, and keyboard/screen-reader acceptance. Record the
 exact deployed commit, LiveKit version, worker/Beat configuration, and sanitized
-evidence. Any unauthorized media or data exposure blocks release. A human must
-review the final PR head after these checks.
+evidence. Any unauthorized media or data exposure blocks release. Outstanding
+review requests must be addressed before merge.

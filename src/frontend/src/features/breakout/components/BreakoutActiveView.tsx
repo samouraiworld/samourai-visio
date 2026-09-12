@@ -11,14 +11,15 @@
  * 7. 'Close All Rooms' recall button.
  */
 
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useBreakoutManagerAction } from '../hooks/useBreakoutManagerAction'
+import { BreakoutActionFailure } from './BreakoutActionFailure'
+import { useState, useCallback, useMemo } from 'react'
 import { css } from '@/styled-system/css'
 import { Button } from '@/primitives'
 import { useTranslation } from 'react-i18next'
 import { useConfig } from '@/api/useConfig'
 import { useSnapshot } from 'valtio'
 import { useParticipants } from '@livekit/components-react'
-import { queryClient } from '@/api/queryClient'
 import { breakoutStore, clearBreakoutSession } from '../stores/breakout'
 import { useBreakoutStatus } from '../api/useBreakoutStatus'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
@@ -26,13 +27,9 @@ import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
 import { useBroadcastMessage } from '../api/useBroadcastMessage'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useBreakoutRoomSwap } from '../hooks/useBreakoutRoomSwap'
-import { breakoutSessionKey } from '../api/useBreakoutSession'
 import { BreakoutTimer } from './BreakoutTimer'
 import type { BreakoutSession } from '../api/types'
-import {
-  classifyActionFailure,
-  type ActionFailure,
-} from '../utils/actionFailure'
+
 import {
   RiStopFill,
   RiGroupLine,
@@ -94,36 +91,7 @@ export const BreakoutActiveView = ({
       currentRoomSlug: snap.mainRoomSlug ?? undefined,
     })
 
-  const [actionFailure, setActionFailure] = useState<ActionFailure | null>(null)
-
-  // A fresh revision from the poll supersedes a stale failure message.
-  useEffect(() => setActionFailure(null), [session.revision])
-
-  /**
-   * Run a manager action; on failure show why and refresh the stale session.
-   * Returns false when the action was refused so callers stop there.
-   */
-  const runAction = useCallback(
-    async (action: () => Promise<unknown>): Promise<boolean> => {
-      setActionFailure(null)
-      try {
-        await action()
-        return true
-      } catch (error) {
-        const failure = classifyActionFailure(error)
-        // Refetch BEFORE showing the message. This invalidation is itself what
-        // bumps the revision on a 409, and the revision effect above clears the
-        // message on any bump — so setting it first made the conflict alert,
-        // the flagship case of D15, flash and vanish before it could be read.
-        await queryClient.invalidateQueries({
-          queryKey: breakoutSessionKey(roomUuid),
-        })
-        setActionFailure(failure)
-        return false
-      }
-    },
-    [roomUuid]
-  )
+  const { actionFailure, runAction } = useBreakoutManagerAction(roomUuid)
 
   const handleCloseAll = useCallback(async () => {
     if (!sessionId) return
@@ -134,7 +102,7 @@ export const BreakoutActiveView = ({
     if (!closed) return
 
     if (snap.currentBreakoutRoomLkName) {
-      await returnToMainRoomAfterClose()
+      await runAction(returnToMainRoomAfterClose)
       return
     }
     clearBreakoutSession()
@@ -253,6 +221,7 @@ export const BreakoutActiveView = ({
           flex: 1,
         })}
       >
+        <BreakoutActionFailure failure={actionFailure} />
         {session.effect_error ? (
           <div
             role="alert"
@@ -300,20 +269,7 @@ export const BreakoutActiveView = ({
         </p>
       )}
 
-      {actionFailure && (
-        <div
-          role="alert"
-          className={css({
-            padding: 0.75,
-            borderRadius: '8',
-            backgroundColor: 'danger.subtle',
-            color: 'danger.subtle-text',
-            fontSize: 14,
-          })}
-        >
-          {t(`actionFailed.${actionFailure}`)}
-        </div>
-      )}
+      <BreakoutActionFailure failure={actionFailure} />
 
       {session.effect_error && (
         <div
@@ -547,6 +503,7 @@ export const BreakoutActiveView = ({
                     name: p.name || p.identity,
                   })}
                   disabled={isReassigning}
+                  value=""
                   onChange={(e) => {
                     if (e.target.value) {
                       handleInFlightReassign(

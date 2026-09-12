@@ -148,7 +148,7 @@ services:
   celery-beat:
     user: ${DOCKER_USER:-1000}
     image: meet:backend-production
-    command: ["celery", "-A", "meet.celery_app", "beat", "-l", "INFO"]
+    command: ["celery", "-A", "meet.celery_app", "beat", "-l", "INFO", "--schedule=/tmp/celerybeat-schedule"]
     environment:
       - DJANGO_CONFIGURATION=Demo
       - CELERY_ENABLED=true

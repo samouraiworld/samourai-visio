@@ -20,7 +20,6 @@ const base: AssignmentInput = {
   currentBreakoutRoomLkName: null,
   connectionLost: false,
   pausedAssignmentRevision: null,
-  lastTransitionRevision: null,
 }
 
 const resolve = (overrides: Partial<AssignmentInput>) =>
@@ -50,14 +49,8 @@ describe('resolveAssignmentAction', () => {
     const action = resolve({
       currentBreakoutRoomLkName: 'breakout_s_0',
       connectionLost: true,
-      lastTransitionRevision: 3,
     })
     expect(action.type).toBe('move')
-  })
-
-  it('attempts a revision once', () => {
-    expect(resolve({ lastTransitionRevision: null }).type).toBe('move')
-    expect(resolve({ lastTransitionRevision: 3 })).toEqual({ type: 'none' })
   })
 
   it('respects a deliberate return to main until the assignment changes', () => {
@@ -100,5 +93,16 @@ describe('resolveAssignmentAction', () => {
 
   it('waits while the session is still activating', () => {
     expect(resolve({ status: 'activating' })).toEqual({ type: 'none' })
+  })
+  it('returns a disconnected visiting manager to the main meeting', () => {
+    expect(
+      resolve({ isModeratorVisiting: true, connectionLost: true })
+    ).toEqual({ type: 'return-to-main' })
+  })
+
+  it('recovers to main after closure even when the first breakout join never connected', () => {
+    expect(resolve({ status: 'closed', connectionLost: true })).toEqual({
+      type: 'return-after-close',
+    })
   })
 })

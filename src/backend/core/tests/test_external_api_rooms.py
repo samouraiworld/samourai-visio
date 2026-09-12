@@ -26,7 +26,7 @@ from core.models import (
     RoomAccessLevel,
     User,
 )
-from core.services.room_management import RoomManagement
+from core.services.room_management import RoomManagement, RoomManagementException
 
 pytestmark = pytest.mark.django_db
 
@@ -1312,10 +1312,10 @@ def test_api_rooms_update_public_access_enabled_with_settings(
 
 @mock.patch("core.external_api.viewsets.analytics.capture")
 @mock.patch.object(RoomManagement, "update_metadata")
-def test_api_rooms_update_unchanged_skips_livekit_sync(
+def test_api_rooms_update_unchanged_retries_livekit_sync(
     mock_update_metadata, mock_capture
 ):
-    """An update that changes nothing should not sync metadata nor report changes."""
+    """An unchanged update repairs media metadata without reporting a database delta."""
 
     user = UserFactory()
     room = RoomFactory(
@@ -1338,7 +1338,7 @@ def test_api_rooms_update_unchanged_skips_livekit_sync(
     )
 
     assert response.status_code == 200
-    mock_update_metadata.assert_not_called()
+    mock_update_metadata.assert_called_once()
 
     # The event is still emitted for auditing, but reports an empty delta.
     _, _, properties = mock_capture.call_args[0]
@@ -2375,3 +2375,23 @@ def test_api_rooms_addons_disabled_does_not_break_application_auth(settings):
     assert response.status_code == 200
     assert response.data["count"] == 1
     assert response.data["results"][0]["id"] == str(room.id)
+
+
+@mock.patch.object(RoomManagement, "update_metadata")
+def test_api_rooms_update_retries_failed_metadata_sync(update_metadata):
+    """An identical retry repairs the media state after a transient outage."""
+    update_metadata.side_effect = [RoomManagementException("unavailable"), None]
+    user = UserFactory()
+    room = RoomFactory(users=[(user, RoleChoices.OWNER)])
+    client = APIClient()
+    client.credentials(
+        HTTP_AUTHORIZATION=f"Bearer {generate_test_token(user, [ApplicationScope.ROOMS_UPDATE])}"
+    )
+    for _ in range(2):
+        response = client.patch(
+            f"/external-api/v1.0/rooms/{room.id}/",
+            {"configuration": {"everyone_can_mute": True}},
+            format="json",
+        )
+        assert response.status_code == 200
+    assert update_metadata.call_count == 2

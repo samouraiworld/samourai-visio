@@ -97,7 +97,7 @@ class UpdateBreakoutSessionSerializer(serializers.Serializer):
 class BreakoutParticipantSerializer(serializers.Serializer):
     """Validate a participant selected by a manager."""
 
-    identity = serializers.CharField(max_length=255)
+    identity = serializers.CharField(max_length=255, trim_whitespace=False)
     name = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 
@@ -132,21 +132,12 @@ class BulkAssignSerializer(serializers.Serializer):
                 f"Too many rooms in assignment payload: {len(value)} (max 10)."
             )
 
-        allowed_keys = {"identity", "name"}
         for room_id, participants in value.items():
             # Cap participants per room
             if len(participants) > 500:
                 raise serializers.ValidationError(
                     f"Room '{room_id}' has {len(participants)} participants (max 500)."
                 )
-            for idx, participant in enumerate(participants):
-                extra = set(participant.keys()) - allowed_keys
-                if extra:
-                    raise serializers.ValidationError(
-                        f"Participant at room '{room_id}' index {idx} contains "
-                        f"unexpected keys: {sorted(extra)}. "
-                        f"Only 'identity' and 'name' are allowed."
-                    )
         return value
 
 
@@ -219,3 +210,11 @@ class BreakoutHelpRequestSerializer(serializers.ModelSerializer):
             "acknowledged_at",
         ]
         read_only_fields = fields
+
+
+class AcknowledgeHelpSerializer(serializers.Serializer):
+    """Validate the precise help assignment a manager intends to acknowledge."""
+
+    help_request_id = serializers.UUIDField()
+    expected_breakout_room_id = serializers.UUIDField()
+    expected_assignment_revision = serializers.IntegerField(min_value=0)

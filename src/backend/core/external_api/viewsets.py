@@ -256,8 +256,8 @@ class RoomViewSet(
             if getattr(room, field) != previous_value
         )
 
-        if updated_fields:
-            RoomManagement.sync_room_metadata(room)
+        # An identical retry must repair a previous failed LiveKit sync.
+        RoomManagement.sync_room_metadata(room)
 
         self._track_room_event(
             room,

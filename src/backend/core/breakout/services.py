@@ -795,6 +795,18 @@ class BreakoutService:
                     "Breakout effect lock %s could not be released", room_id
                 )
 
+    @serialize_room_effects
+    def restore_parent_metadata(self, room) -> None:
+        """Restore session discovery after LiveKit recreates an empty main room."""
+        session = BreakoutSession.objects.filter(
+            room=room, status__in=BreakoutSession.OPEN_STATUSES
+        ).first()
+        if session is not None:
+            RoomManagement().update_metadata(
+                room_name=str(room.pk),
+                metadata={"breakout": self._build_breakout_metadata(session)},
+            )
+
     def _build_breakout_metadata(self, session: BreakoutSession) -> dict:
         """Build bounded, non-sensitive shared metadata."""
         return {

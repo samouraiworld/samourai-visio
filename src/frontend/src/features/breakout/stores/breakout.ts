@@ -149,7 +149,11 @@ export const clearBreakoutState = (): void => {
   breakoutStore.pausedAssignmentRevision = null
   breakoutStore.lastBroadcastShownAt = null
   breakoutStore.connectionLost = false
-  sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_STATE)
+  try {
+    sessionStorage.removeItem(STORAGE_KEYS.BREAKOUT_STATE)
+  } catch {
+    // Storage may be unavailable; in-memory cleanup still completes.
+  }
 }
 
 /**
@@ -169,8 +173,9 @@ export const clearBreakoutSession = (): void => {
  * deliberate-return intent, and tell the lobby page why it is shown.
  */
 export const prepareLobbyReentry = (): void => {
-  const { pausedAssignmentRevision } = breakoutStore
+  const { activeSessionId, pausedAssignmentRevision } = breakoutStore
   clearBreakoutSession()
+  breakoutStore.activeSessionId = activeSessionId
   breakoutStore.pausedAssignmentRevision = pausedAssignmentRevision
   // Write now: the caller reloads before valtio's subscriber microtask runs.
   persistBreakoutState()
@@ -179,6 +184,18 @@ export const prepareLobbyReentry = (): void => {
   } catch {
     // Best effort: the lobby simply shows no explanation.
   }
+}
+
+/** Revisions and deliberate returns belong to one session, not the meeting. */
+export const bindBreakoutSession = (sessionId: string): void => {
+  if (breakoutStore.activeSessionId === sessionId) return
+  breakoutStore.activeSessionId = sessionId
+  breakoutStore.revisionHint = 0
+  breakoutStore.pausedAssignmentRevision = null
+  breakoutStore.assignedRoomId = null
+  breakoutStore.lastBroadcastShownAt = null
+  breakoutStore.broadcastAnnouncement = null
+  breakoutStore.pendingHelpAcknowledgement = null
 }
 
 /** Ask the metadata watcher to re-read the caller's assignment from the server. */

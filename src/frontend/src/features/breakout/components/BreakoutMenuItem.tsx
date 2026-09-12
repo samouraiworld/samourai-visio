@@ -7,7 +7,7 @@
 import { useTranslation } from 'react-i18next'
 import { RiLayoutGridLine } from '@remixicon/react'
 import { useSnapshot } from 'valtio'
-import { layoutStore } from '@/stores/layout'
+import { useSidePanel } from '@/features/rooms/livekit/hooks/useSidePanel'
 import { MenuItem } from 'react-aria-components'
 import { menuRecipe } from '@/primitives/menuRecipe'
 import { useConfig } from '@/api/useConfig'
@@ -20,6 +20,7 @@ import { canUseBreakoutRooms } from '../utils/featureGate'
 export const BreakoutMenuItem = () => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout' })
   const room = useRoomData()
+  const { toggleBreakout } = useSidePanel()
   const isAdminOrOwner = useIsAdminOrOwner()
   // A visiting host holds a member token inside a breakout room.
   const { isModeratorVisiting } = useSnapshot(breakoutStore)
@@ -42,10 +43,7 @@ export const BreakoutMenuItem = () => {
     <MenuItem
       id="breakout-rooms"
       className={menuRecipe({ icon: true, variant: 'dark' }).item}
-      onAction={() => {
-        layoutStore.activePanelId = 'breakout' as never
-        layoutStore.activeSubPanelId = null
-      }}
+      onAction={toggleBreakout}
     >
       <RiLayoutGridLine size={20} aria-hidden="true" />
       {t('menuItem')}

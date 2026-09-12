@@ -11,7 +11,6 @@ export interface AssignmentInput {
   currentBreakoutRoomLkName: string | null
   connectionLost: boolean
   pausedAssignmentRevision: number | null
-  lastTransitionRevision: number | null
 }
 
 export type AssignmentAction =
@@ -33,13 +32,17 @@ export const resolveAssignmentAction = (
   if (input.isTransitioning) return { type: 'none' }
 
   if (input.status === 'closing' || input.status === 'closed') {
-    return input.currentBreakoutRoomLkName
+    return input.currentBreakoutRoomLkName || input.connectionLost
       ? { type: 'return-after-close' }
       : { type: 'clear' }
   }
 
-  if (input.status !== 'active' || input.isModeratorVisiting) {
+  if (input.status !== 'active') {
     return { type: 'none' }
+  }
+
+  if (input.isModeratorVisiting) {
+    return input.connectionLost ? { type: 'return-to-main' } : { type: 'none' }
   }
 
   // A join after ends_at is refused by the server and the webhook would evict
@@ -48,7 +51,7 @@ export const resolveAssignmentAction = (
 
   const { assignment } = input
   if (!assignment) {
-    return input.currentBreakoutRoomLkName
+    return input.currentBreakoutRoomLkName || input.connectionLost
       ? { type: 'return-to-main' }
       : { type: 'none' }
   }
@@ -59,10 +62,7 @@ export const resolveAssignmentAction = (
   const isPausedHere =
     !input.currentBreakoutRoomLkName &&
     input.pausedAssignmentRevision === input.revision
-  const alreadyTransitioned =
-    input.lastTransitionRevision === input.revision && !input.connectionLost
-
-  if (isAlreadyThere || isPausedHere || alreadyTransitioned) {
+  if (isAlreadyThere || isPausedHere) {
     return { type: 'none' }
   }
 

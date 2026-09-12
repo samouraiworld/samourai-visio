@@ -20,7 +20,8 @@ import { useRandomizeAssignments } from '../api/useRandomizeAssignments'
 import { useAssignParticipants } from '../api/useAssignParticipants'
 import { useUpdateBreakoutSession } from '../api/useUpdateBreakoutSession'
 import { useRetryBreakoutSession } from '../api/useRetryBreakoutSession'
-import { ApiError } from '@/api/ApiError'
+import { useBreakoutManagerAction } from '../hooks/useBreakoutManagerAction'
+import { BreakoutActionFailure } from './BreakoutActionFailure'
 import type { BreakoutSession } from '../api/types'
 import {
   RiShuffleLine,
@@ -53,6 +54,7 @@ const DURATION_OPTION_KEYS = [
 export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.setup' })
   const participants = useParticipants()
+  const { actionFailure, runAction } = useBreakoutManagerAction(roomUuid)
 
   const [numRooms, setNumRooms] = useState<number>(
     BREAKOUT_DEFAULTS.DEFAULT_ROOMS
@@ -86,21 +88,14 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
   )
 
   const handleCreate = useCallback(async () => {
-    try {
-      await createSession({
+    await runAction(() =>
+      createSession({
         roomId: roomUuid,
         numRooms,
         durationSeconds: duration === '0' ? null : parseInt(duration, 10),
       })
-    } catch (e) {
-      if (e instanceof ApiError && e.statusCode === 409) {
-        // A session already exists (e.g. host reloaded the tab mid-session).
-        // useBreakoutSession polling will surface it within its next interval.
-        return
-      }
-      throw e
-    }
-  }, [roomUuid, numRooms, duration, createSession])
+    )
+  }, [roomUuid, numRooms, duration, createSession, runAction])
 
   const handleRandomize = useCallback(async () => {
     if (!session) return
@@ -110,13 +105,15 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
       name: p.name ?? p.identity,
     }))
 
-    await randomize({
-      roomId: roomUuid,
-      sessionId: session.id,
-      revision: session.revision,
-      participants: participantList,
-    })
-  }, [session, assignableParticipants, roomUuid, randomize])
+    await runAction(() =>
+      randomize({
+        roomId: roomUuid,
+        sessionId: session.id,
+        revision: session.revision,
+        participants: participantList,
+      })
+    )
+  }, [session, assignableParticipants, roomUuid, randomize, runAction])
 
   const handleManualAssign = useCallback(
     async (
@@ -148,30 +145,36 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
         })
       }
 
-      await assignManual({
-        roomId: roomUuid,
-        sessionId: session.id,
-        revision: session.revision,
-        assignments: newAssignments,
-      })
+      await runAction(() =>
+        assignManual({
+          roomId: roomUuid,
+          sessionId: session.id,
+          revision: session.revision,
+          assignments: newAssignments,
+        })
+      )
     },
-    [session, roomUuid, assignManual]
+    [session, roomUuid, assignManual, runAction]
   )
 
   const handleActivate = useCallback(async () => {
     if (!session) return
 
-    await updateSession({
-      roomId: roomUuid,
-      sessionId: session.id,
-      status: 'active',
-    })
-  }, [session, roomUuid, updateSession])
+    await runAction(() =>
+      updateSession({
+        roomId: roomUuid,
+        sessionId: session.id,
+        status: 'active',
+      })
+    )
+  }, [session, roomUuid, updateSession, runAction])
 
   const handleRetry = useCallback(async () => {
     if (!session) return
-    await retrySession({ roomId: roomUuid, sessionId: session.id })
-  }, [retrySession, roomUuid, session])
+    await runAction(() =>
+      retrySession({ roomId: roomUuid, sessionId: session.id })
+    )
+  }, [retrySession, roomUuid, session, runAction])
 
   // Total assigned
   const assignedCount =
@@ -206,6 +209,7 @@ export const BreakoutSetup = ({ roomUuid, session }: BreakoutSetupProps) => {
         flex: 1,
       })}
     >
+      <BreakoutActionFailure failure={actionFailure} />
       {!session && (
         <>
           {/* Room count selector */}

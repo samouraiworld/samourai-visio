@@ -303,6 +303,8 @@ class LiveKitEventsService:
         except models.Room.DoesNotExist as err:
             raise ActionFailedError(f"Room with ID {room_id} does not exist") from err
 
+        BreakoutService().restore_parent_metadata(room)
+
         if settings.ROOM_TELEPHONY_ENABLED or settings.ROOMKIT_ENABLED:
             try:
                 self.sip_management.ensure_dispatch_rule(room)
