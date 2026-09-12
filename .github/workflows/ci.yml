@@ -39,7 +39,11 @@ jobs:
       - name: Enforce absence of print statements in code
         if: always()
         run: |
-          ! git diff origin/${{ github.event.pull_request.base.ref }}..HEAD -- . ':(exclude).github/workflows/**' ':(exclude).github/scripts/**' | grep "print("
+          # Three dots: what this branch adds since the merge base. Two dots also
+          # reports what landed on the base meanwhile, as deletions, and a
+          # deleted print( matched the grep — a green pull request went red
+          # because an unrelated one merged.
+          ! git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- . ':(exclude).github/workflows/**' ':(exclude).github/scripts/**' | grep -E '^\+' | grep -v '^+++' | grep "print("
       - name: Check absence of fixup commits
         if: always()
         run: |
