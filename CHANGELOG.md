@@ -10,8 +10,12 @@ and this project adheres to
 
 ### Added
 
+- 🧪(ci) run upstream checks and real breakout browser tests locally #63
+- ✨(frontend) add breakout rooms for sub-group sessions #63
+- ✨(backend) add breakout session models, API and services #63
 - ✨(frontend) add 1080p sending resolution option #1660
 - ✨(backend) add Traefik support via configurable media-auth url header #1649
+- ✨(backend) update a room's attributes from the external API
 
 ### Changed
 
@@ -20,7 +24,18 @@ and this project adheres to
 
 ### Fixed
 
+- 🐛(backend) admit scoped guest identities from the waiting-room API #63
+- 🐛(ci) build mail templates from the committed npm lockfile
+- 🐛(breakout) keep announcements clear of participant controls #63
+- 🐛(breakout) preserve host names on recall #63
+- 🐛(breakout) retry connections without reconnecting stale transports #63
+- 🐛(breakout) recover connections and preserve scoped participant access #63
+
 - 🐛(ci) judge the print-statement rule on added lines only
+- 🐛(breakout) leave the meeting before joining a breakout room #63
+- 🐛(breakout) preserve media intent and help state during recovery
+- 🐛(backend) serialize metadata updates and tolerate expired breakout rooms
+- 🐛(backend) allow any printable ASCII characters in user sub field #1673
 - 🐛(frontend) keep the sending resolution picked while the camera is off #1667
 
 ## [1.30.0] - 2026-09-01

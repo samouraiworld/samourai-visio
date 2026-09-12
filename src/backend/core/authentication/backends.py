@@ -1,9 +1,14 @@
 """Authentication Backends for the Meet core app."""
 
 import contextlib
+from logging import getLogger
 
 from django.conf import settings
-from django.core.exceptions import ImproperlyConfigured, SuspiciousOperation
+from django.core.exceptions import (
+    ImproperlyConfigured,
+    SuspiciousOperation,
+    ValidationError,
+)
 from django.utils.translation import gettext_lazy as _
 
 from lasuite.oidc_login.backends import (
@@ -17,6 +22,9 @@ from core.services.marketing import (
     ContactData,
     get_marketing_service,
 )
+from core.validators import is_legacy_sub, sub_validator
+
+logger = getLogger(__name__)
 
 
 class OIDCAuthenticationBackend(LaSuiteOIDCAuthenticationBackend):
@@ -84,6 +92,29 @@ class OIDCAuthenticationBackend(LaSuiteOIDCAuthenticationBackend):
 
     def get_existing_user(self, sub, email):
         """Fetch existing user by sub or email."""
+
+        sub = str(sub)
+
+        try:
+            sub_validator(sub)
+        except ValidationError as err:
+            # The former Unicode-aware validator accepted these exact subjects.
+            # Never extend this compatibility path to new accounts or controls.
+            if len(sub) <= 255 and is_legacy_sub(sub):
+                existing = User.objects.filter(sub=sub).first()
+                if existing is not None:
+                    logger.warning(
+                        "Authenticating an existing legacy subject for user %s",
+                        existing.pk,
+                    )
+                    return existing
+            raise SuspiciousOperation(
+                "User info contained an invalid sub claim"
+            ) from err
+
+        if len(sub) > 255:
+            raise SuspiciousOperation("User info contained an invalid sub claim")
+
         try:
             return User.objects.get(sub=sub)
         except User.DoesNotExist:

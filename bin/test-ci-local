@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Run the repository CI workflow in an isolated Linux test stack."""
+
+import argparse
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+
+def run(*args, **kwargs):
+    return subprocess.run(args, check=True, **kwargs)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--base",
+        default="origin/develop",
+        help="Local PR base ref (default: origin/develop)",
+    )
+    parser.add_argument(
+        "--skip-e2e",
+        action="store_true",
+        help="Run CI jobs without the separate browser acceptance suite",
+    )
+    args = parser.parse_args()
+    root = Path(__file__).resolve().parents[1]
+    base_sha = subprocess.check_output(
+        ["git", "rev-parse", "--verify", args.base + "^{commit}"], cwd=root, text=True
+    ).strip()
+    run("docker", "compose", "version", stdout=subprocess.DEVNULL)
+    run("docker", "info", stdout=subprocess.DEVNULL)
+    reports = Path(tempfile.mkdtemp(prefix="visio-ci-results-"))
+    workspace = Path(tempfile.mkdtemp(prefix="visio-ci-workspace-"))
+    snapshot = workspace / "source"
+    project = workspace.name
+    environment = dict(
+        os.environ,
+        CI_LOCAL_SNAPSHOT=str(snapshot),
+        CI_LOCAL_REPORTS=str(reports),
+        CI_LOCAL_BASE="refs/ci/base",
+        CI_LOCAL_UID=str(os.getuid()),
+        CI_LOCAL_GID=str(os.getgid()),
+    )
+    compose = [
+        "docker",
+        "compose",
+        "--project-name",
+        project,
+        "--file",
+        str(root / "docker/ci/compose.yml"),
+    ]
+    sys.stdout.write("Local CI reports: " + str(reports) + "\n")
+    sys.stdout.flush()
+
+    def interrupted(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, interrupted)
+    try:
+        run("git", "clone", "--quiet", "--no-hardlinks", str(root), str(snapshot))
+        run("git", "update-ref", "refs/ci/base", base_sha, cwd=snapshot)
+        # Remove the committed files first, including deletions already staged.
+        committed = subprocess.check_output(["git", "ls-files", "-z"], cwd=snapshot)
+        for raw in committed.split(b"\0"):
+            if raw:
+                destination = snapshot / os.fsdecode(raw)
+                if destination.is_file() or destination.is_symlink():
+                    destination.unlink()
+                    for parent in destination.parents:
+                        if parent == snapshot:
+                            break
+                        try:
+                            parent.rmdir()
+                        except OSError:
+                            break
+        # Overlay only Git-visible files; ignored local credentials/data stay outside.
+        tracked = subprocess.check_output(["git", "ls-files", "-z"], cwd=root).split(
+            b"\0"
+        )
+        untracked = subprocess.check_output(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"], cwd=root
+        ).split(b"\0")
+        for raw in set(tracked + untracked) - {b""}:
+            relative = os.fsdecode(raw)
+            source, destination = root / relative, snapshot / relative
+            if destination.is_file() or destination.is_symlink():
+                destination.unlink()
+            if source.is_file() or source.is_symlink():
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination, follow_symlinks=False)
+        # Make added working files visible to the tracked-file policy checker.
+        run("git", "add", "--intent-to-add", "--all", cwd=snapshot)
+        run(*compose, "build", "runner", env=environment)
+        result = subprocess.run(
+            [*compose, "run", "--rm", "runner"], env=environment, check=False
+        )
+        if result.returncode:
+            return result.returncode
+        if not args.skip_e2e:
+            run(str(root / "docker/e2e/test-runner.sh"), cwd=root)
+            return subprocess.run(
+                [str(root / "bin/test-e2e-local")], cwd=root, check=False
+            ).returncode
+        return 0
+    finally:
+        cleanup = subprocess.run(
+            [*compose, "down", "--volumes", "--remove-orphans", "--rmi", "local"],
+            env=environment,
+            check=False,
+        )
+        shutil.rmtree(workspace)
+        sys.stdout.write("Local CI reports retained at " + str(reports) + "\n")
+        if cleanup.returncode:
+            raise subprocess.CalledProcessError(cleanup.returncode, cleanup.args)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

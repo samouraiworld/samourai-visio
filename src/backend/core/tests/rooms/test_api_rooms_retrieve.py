@@ -11,6 +11,8 @@ from django.test.utils import override_settings
 import pytest
 from rest_framework.test import APIClient
 
+from core.services.lobby import LobbyService
+
 from ...factories import RoomFactory, UserFactory, UserResourceAccessFactory
 from ...models import RoleChoices, RoomAccessLevel
 
@@ -507,3 +509,77 @@ def test_api_rooms_retrieve_administrators(
         role=str(user_access.role),
         participant_id=None,
     )
+
+
+@mock.patch("core.utils.generate_token", return_value="foo")
+@override_settings(
+    LIVEKIT_CONFIGURATION={
+        "api_key": "key",
+        "api_secret": "secret",
+        "url": "test_url_value",
+    }
+)
+def test_api_rooms_retrieve_anonymous_public_issues_lobby_identity(mock_token):
+    """A guest entering a public room directly gets the lobby's signed identity."""
+    room = RoomFactory(access_level=RoomAccessLevel.PUBLIC)
+    client = APIClient()
+
+    response = client.get(f"/api/v1.0/rooms/{room.id!s}/")
+
+    assert response.status_code == 200
+    assert response["Cache-Control"] == "no-store"
+    cookie_name = LobbyService._get_guest_cookie_name(room.id)  # pylint: disable=protected-access
+    assert cookie_name in response.cookies
+    assert response.cookies[cookie_name]["httponly"] is True
+    assert response.cookies[cookie_name]["secure"] is True
+
+    identity = mock_token.call_args.kwargs["participant_id"]
+    assert identity.startswith("guest_")
+
+    replay = mock.MagicMock()
+    replay.COOKIES = {cookie_name: response.cookies[cookie_name].value}
+    assert LobbyService.get_participant_id(replay, room.id) == identity
+
+
+@mock.patch("core.utils.generate_token", return_value="foo")
+@override_settings(
+    LIVEKIT_CONFIGURATION={
+        "api_key": "key",
+        "api_secret": "secret",
+        "url": "test_url_value",
+    }
+)
+def test_api_rooms_retrieve_anonymous_public_reuses_existing_identity(mock_token):
+    """A second visit with the cookie mints the same identity again."""
+    room = RoomFactory(access_level=RoomAccessLevel.PUBLIC)
+    client = APIClient()
+
+    client.get(f"/api/v1.0/rooms/{room.id!s}/")
+    client.get(f"/api/v1.0/rooms/{room.id!s}/")
+
+    identities = [call.kwargs["participant_id"] for call in mock_token.call_args_list]
+    assert identities[0] is not None
+    assert identities[0] == identities[1]
+
+
+@mock.patch("core.utils.generate_token", return_value="foo")
+@override_settings(
+    LIVEKIT_CONFIGURATION={
+        "api_key": "key",
+        "api_secret": "secret",
+        "url": "test_url_value",
+    }
+)
+def test_api_rooms_retrieve_authenticated_public_sets_no_guest_cookie(mock_token):
+    """Authenticated users are identified by their sub, never by a guest cookie."""
+    room = RoomFactory(access_level=RoomAccessLevel.PUBLIC)
+    user = UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    response = client.get(f"/api/v1.0/rooms/{room.id!s}/")
+
+    assert response.status_code == 200
+    cookie_name = LobbyService._get_guest_cookie_name(room.id)  # pylint: disable=protected-access
+    assert cookie_name not in response.cookies
+    assert mock_token.call_args.kwargs["participant_id"] is None

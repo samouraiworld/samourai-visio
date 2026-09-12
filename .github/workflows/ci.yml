@@ -108,17 +108,13 @@ jobs:
           path: "src/backend/core/templates/mail"
           key: mail-templates-${{ hashFiles('src/mail/mjml') }}
 
-      - name: Install yarn
-        if: steps.mail-templates.outputs.cache-hit != 'true'
-        run: npm install -g --ignore-scripts yarn@1.22.22
-
       - name: Install node dependencies
         if: steps.mail-templates.outputs.cache-hit != 'true'
-        run: yarn install --frozen-lockfile --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Build mails
         if: steps.mail-templates.outputs.cache-hit != 'true'
-        run: yarn build
+        run: npm run build
 
       - name: Cache mail templates
         if: steps.mail-templates.outputs.cache-hit != 'true'
@@ -152,6 +148,18 @@ jobs:
         run: uv run --no-sync --no-build ruff check .
       - name: Lint code with pylint
         run: uv run --no-sync --no-build pylint meet demo core
+
+  test-breakout-helm:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Install Helm
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+      - name: Test breakout runtime invariants
+        run: ./src/helm/meet/tests/test-breakout-runtime.sh
 
   lint-agents:
     runs-on: ubuntu-latest
@@ -372,6 +380,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
+      - name: Install Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "22"
+
       - name: Install dependencies
         run: cd src/frontend/ && npm ci --ignore-scripts
 
@@ -380,6 +393,18 @@ jobs:
 
       - name: Check format
         run: cd src/frontend/ && npm run check
+
+      - name: Check types
+        run: cd src/frontend/ && npm run typecheck
+
+      - name: Prove the typecheck gate rejects a type mutation
+        run: cd src/frontend/ && npm run test:typecheck-guard
+
+      - name: Run frontend tests
+        run: cd src/frontend/ && npm test
+
+      - name: Build frontend
+        run: cd src/frontend/ && npm run build
 
   lint-sdk:
     runs-on: ubuntu-latest
@@ -418,3 +443,27 @@ jobs:
 
       - name: Build SDK
         run: npm run build
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prove local test runner failure propagation
+        run: docker/e2e/test-runner.sh
+      - name: Prove local CI workflow adaptation
+        run: python3 -m unittest discover -s docker/ci/tests
+      - name: Run browser acceptance against local services
+        env:
+          E2E_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/e2e
+        run: bin/test-e2e-local
+      - name: Upload browser reports and service logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-acceptance
+          path: artifacts/e2e
+          retention-days: 7

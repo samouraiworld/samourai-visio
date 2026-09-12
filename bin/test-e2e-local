@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Run real browser and media acceptance tests without exposing host ports.
+set -euo pipefail
+
+if [[ "${1:-}" == "--help" ]]; then
+  cat <<'HELP'
+Usage: bin/test-e2e-local [Playwright arguments...]
+
+Build and run an isolated Django, PostgreSQL, Redis, LiveKit, Celery and browser
+stack. Docker with Compose v2 is required. All run containers and volumes are
+removed on exit; reports and service logs are retained.
+
+  E2E_ARTIFACTS_DIR  Optional directory for reports (default: temporary).
+  E2E_SKIP_BUILD=1   Reuse images previously built for this checkout.
+
+Examples:
+  bin/test-e2e-local
+  bin/test-e2e-local --grep 'breakout'
+HELP
+  exit 0
+fi
+
+repository_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+if [[ -n "${E2E_ARTIFACTS_DIR:-}" ]]; then
+  mkdir -p "$E2E_ARTIFACTS_DIR"
+  E2E_ARTIFACTS_DIR=$(cd "$E2E_ARTIFACTS_DIR" && pwd)
+else
+  E2E_ARTIFACTS_DIR=$(mktemp -d "${TMPDIR:-/tmp}/visio-e2e-artifacts.XXXXXX")
+fi
+export E2E_ARTIFACTS_DIR
+project="visio-e2e-$$-${RANDOM}"
+compose=(docker compose --project-name "$project" --file "$repository_root/docker/e2e/compose.yaml")
+
+cleanup() {
+  result=$?
+  trap - EXIT INT TERM
+  "${compose[@]}" logs --no-color > "$E2E_ARTIFACTS_DIR/services.log" 2>&1 || true
+  if ! "${compose[@]}" down --volumes --remove-orphans > "$E2E_ARTIFACTS_DIR/cleanup.log" 2>&1; then
+    echo "Cleanup failed; see $E2E_ARTIFACTS_DIR/cleanup.log" >&2
+    [[ "$result" -ne 0 ]] || result=1
+  fi
+  echo "E2E artifacts: $E2E_ARTIFACTS_DIR"
+  exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+"${compose[@]}" version
+# Stable image tags permit optional rebuild skips while project resources stay isolated.
+export E2E_IMAGE_TAG="$(printf '%s' "$repository_root" | cksum | awk '{print $1}')"
+if [[ "${E2E_SKIP_BUILD:-0}" != "1" ]]; then
+  "${compose[@]}" build backend runner
+fi
+"${compose[@]}" up --detach --wait --wait-timeout 180 backend worker beat
+"${compose[@]}" run --rm --no-deps runner npm test -- "$@"

@@ -48,10 +48,11 @@ def test_request_entry_anonymous(settings):
     assert response.status_code == 200
 
     # Verify the lobby cookie was properly set
-    cookie = response.cookies.get("mocked-cookie")
+    cookie = response.cookies.get(LobbyService._get_guest_cookie_name(room.id))
     assert cookie is not None
 
-    participant_id = cookie.value
+    participant_id = response.json()["id"]
+    assert cookie.value != participant_id
 
     # Verify response content matches expected structure and values
     assert response.json() == {
@@ -97,10 +98,11 @@ def test_request_entry_authenticated_user(settings):
     assert response.status_code == 200
 
     # Verify the lobby cookie was properly set
-    cookie = response.cookies.get("mocked-cookie")
+    cookie = response.cookies.get(LobbyService._get_guest_cookie_name(room.id))
     assert cookie is not None
 
-    participant_id = cookie.value
+    participant_id = response.json()["id"]
+    assert cookie.value != participant_id
 
     # Verify response content matches expected structure and values
     assert response.json() == {
@@ -172,7 +174,8 @@ def test_request_entry_with_existing_participants(settings):
     cookie = response.cookies.get("mocked-cookie")
     assert cookie is not None
 
-    participant_id = cookie.value
+    participant_id = response.json()["id"]
+    assert cookie.value != participant_id
 
     # Verify response content matches expected structure and values
     assert response.json() == {
@@ -224,7 +227,7 @@ def test_request_entry_public_room(settings):
     # Verify the lobby cookie was set
     cookie = response.cookies.get("mocked-cookie")
     assert cookie is not None
-    assert cookie.value == "123"
+    assert cookie.value != "123"
 
     # Verify response content matches expected structure and values
     assert response.json() == {
@@ -276,7 +279,7 @@ def test_request_entry_authenticated_user_public_room(settings):
     # Verify the lobby cookie was set
     cookie = response.cookies.get("mocked-cookie")
     assert cookie is not None
-    assert cookie.value == "2f7f162f-e7d1-421b-90e7-02bfbfbf8def"
+    assert cookie.value != "2f7f162f-e7d1-421b-90e7-02bfbfbf8def"
 
     # Verify response content matches expected structure and values
     assert response.json() == {
@@ -300,11 +303,16 @@ def test_request_entry_waiting_participant_public_room(settings):
     settings.LOBBY_COOKIE_NAME = "mocked-cookie"
     settings.LOBBY_KEY_PREFIX = "mocked-cache-prefix"
 
+    capability = LobbyService._new_guest_cookie(room.id)
+    participant_id = LobbyService._derive_guest_identity(
+        room.id, LobbyService._read_guest_capability(capability, room.id)
+    )
+
     # Add a waiting participant to the room's lobby cache
     cache.set(
-        f"mocked-cache-prefix_{room.id}_2f7f162f-e7d1-421b-90e7-02bfbfbf8def",
+        f"mocked-cache-prefix_{room.id}_{participant_id}",
         {
-            "id": "2f7f162f-e7d1-421b-90e7-02bfbfbf8def",
+            "id": participant_id,
             "username": "user1",
             "status": "waiting",
             "color": "#123456",
@@ -312,7 +320,7 @@ def test_request_entry_waiting_participant_public_room(settings):
     )
 
     # Simulate a browser with existing participant cookie
-    client.cookies.load({"mocked-cookie": "2f7f162f-e7d1-421b-90e7-02bfbfbf8def"})
+    client.cookies.load({LobbyService._get_guest_cookie_name(room.id): capability})
 
     with (
         mock.patch.object(utils, "notify_participants", return_value=None),
@@ -327,14 +335,14 @@ def test_request_entry_waiting_participant_public_room(settings):
 
     assert response.status_code == 200
 
-    # Verify the lobby cookie was set
-    cookie = response.cookies.get("mocked-cookie")
+    # Verify the room-bound lobby capability was preserved.
+    cookie = response.cookies.get(LobbyService._get_guest_cookie_name(room.id))
     assert cookie is not None
-    assert cookie.value == "2f7f162f-e7d1-421b-90e7-02bfbfbf8def"
+    assert cookie.value == capability
 
     # Verify response content matches expected structure and values
     assert response.json() == {
-        "id": "2f7f162f-e7d1-421b-90e7-02bfbfbf8def",
+        "id": participant_id,
         "username": "user1",
         "status": "accepted",
         "color": "#123456",
@@ -505,6 +513,100 @@ def test_allow_participant_to_enter_invalid_data():
     )
 
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+@pytest.mark.parametrize("allow_entry", [False, True])
+def test_lobby_decision_accepts_returned_guest_identity(authenticated, allow_entry):
+    """Managers can decide actual requests using the identity returned by the lobby."""
+    owner = UserFactory()
+    room = RoomFactory(access_level=RoomAccessLevel.RESTRICTED)
+    room.accesses.create(user=owner, role="owner")
+    participant = APIClient()
+    if authenticated:
+        participant.force_login(UserFactory())
+    manager = APIClient()
+    manager.force_login(owner)
+
+    with mock.patch.object(utils, "notify_participants"):
+        requested = participant.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/", {"username": "Guest"}
+        )
+    assert requested.status_code == 200
+    participant_id = requested.json()["id"]
+    assert participant_id.startswith("guest_")
+
+    waiting = manager.get(f"/api/v1.0/rooms/{room.id}/waiting-participants/")
+    assert waiting.status_code == 200
+    assert waiting.json()["participants"][0]["id"] == participant_id
+    decision_url = f"/api/v1.0/rooms/{room.id}/enter/"
+    payload = {"participant_id": participant_id, "allow_entry": allow_entry}
+    refused = participant.post(decision_url, payload)
+    assert refused.status_code == (403 if authenticated else 401)
+
+    decided = manager.post(decision_url, payload)
+    assert decided.status_code == 200, decided.json()
+    with mock.patch.object(
+        utils, "generate_livekit_config", return_value={"token": "accepted-token"}
+    ):
+        polled = participant.post(
+            f"/api/v1.0/rooms/{room.id}/request-entry/", {"username": "Guest"}
+        )
+    assert polled.status_code == 200
+    assert polled.json()["id"] == participant_id
+    assert polled.json()["status"] == ("accepted" if allow_entry else "denied")
+    assert polled.json()["livekit"] == (
+        {"token": "accepted-token"} if allow_entry else None
+    )
+
+
+@pytest.mark.parametrize(
+    "participant_id",
+    [
+        "guest_invalid",
+        "guest_" + "a" * 39,
+        "guest_" + "a" * 41,
+        "guest_" + "G" * 40,
+        " guest_" + "a" * 40,
+        "guest_" + "a" * 40 + "\n",
+    ],
+)
+def test_lobby_decision_rejects_malformed_guest_identity(participant_id):
+    """Only the exact server-issued guest identity format is accepted."""
+    room = RoomFactory(access_level=RoomAccessLevel.RESTRICTED)
+    owner = UserFactory()
+    room.accesses.create(user=owner, role="owner")
+    manager = APIClient()
+    manager.force_login(owner)
+    response = manager.post(
+        f"/api/v1.0/rooms/{room.id}/enter/",
+        {"participant_id": participant_id, "allow_entry": True},
+    )
+    assert response.status_code == 400
+
+
+def test_lobby_decision_cannot_admit_guest_from_another_room():
+    """A valid guest identity remains authorized only within its parent lobby."""
+    owner = UserFactory()
+    rooms = [RoomFactory(access_level=RoomAccessLevel.RESTRICTED) for _ in range(2)]
+    for room in rooms:
+        room.accesses.create(user=owner, role="owner")
+    participant = APIClient()
+    with mock.patch.object(utils, "notify_participants"):
+        requested = participant.post(
+            f"/api/v1.0/rooms/{rooms[0].id}/request-entry/", {"username": "Guest"}
+        )
+    assert requested.status_code == 200
+    participant_id = requested.json()["id"]
+    manager = APIClient()
+    manager.force_login(owner)
+    response = manager.post(
+        f"/api/v1.0/rooms/{rooms[1].id}/enter/",
+        {"participant_id": participant_id, "allow_entry": True},
+    )
+    assert response.status_code == 404
+    waiting = manager.get(f"/api/v1.0/rooms/{rooms[0].id}/waiting-participants/")
+    assert waiting.json()["participants"][0]["status"] == "waiting"
 
 
 # Tests for list_waiting_participants endpoint
@@ -680,8 +782,8 @@ def test_request_entry_throttling_anonymous_with_cookie(
     settings.LOBBY_COOKIE_NAME = "mocked-cookie"
     settings.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["request_entry"] = "2/minute"
 
-    participant_id = str(uuid.uuid4())
-    client.cookies.load({"mocked-cookie": participant_id})
+    capability = LobbyService._new_guest_cookie(room.id)
+    client.cookies.load({"mocked-cookie": capability})
 
     response = client.post(
         f"/api/v1.0/rooms/{room.id}/request-entry/",

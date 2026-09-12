@@ -485,6 +485,17 @@ class Base(Configuration):
     CELERY_BROKER_URL = values.Value("redis://redis:6379/0", environ_prefix=None)
     CELERY_BROKER_TRANSPORT_OPTIONS = values.DictValue({}, environ_prefix=None)
 
+    # Celery Beat — periodic tasks
+    # Each entry runs on the configured schedule when CELERY_ENABLED=True and
+    # a celery beat worker is active.
+    CELERY_BEAT_SCHEDULE = {
+        # Reconcile timed breakout sessions after their absolute end boundary.
+        "cleanup-stale-breakout-sessions": {
+            "task": "core.breakout.tasks.cleanup_stale_breakout_sessions",
+            "schedule": 60,
+        },
+    }
+
     # Session
     SESSION_ENGINE = values.Value(
         default="django.contrib.sessions.backends.cache",
@@ -748,6 +759,11 @@ class Base(Configuration):
     # Set to None for no max duration
     RECORDING_MAX_DURATION = values.IntegerValue(
         None, environ_name="RECORDING_MAX_DURATION", environ_prefix=None
+    )
+
+    # Breakout rooms settings
+    MEET_BREAKOUT_ROOMS_ENABLED = values.BooleanValue(
+        False, environ_name="MEET_BREAKOUT_ROOMS_ENABLED", environ_prefix=None
     )
 
     # Recording encoding options for LiveKit Egress (video composite egress only).
@@ -1248,6 +1264,9 @@ class Development(Base):
     """
 
     ALLOWED_HOSTS = ["*"]
+    MEET_BREAKOUT_ROOMS_ENABLED = values.BooleanValue(
+        True, environ_name="MEET_BREAKOUT_ROOMS_ENABLED", environ_prefix=None
+    )
     CORS_ALLOW_ALL_ORIGINS = True
     CSRF_TRUSTED_ORIGINS = ["http://localhost:8072", "http://localhost:3000"]
     DEBUG = True
@@ -1263,6 +1282,8 @@ class Development(Base):
 
 class Test(Base):
     """Test environment settings"""
+
+    MEET_BREAKOUT_ROOMS_ENABLED = True
 
     LOGGING = values.DictValue(
         {

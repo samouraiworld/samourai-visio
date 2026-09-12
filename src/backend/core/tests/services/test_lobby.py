@@ -137,25 +137,44 @@ def test_get_cache_key(lobby_service, participant_id):
 
 
 def test_get_or_create_participant_id_from_cookie(lobby_service):
-    """Test extracting participant ID from cookie."""
+    """A valid capability deterministically derives a room-scoped identity."""
+    room = RoomFactory()
     request = mock.Mock()
-    request.COOKIES = {settings.LOBBY_COOKIE_NAME: "existing-id"}
+    capability = lobby_service._new_guest_cookie(room.id)
+    cookie_name = lobby_service._get_guest_cookie_name(room.id)
+    request.COOKIES = {cookie_name: capability}
 
-    participant_id = lobby_service._get_or_create_participant_id(request)
+    participant_id = lobby_service._get_or_create_participant_id(request, room.id)
 
-    assert participant_id == "existing-id"
+    assert participant_id == lobby_service._get_or_create_participant_id(
+        request, room.id
+    )
+    assert participant_id != capability
+    assert participant_id.startswith("guest_")
 
 
-@mock.patch.object(uuid, "uuid4", return_value="generated-id")
-def test_get_or_create_participant_id_new(mock_uuid4, lobby_service):
-    """Test creating new participant ID when cookie is missing."""
+def test_get_or_create_participant_id_new(lobby_service):
+    """A missing cookie produces a fresh signed capability and public identity."""
+    room = RoomFactory()
     request = mock.Mock()
     request.COOKIES = {}
 
-    participant_id = lobby_service._get_or_create_participant_id(request)
+    participant_id = lobby_service._get_or_create_participant_id(request, room.id)
 
-    assert participant_id == "generated-id"
-    mock_uuid4.assert_called_once()
+    cookie_name, cookie = getattr(request, lobby_service._REQUEST_COOKIE_ATTRIBUTE)
+    assert cookie_name == lobby_service._get_guest_cookie_name(room.id)
+    assert lobby_service._read_guest_capability(cookie, room.id)
+    assert participant_id != cookie
+
+
+def test_guest_capability_is_cryptographically_bound_to_room(lobby_service):
+    """A signed capability for one room is invalid in every other room."""
+    first_room = RoomFactory()
+    second_room = RoomFactory()
+    capability = lobby_service._new_guest_cookie(first_room.id)
+
+    assert lobby_service._read_guest_capability(capability, first_room.id)
+    assert lobby_service._read_guest_capability(capability, second_room.id) is None
 
 
 def test_prepare_response_existing_cookie(lobby_service, participant_id):
@@ -180,13 +199,12 @@ def test_prepare_response_new_cookie(lobby_service, participant_id):
     # Verify cookie was set
     cookie = response.cookies.get(settings.LOBBY_COOKIE_NAME)
     assert cookie is not None
-    assert cookie.value == participant_id
+    assert cookie.value != participant_id
     assert cookie["httponly"] is True
     assert cookie["secure"] is True
     assert cookie["samesite"] == "Lax"
 
-    # It's a session cookies (no max_age specified):
-    assert not cookie["max-age"]
+    assert int(cookie["max-age"]) == settings.SESSION_COOKIE_AGE
 
 
 def test_can_bypass_lobby_public_room(lobby_service):

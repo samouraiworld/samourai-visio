@@ -1,5 +1,7 @@
 # All these sections are optional, edit this file as you like.
 [general]
+# Commit messages use a concise subject; a body and emoji are optional.
+ignore=B6,UC1
 # Ignore certain rules, you can reference them by their id or by their full name
 # ignore=title-trailing-punctuation, T3
 
