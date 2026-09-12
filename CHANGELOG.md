@@ -19,9 +19,11 @@ and this project adheres to
 ### Changed
 
 - ⬆️(dev) pin LiveKit server to v1.13.6
+- 🔒️(assets) strip editor metadata from tracked PNG files
 
 ### Fixed
 
+- 🐛(ci) judge the print-statement rule on added lines only
 - 🐛(breakout) leave the meeting before joining a breakout room #63
 - 🐛(breakout) preserve media intent and help state during recovery
 - 🐛(backend) serialize metadata updates and tolerate expired breakout rooms

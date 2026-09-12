@@ -11,6 +11,19 @@ permissions:
   contents: read
 
 jobs:
+  attribution:
+    name: Vendor attribution
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prove this check can fail
+        run: .github/scripts/check-vendor-attribution.selftest.sh
+      - name: No tracked file carries assistant attribution
+        run: python3 .github/scripts/check-vendor-attribution.py .
+
   lint-git:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request' # Makes sense only for pull requests
@@ -26,7 +39,11 @@ jobs:
       - name: Enforce absence of print statements in code
         if: always()
         run: |
-          ! git diff origin/${{ github.event.pull_request.base.ref }}..HEAD -- . ':(exclude).github/workflows/**' | grep "print("
+          # Three dots: what this branch adds since the merge base. Two dots also
+          # reports what landed on the base meanwhile, as deletions, and a
+          # deleted print( matched the grep — a green pull request went red
+          # because an unrelated one merged.
+          ! git diff origin/${{ github.event.pull_request.base.ref }}...HEAD -- . ':(exclude).github/workflows/**' ':(exclude).github/scripts/**' | grep -E '^\+' | grep -v '^+++' | grep "print("
       - name: Check absence of fixup commits
         if: always()
         run: |
