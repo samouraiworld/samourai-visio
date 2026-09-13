@@ -156,7 +156,15 @@ The run that reflects venue and corporate reality, and the only one that proves 
 
 **One HTTP request per participant of the class's target count, within 60 seconds** — 100 requests on the reference shape (§3) — against the room endpoint (`/api/v1.0/rooms/<slug>`), from **many source addresses** rather than one — a real audience arriving at a scheduled start time comes from many addresses, and testing from one address measures the rate limiter instead of the application.
 
-Two things are being checked at once: backend and application-server headroom under a join storm, and that the edge's flood brake does **not** throttle a legitimate burst. Requests carrying a session cookie are counted in a bucket of their own, not exempted — the edge cannot verify a cookie — so the anonymous path is the one to watch. A run that trips the brake for legitimate traffic is a failure of the edge configuration, recorded as such, and it blocks the cap just as a media failure would.
+Two things are being checked at once: backend and application-server headroom under a join storm, and that the edge's flood brake does **not** throttle a legitimate burst. Requests carrying a session cookie are counted in a bucket of their own, not exempted: anonymous visitors carry that cookie too, the edge cannot verify it, and a forged one only moves a client to the other, equally braked bucket. A run that trips the brake for legitimate traffic is a failure of the edge configuration, recorded as such, and it blocks the cap just as a media failure would.
+
+**The brake's numbers are provisional until this run (#46) measures them** — per address, 2 room fetches a second with a burst of 100, and 30 lobby polls a second with a burst of 60 ([RUNBOOK](../RUNBOOK.md) §5). What a single-address storm past them looks like, so that a run can recognise it:
+
+- **A refused room fetch is not shown as an error.** The SPA (v1.24.0 `Join.tsx:319-356`, `retry: false`) is left with no room data, treats the room as one with a lobby and calls `startWaiting()`. The participant sees *Requesting to join…* in a room that may have no host, and polls `request-entry` at up to about one request a second — against the same address's lobby bucket. In a guest room (a slug not in the database) that poll answers 404 until they reload.
+- **A venue behind one address with 5 rooms × 30 joining together**: 150 room fetches at once, about 100 admitted, about 50 left waiting. Their ~50 polls a second outrun the lobby rate of 30 and drain its burst of 60 in about 60 / (50 − 30) = 3 s; after that roughly 20 of every 50 polls from that address are refused, a real lobby's among them.
+- **A lobby of N > 30 waiting behind one address** drains the burst of 60 in 60 / (N − 30) s — 6 s at 40 — and then loses (N − 30) / N of its polls. A participant whose polls are refused for 3 s (`LOBBY_WAITING_TIMEOUT`) drops off the host's waiting list until one gets through.
+
+**What the brake does not limit: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([CAPACITY.md](CAPACITY.md) §3.2). That node-level limit is set from these measurements in #47 — not before, because only a measured number may be enforced or published.
 
 ---
 

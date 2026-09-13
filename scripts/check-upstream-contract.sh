@@ -21,6 +21,30 @@ pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 fyi()  { printf '        %s\n' "$1"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=1; }
 
+# ── Flood brake · the lobby's poll pace ──────────────────────────────────────
+# The lobby brake's rate is a full room polling at the pace useLobby.ts sets.
+# A slower poll only makes that rate more generous (upstream main moved to
+# 3_000 ms); a faster one sends more than it was sized for. So this reads the
+# number — `3_000` is a numeric literal, underscore and all — fails only below
+# 1000 ms, and names the value it found either way.
+lobby_poll() { # lobby_poll <useLobby.ts>
+  local ms
+  ms="$(grep -oE '^export const POLL_INTERVAL_MS = [0-9][0-9_]*' "$1" | head -1 | sed 's/.*= //; s/_//g')"
+  if [ -z "$ms" ]; then
+    bad "useLobby.ts no longer sets POLL_INTERVAL_MS to a number — re-derive the lobby brake against the room cap"
+  elif [ "$ms" -lt 1000 ]; then
+    bad "the lobby polls every ${ms} ms, faster than the 1000 ms the lobby brake was sized for — re-size it against the room cap"
+  else
+    pass "the lobby polls every ${ms} ms, no faster than the 1000 ms the lobby brake was sized for"
+  fi
+}
+# `--lobby-poll <file>` runs that one assertion on a local file and exits: how
+# the self-test proves it in both directions without the network.
+if [ "${1:-}" = "--lobby-poll" ]; then
+  lobby_poll "${2:?usage: $0 --lobby-poll <useLobby.ts>}"
+  exit "$fail"
+fi
+
 fetch() { # fetch <remote-path> <local-name>
   local code
   code=$(curl -sS -o "$WORK/$2" -w '%{http_code}' "$MEET/$1")
@@ -65,11 +89,7 @@ if grep -qF -e '`/rooms/${roomId}?username=' -e '`/rooms/${roomId}/${query}`' "$
 else
   bad "the SPA's room URL changed shape — the room brake may now count each join twice, or not at all"
 fi
-if grep -qE '^export const POLL_INTERVAL_MS = 1000$' "$WORK/useLobby.ts"; then
-  pass "the lobby still polls once a second (the lobby brake carries a full room at that pace)"
-else
-  bad "the lobby poll interval changed — re-size the lobby brake against the room cap"
-fi
+lobby_poll "$WORK/useLobby.ts"
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then

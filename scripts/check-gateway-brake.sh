@@ -207,6 +207,58 @@ docker exec "$PEER" sh -c 'for p in $(seq 30); do
   done; wait' _ "$(xff 203.0.113.31)" "$ROOMS/lobby-room/request-entry/" > "$OUT"
 free "lobby: a full room of 30 polling once a second for 6 s" 180
 
+# ── The stated rates, not only the bursts ──────────────────────────────────
+# A burst cannot see the rate: at 20 r/s a room bucket admits the same 101 of
+# an instantaneous burst as at 2 r/s. So take a fresh client and keep it far
+# above its rate for a fixed window: nginx admits the burst plus one at once,
+# then the rate times the window, and nothing more. Eight senders keep the
+# offered load well above either rate. The window opens before the first
+# sender starts and each sender stops at its close, timed from /proc/uptime
+# with shell builtins only, so the senders spend their time sending. (Filling
+# the bucket first and timing a window after it was tried, and read 102 for a
+# lobby's 90: the pause between the two was admitted as well.)
+# paced <container> <seconds> <url> <curl args...>: one status line per request.
+paced() {
+  local c="$1" secs="$2" url="$3"
+  shift 3
+  # shellcheck disable=SC2016  # expanded by the container's shell
+  docker exec "$c" sh -c '
+    secs=$1; url=$2; shift 2
+    read -r now _ < /proc/uptime
+    end=$(( ${now%.*}${now#*.} + secs * 100 ))
+    for sender in 1 2 3 4 5 6 7 8; do
+      while :; do
+        curl -s -o /dev/null -w "%{http_code}\n" "$@" "$url"
+        read -r now _ < /proc/uptime
+        [ "$(( ${now%.*}${now#*.} ))" -lt "$end" ] || break
+      done &
+    done
+    wait' _ "$secs" "$url" "$@"
+}
+rate_holds() { # rate_holds <label> <rate r/s> <seconds> <burst> <tolerance>
+  local want=$(( $4 + 1 + $2 * $3 ))
+  tally "$OUT"
+  if [ "$nother" -ne 0 ]; then
+    bad "$1: $nother answers neither 429 nor 502 — the gateway did not answer the case"
+  elif [ "$n429" -eq 0 ]; then
+    bad "$1: nothing was refused — the senders never outran the rate, so it was not measured"
+  elif [ "$n502" -lt $(( want - $5 )) ] || [ "$n502" -gt $(( want + $5 )) ]; then
+    bad "$1: $n502 admitted in $3 s, expected $want ± $5 (burst $4 + 1, then $2 r/s) — the rate is not the one the template states"
+  else
+    pass "$1: $n502 admitted in $3 s (expected $want ± $5), $n429 refused"
+  fi
+}
+# The error is a fixed handful of requests at the window's two edges — senders
+# starting just after it opens, requests in flight as it closes — and does not
+# grow with its length. At 2 r/s that is under one request. At 30 r/s it was
+# ±7 of a 3 s window's 151 (144 to 156 over three runs), so the lobby window is
+# 10 s: ±10 of 361 is under 3 %, and a lobby widened even to 35 r/s admits 50
+# more than that.
+paced "$PEER" 5 "$ROOMS/rate-room/" -H "$(xff 203.0.113.60)" > "$OUT"
+rate_holds "room: rate held at 2 r/s once the bucket is full" 2 5 100 2
+paced "$PEER" 10 "$ROOMS/rate-lobby/request-entry/" -X POST -H "$(xff 203.0.113.61)" > "$OUT"
+rate_holds "lobby: rate held at 30 r/s once the bucket is full" 30 10 60 10
+
 # ── Trust only the proxy tier ──────────────────────────────────────────────
 # A peer outside PROXY_TIER_SUBNET writes a different X-Forwarded-For on every
 # request. Ignored, they all land in that peer's own bucket and trip it;
@@ -233,7 +285,7 @@ esac
 
 # ── Everything that does not mint is not counted ───────────────────────────
 codes "$PEER" 200 64 -H "$(xff 203.0.113.40)" "$URL/api/v1.0/users/me/" > "$OUT"
-free "not counted: the rest of the API (a signed-in user's traffic)" 200
+free "not counted: the rest of the API (users/me and the SPA's other calls)" 200
 codes "$PEER" 200 64 -X POST -H "$(xff 203.0.113.41)" "$ROOMS/webhooks-livekit/" > "$OUT"
 free "not counted: POST actions on the room collection (webhooks, creation callback)" 200
 codes "$PEER" 200 64 -X PATCH -H "$(xff 203.0.113.42)" "$ROOMS/some-room/" > "$OUT"

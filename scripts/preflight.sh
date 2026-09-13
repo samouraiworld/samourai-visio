@@ -525,11 +525,19 @@ phase_config() {
   # meeting: a full room can join from one address at once (the room burst)
   # and wait in a lobby behind one address, every participant polling once a
   # second (the lobby rate). Raising the cap without the brake turns a venue
-  # into a flood. And each burst stays under 200, or the 200-request burst the
-  # brake exists to stop goes straight through.
-  local rb lb lr
+  # into a flood. And the brake must still brake. Each burst stays under 200,
+  # or the 200-request burst it exists to stop goes straight through. The room
+  # rate stays at or under 10 r/s: LT-7's whole storm, 100 joins in a minute,
+  # averages under 2, so 10 a second sustained from one address is minting,
+  # not a venue. The lobby rate stays at or under two full rooms polling once
+  # a second. A widened rate is invisible to every burst — it admits the same
+  # first 101 — so only these bounds see it on disk.
+  local rb lb rr lr
   rb="$(grep -oE '^    limit_req zone=visio_mint_room burst=[0-9]+' nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+$')"
   lb="$(grep -oE '^    limit_req zone=visio_mint_lobby burst=[0-9]+' nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+$')"
+  # shellcheck disable=SC2016  # a literal nginx variable name
+  rr="$(grep -oE '^limit_req_zone \$visio_mint_room_key +zone=visio_mint_room:[0-9]+[km] +rate=[0-9]+r/s' \
+          nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+r/s$' | grep -oE '^[0-9]+')"
   # shellcheck disable=SC2016  # a literal nginx variable name
   lr="$(grep -oE '^limit_req_zone \$visio_mint_lobby_key +zone=visio_mint_lobby:[0-9]+[km] +rate=[0-9]+r/s' \
           nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+r/s$' | grep -oE '^[0-9]+')"
@@ -537,7 +545,7 @@ phase_config() {
     ''|*[!0-9]*|0)
       skip "flood brake not sized against the room cap" "there is no usable room.max_participants — see the failure above" ;;
     *)
-      if [ -z "$rb" ] || [ -z "$lb" ] || [ -z "$lr" ]; then
+      if [ -z "$rb" ] || [ -z "$lb" ] || [ -z "$rr" ] || [ -z "$lr" ]; then
         skip "flood brake not sized against the room cap" "its limits could not be read — see the flood-brake failure above"
       else
         local sz=""
@@ -545,8 +553,11 @@ phase_config() {
         [ "$lr" -ge "$mp" ] || sz="$sz lobby rate ${lr}r/s is under a full room of $mp polling once a second;"
         [ "$rb" -lt 200 ] || sz="$sz room burst $rb lets a whole 200-request burst through;"
         [ "$lb" -lt 200 ] || sz="$sz lobby burst $lb lets a whole 200-request burst through;"
+        [ "$rr" -le 10 ] || sz="$sz room rate ${rr}r/s is above 10r/s, a mint rate rather than a venue's joins;"
+        [ "$lr" -le $(( 2 * mp )) ] ||
+          sz="$sz lobby rate ${lr}r/s is above two full rooms of $mp polling once a second ($(( 2 * mp ))r/s);"
         if [ -z "$sz" ]; then
-          ok "flood brake leaves a full room of $mp alone (room burst $rb, lobby ${lr}r/s) and still refuses a 200-request burst"
+          ok "flood brake leaves a full room of $mp alone (room burst $rb, lobby ${lr}r/s) and still brakes (room ${rr}r/s, bursts under 200)"
         else
           bad "flood brake mis-sized against the room cap:${sz%;}" \
               "move the brake with the cap (deploy/nginx/default.conf.template), and keep each burst under 200"
@@ -567,7 +578,7 @@ phase_config() {
   case "$ptv" in
     ok)         ok "PROXY_TIER_SUBNET=$pts is a network that reaches no public address" ;;
     unset)      bad "PROXY_TIER_SUBNET unset in .env" \
-                    "compose refuses to run without it; set it to what docker network inspect proxy-tier -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' prints (RUNBOOK §5)" ;;
+                    "docker compose up refuses to run without it. .env is its source of truth: the subnet proxy-tier is created from, or the one an existing proxy-tier already has (RUNBOOK §5)" ;;
     not-a-cidr) bad "PROXY_TIER_SUBNET='$pts' is not a CIDR network" \
                     "expected one subnet as docker network inspect proxy-tier prints it, with no host bits set" ;;
     catch-all)  bad "PROXY_TIER_SUBNET=$pts is a catch-all: it reaches globally routable addresses" \
@@ -959,7 +970,7 @@ gateway_brake() {
     ok "the running gateway carries the flood brake on anonymous token minting"
   else
     bad "the running gateway lacks the flood brake (missing:$bmiss)" \
-        "the host's template predates it, or the frontend was not recreated: docker compose up -d --force-recreate frontend"
+        "the host's template predates it, or the frontend was not recreated: docker compose up -d --no-deps --force-recreate frontend"
   fi
 
   # Exactly one trusted source, and a network that reaches no public address.
@@ -976,6 +987,21 @@ gateway_brake() {
     else
       bad "the running gateway trusts X-Forwarded-For from '$trusted' (${tv:-not evaluated})" \
           "PROXY_TIER_SUBNET in .env must be the proxy-tier network's subnet; recreate the frontend after changing it"
+    fi
+  fi
+
+  # And it is the value .env holds. .env is the source of truth — the network
+  # is created from it — so a gateway trusting anything else is stale: .env
+  # changed and the frontend was never recreated.
+  if [ "$tv" = ok ]; then
+    local envsub
+    envsub="$(envval "$DIR/.env" PROXY_TIER_SUBNET)"
+    if python3 -c 'import ipaddress, sys; sys.exit(ipaddress.ip_network(sys.argv[1]) != ipaddress.ip_network(sys.argv[2]))' \
+         "$trusted" "$envsub" 2>/dev/null; then
+      ok "the running gateway trusts exactly the PROXY_TIER_SUBNET .env holds"
+    else
+      bad "the running gateway trusts $trusted, but .env holds PROXY_TIER_SUBNET='${envsub:-unset}'" \
+          "recreate the gateway so it renders .env's value: docker compose up -d --no-deps --force-recreate frontend"
     fi
   fi
 
@@ -1011,7 +1037,7 @@ PY
           ok "the trusted subnet is the proxy-tier network's own, and every container on it is inside" ;;
         not-the-network*)
           bad "the trusted subnet $trusted is not the proxy-tier network's (it has: ${verdict#not-the-network })" \
-              "every visitor would share nginx-proxy's bucket; set PROXY_TIER_SUBNET to that value and recreate the frontend" ;;
+              "every visitor shares nginx-proxy's bucket: proxy-tier was recreated without --subnet, or .env is wrong — recreate the network from .env (RUNBOOK §5)" ;;
         outside*)
           bad "proxy-tier containers outside the trusted subnet $trusted: ${verdict#outside }" \
               "nginx-proxy reaches the gateway from there; its X-Forwarded-For is ignored and every visitor shares one bucket" ;;

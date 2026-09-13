@@ -106,10 +106,13 @@ services:
       # The proxy tier's subnet: the only peers whose X-Forwarded-For the
       # gateway trusts (nginx/default.conf.template, the realip block), so the
       # flood brake and the access log see the client, not nginx-proxy.
-      # `:?` makes EVERY compose command refuse while .env leaves it unset or
-      # empty — up, config, exec, and so backup.sh's dump as well — rather
-      # than render a gateway that trusts nobody (every visitor would share
-      # nginx-proxy's bucket) or everybody. Set it before copying this file.
+      # `:?` makes every compose command refuse while .env leaves it unset or
+      # empty — `up` above all — rather than render a gateway that trusts
+      # nobody (every visitor would share nginx-proxy's bucket) or everybody.
+      # backup.sh and restore-drill.sh export a placeholder first: their
+      # `exec` and `config --images` never render the gateway, and the
+      # nightly dump must not depend on a gateway setting.
+      # Set it in .env before copying this file.
       - PROXY_TIER_SUBNET=${PROXY_TIER_SUBNET:?set it in .env to the proxy-tier network subnet, see RUNBOOK 5}
     volumes:
       # Serves FRONTEND_CUSTOM_CSS_URL=/custom/style.css and

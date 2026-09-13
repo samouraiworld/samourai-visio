@@ -32,7 +32,9 @@ err() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; rc=1; }
 echo "Gateway brake self-test — the check against broken copies of the template"
 echo
 
-# run_case <label> <sed expression, or empty> <expected exit> <FAIL text, or empty>
+# run_case <label> <sed expression, or empty> <expected exit> <FAIL line pattern, or empty>
+# The pattern is an extended regex, so a text every case prints (a verdict
+# phrase) can be anchored to the case that owns the defect.
 run_case() {
   local label="$1" expr="$2" want="$3" text="$4"
   local copy out code changed
@@ -50,7 +52,7 @@ run_case() {
   if [ "$code" -ne "$want" ]; then
     err "$label — exited $code, expected $want"
     sed 's/^/        /' "$out"
-  elif [ -n "$text" ] && ! grep 'FAIL' "$out" | grep -qF -- "$text"; then
+  elif [ -n "$text" ] && ! grep 'FAIL' "$out" | grep -qE -- "$text"; then
     err "$label — exited $code as expected, but no FAIL line says: $text"
     sed 's/^/        /' "$out"
   elif [ -z "$text" ] && grep -q 'FAIL' "$out"; then
@@ -86,7 +88,15 @@ run_case "MUTATION lobby rate under a full room — a waiting room is refused" \
 
 run_case "MUTATION refusals answered 503 — neither admitted nor counted as refused" \
   's|^    limit_req_status 429;|    limit_req_status 503;|' \
-  1 "neither 429 nor 502"
+  1 "room: 200-request burst from one client: [0-9]+ answers of 200, [0-9]+ neither 429 nor 502"
+
+run_case "MUTATION room rate widened to 20 r/s — a burst looks the same, minting does not" \
+  's|rate=2r/s;|rate=20r/s;|' \
+  1 "room: rate held at 2 r/s once the bucket is full:"
+
+run_case "MUTATION lobby rate widened to 90 r/s — three full rooms' worth" \
+  's|rate=30r/s;|rate=90r/s;|' \
+  1 "lobby: rate held at 30 r/s once the bucket is full:"
 
 echo
 declared="$(grep -c '^run_case ' "$0")"

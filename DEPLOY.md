@@ -67,9 +67,12 @@ mkdir -p ~/visio && cd ~/visio
 2. Copy this repo's templates and fill every value — **RUNBOOK §4**:
    - `deploy/env.d/common.example` → `env.d/common`
    - `deploy/env.d/postgresql.example` → `env.d/postgresql`
-   - `deploy/hosts.example` → `.env` — including `PROXY_TIER_SUBNET`: create the
-     proxy network now (`docker network create proxy-tier`, step 3) and paste
-     its subnet (RUNBOOK §5). Every compose command refuses to run without it.
+   - `deploy/hosts.example` → `.env` — including `PROXY_TIER_SUBNET`, the source
+     of truth for the proxy network's subnet: choose a free private subnet, set
+     it there, then create the network from it with
+     `docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier` (RUNBOOK §5
+     has both commands). Never let Docker pick. `docker compose up` refuses to
+     run without it.
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
 3. Branding: copy `theme/custom.css` → `custom/style.css`, `logo.png` → `custom/logo.png`, and the icon set `theme/icons/*` → `custom/icons/` (nine files, bind-mounted per file — RUNBOOK §7).
@@ -93,7 +96,7 @@ image tags, TURN misconfig.
 
 ## 3. Reverse proxy + TLS — RUNBOOK §5
 
-- `docker network create proxy-tier` — unless step 2 already did; its subnet is `PROXY_TIER_SUBNET` in `.env` (RUNBOOK §5)
+- `docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier` — unless step 2 already did. Always from `.env`, never a subnet Docker picks: a rebuilt network can come back on another one, and every visitor would then share nginx-proxy's single bucket (RUNBOOK §5)
 - Deploy the nginx-proxy example in **its own** compose project, with the two mandatory edits: `DEFAULT_EMAIL` (a monitored address) and **`TRUST_DOWNSTREAM_PROXY=false`** (or a client can spoof the scheme Django trusts).
 - **First issuance against Let's Encrypt _staging_**, then switch to production — the apex is shared, don't burn the rate limit.
 

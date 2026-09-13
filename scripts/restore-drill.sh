@@ -33,6 +33,14 @@ set -uo pipefail
 DIR="${VISIO_DIR:-$PWD}"
 cd "$DIR" || { echo "FAIL cannot cd to $DIR"; exit 1; }
 
+# Same reason as backup.sh: `docker compose config --images` interpolates the
+# whole project, where the gateway's PROXY_TIER_SUBNET is required. Without a
+# value the lookup below fails into its postgres:16 fallback without a word —
+# and restoring into another major version is how a drill passes while the
+# real restore fails. `config --images` renders no container; the placeholder
+# lives in this process only.
+export PROXY_TIER_SUBNET="${PROXY_TIER_SUBNET:-config-does-not-render-gateway}"
+
 fail() { echo "FAIL $1"; exit 1; }
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }

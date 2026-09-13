@@ -45,10 +45,13 @@
 # every other API call, and all media (LiveKit has its own vhost).
 #
 # The key is the client address after realip (server block below), prefixed by
-# whether a session cookie is present. The cookie is not verified here — nginx
-# cannot — so it never exempts: it puts the request in a second bucket of the
-# same size, which keeps an anonymous flood from a shared address (a venue, a
-# carrier NAT) from spending a signed-in user's joins.
+# whether the request carries a session cookie. That is not "signed in": Django
+# sets the cookie for anonymous visitors too — the login flow keeps its state
+# in the session — and nginx cannot verify it. So it never exempts. It puts
+# the request in a second bucket of the same size, braked the same way: a
+# forged cookie only moves a client to the other bucket, and an anonymous flood
+# from a shared address (a venue, a carrier NAT) cannot spend the joins of the
+# requests from that address that do carry one.
 map $cookie_meet_sessionid $visio_mint_tier {
     ""      anon:;
     default session:;
@@ -146,6 +149,9 @@ server {
     #          3 s without a poll (settings.py LOBBY_WAITING_TIMEOUT), so the
     #          rate carries a full room — room.max_participants, 30 — waiting
     #          behind one address. preflight fails if the cap outgrows it.
+    # All four numbers are provisional until the load runs (#45, #46) measure
+    # them; what a refused join looks like to a visitor, and what the brake
+    # does not limit (media), are in RUNBOOK §5 and docs/LOAD_TEST.md.
     # nodelay: refuse at once rather than queue; a queued poll arrives late and
     # a queued flood still holds a connection. 429 rather than the default
     # 503: it says "slow down", and the runbook's verification counts it.

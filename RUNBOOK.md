@@ -339,7 +339,13 @@ All our deltas — pinned tags, restart policies, the Redis volume, the CSS moun
 Use the upstream [nginx-proxy example](https://github.com/suitenumerique/meet/tree/main/docs/examples/compose/nginx-proxy) (auto Let's Encrypt), in its **own** compose project. The `VIRTUAL_HOST` / `LETSENCRYPT_HOST` wiring is already in [`deploy/compose.override.yaml`](deploy/compose.override.yaml) — nothing to uncomment.
 
 ```bash
-docker network create proxy-tier
+# From .env, never numbered by Docker: PROXY_TIER_SUBNET is the source of truth
+# for this network's subnet (below). Choose a private range no other network on
+# the host uses — `ip route` and
+#   docker network inspect $(docker network ls -q) -f '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
+# list the ones taken — and set it in ~/visio/.env first.
+PROXY_TIER_SUBNET="$(grep -m1 '^PROXY_TIER_SUBNET=' ~/visio/.env | cut -d= -f2-)"
+docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier
 ```
 
 Two edits to the nginx-proxy example are mandatory:
@@ -391,22 +397,33 @@ Anyone can obtain a LiveKit token without an account — that is the guest path 
 | `GET /api/v1.0/rooms/<slug>/` (and `HEAD`, and `rooms/<slug>.json`) | 2 a second, burst 100 | one join is one such request, so 100 joins at the same instant from one address pass — the whole LT-7 storm ([docs/LOAD_TEST.md](docs/LOAD_TEST.md)) arriving from a single venue |
 | `POST /api/v1.0/rooms/<id>/request-entry/` | 30 a second, burst 60 | a waiting participant polls once a second, so a full room (`max_participants: 30`) can wait in a lobby behind one address |
 
-A 200-request burst from one address gets about 100 refusals on the first and 140 on the second, answered `429`. Requests carrying a session cookie are counted in a bucket of their own — not exempted: nginx cannot verify the cookie, so forging one buys a second bucket of the same size, never an unlimited one. Nothing else is counted: not the rest of the API, not Django's `301` on `rooms/<slug>` without a slash, and not media, which reaches LiveKit on its own vhost. The upstream lines each number comes from are in the template's comments; `scripts/check-gateway-brake.sh` proves the behaviour in CI, and `preflight.sh config` fails if the room cap outgrows either limit.
+A 200-request burst from one address gets about 100 refusals on the first and 140 on the second, answered `429`. Requests carrying a session cookie are counted in a bucket of their own — not exempted. Django sets that cookie for anonymous visitors too (the login flow keeps its state in the session), and nginx cannot verify it, so a forged cookie only moves a client to the other bucket, braked the same way. Nothing else is counted: not the rest of the API, not Django's `301` on `rooms/<slug>` without a slash, and not media, which reaches LiveKit on its own vhost. The upstream lines each number comes from are in the template's comments; `scripts/check-gateway-brake.sh` proves the behaviour in CI, and `preflight.sh config` fails if the room cap outgrows either limit or a rate is widened past its bound.
 
-The key is the client's address only if the gateway believes `X-Forwarded-For` from nginx-proxy and from nobody else, so it trusts exactly one subnet: **`PROXY_TIER_SUBNET` in `.env`, the subnet of the `proxy-tier` network**. Wrong one way, every visitor shares nginx-proxy's bucket and the brake throttles a whole meeting at once; wrong the other way, a client picks its own bucket by writing the header. Hence:
+**The numbers are provisional** until the load runs measure them (#45, #46). [docs/LOAD_TEST.md](docs/LOAD_TEST.md), under LT-7, carries the arithmetic for a venue behind one address.
 
-- unset or empty, **every compose command refuses to run** — `up`, `config`, `exec`, and therefore the nightly `backup.sh` — and nginx itself would refuse to start;
+**What this does not brake: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([docs/CAPACITY.md](docs/CAPACITY.md) §3.2). That node-level limit is set from measurements, in #47, and not here: capacity is unmeasured, and only a measured number may be enforced or published.
+
+The key is the client's address only if the gateway believes `X-Forwarded-For` from nginx-proxy and from nobody else, so it trusts exactly one subnet: **`PROXY_TIER_SUBNET` in `.env`, the subnet of the `proxy-tier` network**. `.env` is the source of truth: the network is created from it (above), never numbered by Docker. Wrong one way, every visitor shares nginx-proxy's bucket and the brake throttles a whole meeting at once; wrong the other way, a client picks its own bucket by writing the header. Hence:
+
+- unset or empty, `docker compose up` refuses to run, and nginx itself would refuse to start. `backup.sh` and `restore-drill.sh` supply a placeholder for their own `exec` and `config --images`, which never render the gateway, so the nightly dump does not depend on it;
 - `preflight.sh config` fails on a value that is not a network, or that reaches public address space (`0.0.0.0/0`, `::/0`);
-- `preflight.sh stack` fails unless the running gateway carries the brake and trusts exactly the `proxy-tier` network's own subnet (`preflight.sh brake` runs that part alone).
+- `preflight.sh stack` fails unless the running gateway carries the brake and trusts exactly the subnet `.env` holds, which must also be the `proxy-tier` network's own (`preflight.sh brake` runs that part alone).
 
-This relies on `TRUST_DOWNSTREAM_PROXY=false` above: nginx-proxy then writes the header itself and drops the client's. If anything is ever placed in front of nginx-proxy — a CDN, a load balancer — every visitor would arrive from its handful of addresses; re-derive this section before that happens.
+This relies on `TRUST_DOWNSTREAM_PROXY=false` above: nginx-proxy then writes the header itself and drops the client's. **Re-derive this section, then run `preflight.sh stack`, whenever:**
 
-**Apply.** In this order: the override refuses to run until the variable exists.
+- the `proxy-tier` network is recreated — from `.env`, with `--subnet` (above). A network Docker numbers itself can come back on another subnet, and every visitor then shares nginx-proxy's single bucket, with nothing failing until `preflight.sh stack` does;
+- `PROXY_TIER_SUBNET` changes in `.env` — then recreate the gateway: `docker compose up -d --no-deps --force-recreate frontend`;
+- anything is placed in front of nginx-proxy — a CDN, a load balancer — since every visitor would arrive from its handful of addresses;
+- an AAAA record is added for the host name — IPv6 clients would reach nginx-proxy through docker-proxy and collapse into its address.
+
+**Apply.** In this order: the override refuses to start the stack until the variable exists.
 
 ```bash
 cd ~/visio
-# 1. Read the subnet from Docker — never from memory. One CIDR; if two are
-#    printed, the IPv4 one (nginx-proxy reaches the gateway over IPv4).
+# 1. The subnet into .env. On a running host proxy-tier already exists, so
+#    copy the one it has — one CIDR; if two are printed, the IPv4 one
+#    (nginx-proxy reaches the gateway over IPv4). From then on .env is the
+#    source of truth, and any rebuild creates the network from it (above).
 docker network inspect proxy-tier -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
 #    Add it to .env, e.g. (a documentation range — use the printed value):
 #      PROXY_TIER_SUBNET=192.0.2.0/24
@@ -416,9 +433,9 @@ cp nginx/default.conf.template ~/backups/default.conf.template.pre-brake
 cp ~/repo/deploy/compose.override.yaml .
 cp ~/repo/deploy/nginx/default.conf.template nginx/
 # 3. Gate, recreate the gateway only, gate again.
-/path/to/repo/scripts/preflight.sh config
-docker compose up -d --force-recreate frontend
-/path/to/repo/scripts/preflight.sh stack
+~/repo/scripts/preflight.sh config
+docker compose up -d --no-deps --force-recreate frontend
+~/repo/scripts/preflight.sh stack
 ```
 
 Recreating `frontend` costs a few seconds of `502` on the site and API. Calls in progress keep their media: LiveKit is not touched.
@@ -426,7 +443,7 @@ Recreating `frontend` costs a few seconds of `502` on the site and API. Calls in
 **Verify.** The first line on the host; the rest from a test client **off the host**, on another network — a request the host makes to itself can arrive from the bridge gateway's address, which proves nothing.
 
 ```bash
-scripts/preflight.sh brake       # on the host: the brake and the subnet, as nginx loaded them
+~/repo/scripts/preflight.sh brake   # on the host: the brake and the subnet, as nginx loaded them
 
 H=https://visio.samourai.app
 # a) The access log shows the client, not nginx-proxy. From the test client:
@@ -448,6 +465,8 @@ seq 200 | xargs -P 50 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
 #    second participant from another device on the same network. Both join.
 ```
 
+**If (c) shows "Requesting to join…" instead of the room, that join was refused.** The SPA shows no error for a refused room fetch: v1.24.0's `Join.tsx:319-356` fetches with `retry: false`, is left with no room data, takes the room for one with a lobby and calls `startWaiting()`. The visitor then waits for a host that a guest room does not have — its `request-entry` answers 404 — polling at up to about one request a second against the same address's lobby bucket. Wait out the minute and reload. On the live host the same screen appears when one address sends more than about 100 joins at once: a venue with 5 rooms × 30 joining together leaves about 50 visitors on it, whose polls drain the lobby's burst of 60 in about 3 s and then crowd out a real lobby behind the same address. [docs/LOAD_TEST.md](docs/LOAD_TEST.md), under LT-7, has the arithmetic, lobbies above 30 included.
+
 The throwaway slugs in (b) are synthetic rooms: nothing is stored and nothing reaches LiveKit, since no client connects with those tokens. Refusals appear in `docker compose logs frontend` as `limiting requests`, with the client address.
 
 **Roll back.**
@@ -455,10 +474,10 @@ The throwaway slugs in (b) are synthetic rooms: nothing is stored and nothing re
 ```bash
 cp ~/backups/compose.override.yaml.pre-brake compose.override.yaml
 cp ~/backups/default.conf.template.pre-brake nginx/default.conf.template
-docker compose up -d --force-recreate frontend
+docker compose up -d --no-deps --force-recreate frontend
 ```
 
-`PROXY_TIER_SUBNET` can stay in `.env`; the old files ignore it. `preflight.sh config` and `stack` then fail on the brake checks, which is correct for a gateway that no longer carries it. To loosen rather than remove, change the numbers in the repository's template — `preflight.sh config` refuses a burst of 200 or more, which would let the flood it exists for straight through.
+`PROXY_TIER_SUBNET` can stay in `.env`; the old files ignore it. `preflight.sh config` and `stack` then fail on the brake checks, which is correct for a gateway that no longer carries it. To loosen rather than remove, change the numbers in the repository's template — `preflight.sh config` refuses a burst of 200 or more, a room rate above 10 a second and a lobby rate above two full rooms, each of which would let through the flood the brake exists for.
 
 Caddy alternative: expose `frontend` on `8086:8086` and proxy to it. The peer is then no longer on `proxy-tier`: `PROXY_TIER_SUBNET` must become the address Caddy connects from, and the stack check above must be re-derived for it.
 

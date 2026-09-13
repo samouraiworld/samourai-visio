@@ -156,6 +156,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Assert pinned upstream still behaves as documented
         run: scripts/check-upstream-contract.sh "$UPSTREAM_REF"
+      - name: And its lobby-poll threshold can fail, naming the value it read
+        run: scripts/check-upstream-contract.selftest.sh
 
   upstream-drift:
     name: Upstream drift (advisory)
@@ -456,6 +458,50 @@ jobs:
           run_drill --remote | tee /tmp/drill-remote.out
           grep -q '^OK restored from remote ' /tmp/drill-remote.out ||
             { echo "::error::remote drill did not report OK"; exit 1; }
+
+      - name: backup.sh and the drill run without the gateway's PROXY_TIER_SUBNET; up still refuses
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          # The gateway's `:?` line, copied verbatim from the override the host
+          # runs: a paraphrase could pass here while the real line broke both.
+          line="$(grep -m1 -E '^      - PROXY_TIER_SUBNET=[$][{]PROXY_TIER_SUBNET:[?]' \
+                    "$GITHUB_WORKSPACE/deploy/compose.override.yaml")" ||
+            { echo "::error::no PROXY_TIER_SUBNET refusal line in deploy/compose.override.yaml"; exit 1; }
+          # The fixture's postgres image under a name the drill's fallback
+          # (postgres:16) cannot produce, so the drill names it only if
+          # `docker compose config --images` answered. The frontend stand-in is
+          # never pulled: interpolation refuses before anything starts.
+          docker tag postgres:16 visio-drill-probe/postgres:16
+          printf '%s\n' 'services:' '  postgresql:' '    image: visio-drill-probe/postgres:16' \
+            '  frontend:' '    image: visio-drill-probe/gateway:never-started' '    environment:' \
+            "$line" > compose.override.yaml
+          unset PROXY_TIER_SUBNET
+          if docker compose up -d 2> /tmp/nosubnet-up.err; then
+            echo "::error::compose up ran with PROXY_TIER_SUBNET unset"; exit 1
+          fi
+          grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/nosubnet-up.err || {
+            cat /tmp/nosubnet-up.err
+            echo "::error::compose up failed, but not on PROXY_TIER_SUBNET"; exit 1
+          }
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/nosubnet-backup.out
+          grep -q '^OK ' /tmp/nosubnet-backup.out ||
+            { echo "::error::backup.sh failed while PROXY_TIER_SUBNET was unset"; exit 1; }
+          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/restore-drill.sh" | tee /tmp/nosubnet-drill.out
+          grep -q 'into visio-drill-probe/postgres:16' /tmp/nosubnet-drill.out ||
+            { echo "::error::the drill did not read its image from compose while PROXY_TIER_SUBNET was unset"; exit 1; }
+          # And the export is what did it: the same drill without that line
+          # falls back to postgres:16 without a word. backup.sh gets no such
+          # control — some Compose releases do not interpolate for `exec`, so
+          # its dump passes either way; the export there covers the ones that do.
+          sed '/^export PROXY_TIER_SUBNET=/d' "$GITHUB_WORKSPACE/scripts/restore-drill.sh" > /tmp/drill-noexport.sh
+          VISIO_DIR="$W" bash /tmp/drill-noexport.sh > /tmp/drill-noexport.out 2>&1 || true
+          if grep -q 'into visio-drill-probe/postgres:16' /tmp/drill-noexport.out; then
+            cat /tmp/drill-noexport.out
+            echo "::error::the drill read its image without the export — this step proves nothing"; exit 1
+          fi
+          rm compose.override.yaml
 
       - name: And it WAITS for Postgres instead of racing its startup
         run: |

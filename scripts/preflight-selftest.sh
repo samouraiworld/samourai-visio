@@ -275,6 +275,12 @@ mutate_rs 's|zone=visio_mint_room burst=100 |zone=visio_mint_room burst=250 |' n
   'room burst 250 lets a whole 200-request burst through' "room burst wide enough to admit the flood it exists for"
 mutate_rs 's|zone=visio_mint_lobby burst=60 |zone=visio_mint_lobby burst=250 |' nginx/default.conf.template \
   'lobby burst 250 lets a whole 200-request burst through' "lobby burst wide enough to admit the flood it exists for"
+# A widened rate admits the same first 101 of a burst, so no burst-shaped check
+# sees it: only the upper bounds do.
+mutate_rs 's|rate=2r/s;|rate=20r/s;|' nginx/default.conf.template \
+  'room rate 20r/s is above 10r/s' "room rate widened tenfold (bursts unchanged, sustained minting ten times higher)"
+mutate_rs 's|rate=30r/s;|rate=90r/s;|' nginx/default.conf.template \
+  'lobby rate 90r/s is above two full rooms of 30' "lobby rate widened to three full rooms' polling"
 # The subnet the host supplies.
 mutate_rs '/^PROXY_TIER_SUBNET=/d' .env \
   'PROXY_TIER_SUBNET unset in .env' "proxy-tier subnet left unset"
@@ -491,6 +497,7 @@ case "$*" in
       no-gateway)         exit 1 ;;
       trusts-everyone)    subnet=0.0.0.0/0 ;;
       ipv6-of-dual-stack) subnet=2001:db8:1::/64 ;;
+      stale-gateway)      subnet=198.51.100.0/24 ;;
     esac
     sed -e "s|\${PROXY_TIER_SUBNET}|$subnet|" "$STUB_TEMPLATE" |
       case "$mode" in
@@ -500,7 +507,7 @@ case "$*" in
       esac ;;
   "network inspect proxy-tier --format {{json .}}")
     net=192.0.2; v6=""
-    [ "$mode" = other-network ] && net=198.51.100
+    case "$mode" in other-network|stale-gateway) net=198.51.100 ;; esac
     [ "$mode" = ipv6-of-dual-stack ] && v6=',{"Subnet":"2001:db8:1::/64"}'
     printf '{"Name":"proxy-tier","IPAM":{"Config":[{"Subnet":"%s.0/24"}%s]},"Containers":{"a":{"Name":"nginx-proxy","IPv4Address":"%s.2/24"},"b":{"Name":"visio-frontend-1","IPv4Address":"%s.3/24"}}}\n' \
       "$net" "$v6" "$net" "$net" ;;
@@ -537,6 +544,8 @@ bmutate trusts-everyone "the running gateway trusts X-Forwarded-For from '0.0.0.
   "a gateway trusting every peer"
 bmutate other-network "is not the proxy-tier network's" \
   "a valid subnet that belongs to some other network (a recreated proxy-tier, a typo)"
+bmutate stale-gateway "but .env holds PROXY_TIER_SUBNET='192.0.2.0/24'" \
+  "a gateway trusting a subnet .env no longer holds (never recreated after .env changed)"
 bmutate ipv6-of-dual-stack 'proxy-tier containers outside the trusted subnet' \
   "the IPv6 half of a dual-stack proxy-tier, while nginx-proxy connects over IPv4"
 clean brake "stub gateway back in good mode" "${BRAKE_ENV[@]}"

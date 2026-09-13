@@ -12,9 +12,11 @@ LIVEKIT_INTERNAL_HOST=livekit
 
 # The subnet of the external `proxy-tier` Docker network (RUNBOOK §5): the only
 # peers whose X-Forwarded-For the gateway trusts, so the flood brake and the
-# access log see the real client rather than nginx-proxy. Read it on the host,
-# never guess or widen it — preflight refuses a catch-all and any value that is
-# not that network's own subnet:
+# access log see the real client rather than nginx-proxy. This file is its
+# source of truth — create the network FROM it, never let Docker pick one:
+#   docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier
+# On a host where proxy-tier already exists, copy the subnet it has instead:
 #   docker network inspect proxy-tier -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
-# While it is unset, every compose command refuses to run.
+# preflight refuses a catch-all, and any value the running network does not have.
+# While it is unset, `docker compose up` refuses to run.
 PROXY_TIER_SUBNET=<proxy-tier-subnet>

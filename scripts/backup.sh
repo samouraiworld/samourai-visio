@@ -48,6 +48,15 @@ esac
 DIR="${VISIO_DIR:-$PWD}"
 cd "$DIR" || { echo "FAIL cannot cd to $DIR"; exit 1; }
 
+# compose.override.yaml makes the gateway's PROXY_TIER_SUBNET required (`:?`),
+# and compose interpolates the WHOLE project on every command, `exec` included.
+# A host whose .env lost that line must still get its nightly dump: a gateway
+# setting failing the backup would show only in journald. `exec` renders no
+# container, so a placeholder is harmless here. Exported, it outranks .env for
+# this process's compose calls only; `docker compose up` in any other shell
+# still refuses.
+export PROXY_TIER_SUBNET="${PROXY_TIER_SUBNET:-exec-does-not-render-gateway}"
+
 fail() { echo "FAIL $1"; exit 1; }
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
