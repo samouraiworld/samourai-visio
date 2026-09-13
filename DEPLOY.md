@@ -67,7 +67,19 @@ mkdir -p ~/visio && cd ~/visio
 2. Copy this repo's templates and fill every value — **RUNBOOK §4**:
    - `deploy/env.d/common.example` → `env.d/common`
    - `deploy/env.d/postgresql.example` → `env.d/postgresql`
-   - `deploy/hosts.example` → `.env`
+   - `deploy/hosts.example` → `.env` — including `PROXY_TIER_SUBNET`, the source
+     of truth for the proxy network's subnet: choose a free private subnet, set
+     it there, then load it from `.env` and create the network from it (RUNBOOK
+     §5). Never let Docker pick: the `:?` stops the shell when the `.env` line is
+     missing, because an empty `--subnet` would let Docker pick after all.
+
+     ```bash
+     PROXY_TIER_SUBNET="$(grep -m1 '^PROXY_TIER_SUBNET=' ~/visio/.env | cut -d= -f2-)"
+     docker network create --subnet "${PROXY_TIER_SUBNET:?set PROXY_TIER_SUBNET in .env first}" proxy-tier
+     ```
+
+     Every compose command that interpolates the stack's files refuses to run
+     without it.
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
 3. Branding: copy `theme/custom.css` → `custom/style.css`, `logo.png` → `custom/logo.png`, and the icon set `theme/icons/*` → `custom/icons/` (nine files, bind-mounted per file — RUNBOOK §7).
@@ -91,7 +103,7 @@ image tags, TURN misconfig.
 
 ## 3. Reverse proxy + TLS — RUNBOOK §5
 
-- `docker network create proxy-tier`
+- Create `proxy-tier` from `.env` with the two lines in step 2 — unless step 2 already did. Always from `.env`, with the `:?` guard, never a subnet Docker picks: a rebuilt network can come back on another one, and every visitor would then share nginx-proxy's single bucket (RUNBOOK §5)
 - Deploy the nginx-proxy example in **its own** compose project, with the two mandatory edits: `DEFAULT_EMAIL` (a monitored address) and **`TRUST_DOWNSTREAM_PROXY=false`** (or a client can spoof the scheme Django trusts).
 - **First issuance against Let's Encrypt _staging_**, then switch to production — the apex is shared, don't burn the rate limit.
 
@@ -111,7 +123,8 @@ scripts/preflight.sh stack
 
 Confirms the backend is healthy, env interpolation resolved (empty ≠ literal
 `${VAR}`), the resolved Django settings actually parse (this is where the JSON-list
-bug would show), Redis persistence is on, and migrations are applied.
+bug would show), Redis persistence is on, migrations are applied, and the running
+gateway carries the flood brake and trusts exactly the `proxy-tier` network's subnet.
 
 ---
 

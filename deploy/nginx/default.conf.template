@@ -15,8 +15,58 @@
 # version bump, re-derive this copy: fresh upstream file + these blocks.
 #
 # envsubst: the stock nginx entrypoint substitutes only ${VARS} that exist in
-# the environment; nginx runtime vars ($http_host, $uri) survive, and the
-# added blocks deliberately contain none.
+# the environment; nginx runtime vars ($http_host, $uri) survive. The added
+# blocks read exactly one environment variable, PROXY_TIER_SUBNET, and every
+# nginx variable they use has a name no environment variable carries.
+# SAMOURAI-END
+
+# SAMOURAI-BEGIN flood brake on anonymous token minting (zones)
+# Two endpoints hand a LiveKit token to a caller who has no account (Meet
+# v1.24.0, src/backend/core):
+#   GET/HEAD /api/v1.0/rooms/<slug>/  RoomViewSet.retrieve (api/viewsets.py:257-
+#       285). For a slug not in the database it answers a synthetic room and a
+#       fresh token (ALLOW_UNREGISTERED_ROOMS) — room creation with no account;
+#       for a public room the serializer mints one too (serializers.py:169-188).
+#   POST /api/v1.0/rooms/<id>/request-entry/  RoomViewSet.request_entry
+#       (api/viewsets.py:474-501, permission_classes=[]). LobbyService mints for
+#       a public room on every call and for an admitted participant
+#       (services/lobby.py:124-190).
+# POST /api/v1.0/rooms/ requires an account (api/permissions.py:50-55);
+# creation-callback returns a cached slug, never a token; the external API is
+# off by default and this gateway does not proxy /external-api/ at all; and
+# add-ons are off by default (ADDONS_ENABLED) and hand out no LiveKit token.
+#
+# Each shape is matched on what reaches Django, including DRF's format suffix
+# (`rooms/<slug>.json` routes to retrieve with no slash — rest_framework
+# urlpatterns.py:107-109). `rooms/<slug>` without a slash is NOT counted: Django
+# answers it with a 301 and mints nothing, and the SPA requests exactly that
+# form (fetchRoom.ts via apiUrl.ts), so counting it would bill every join twice.
+# A request matching neither shape maps to "" and nginx does not count it:
+# every other API call, and all media (LiveKit has its own vhost).
+#
+# The key is the client address after realip (server block below), prefixed by
+# whether the request carries a session cookie. That is not "signed in": Django
+# sets the cookie for anonymous visitors too — the login flow keeps its state
+# in the session — and nginx cannot verify it. So it never exempts. It puts
+# the request in a second bucket of the same size, braked the same way: a
+# forged cookie only moves a client to the other bucket, and an anonymous flood
+# from a shared address (a venue, a carrier NAT) cannot spend the joins of the
+# requests from that address that do carry one.
+map $cookie_meet_sessionid $visio_mint_tier {
+    ""      anon:;
+    default session:;
+}
+map "$request_method $uri" $visio_mint_room_key {
+    default "";
+    "~^(GET|HEAD) /api/v1\.0/rooms/[^/]+/$"       $visio_mint_tier$binary_remote_addr;
+    "~^(GET|HEAD) /api/v1\.0/rooms/[^/]*\.[^/]*$" $visio_mint_tier$binary_remote_addr;
+}
+map "$request_method $uri" $visio_mint_lobby_key {
+    default "";
+    "~^POST /api/v1\.0/rooms/[^/]+/request-entry[^/]*/?$" $visio_mint_tier$binary_remote_addr;
+}
+limit_req_zone $visio_mint_room_key  zone=visio_mint_room:10m  rate=2r/s;
+limit_req_zone $visio_mint_lobby_key zone=visio_mint_lobby:10m rate=30r/s;
 # SAMOURAI-END
 
 upstream meet_backend {
@@ -64,6 +114,50 @@ server {
     # header, the LiveKit websocket and the OIDC redirect carry their own
     # parameters.
     add_header Referrer-Policy "same-origin" always;
+    # SAMOURAI-END
+
+    # SAMOURAI-BEGIN real client address, and the flood brake applied
+    # nginx-proxy is the only hop in front of this server, and it connects from
+    # the external proxy-tier network. With TRUST_DOWNSTREAM_PROXY=false
+    # (RUNBOOK §5) it sets X-Forwarded-For to the address it accepted the
+    # connection from and discards whatever the client sent (nginx-proxy's
+    # nginx.tmpl, `map $proxy_add_x_forwarded_for $proxy_x_forwarded_for`).
+    #   - Trust that header only from PROXY_TIER_SUBNET, the subnet of that
+    #     network, supplied on the host in .env. Never a literal here.
+    #   - real_ip_recursive off: take the LAST address, the one nginx-proxy
+    #     wrote. `on` walks left past trusted addresses into whatever a client
+    #     wrote, the moment the trusted set is wider than it should be.
+    # Unset, the variable survives envsubst as the literal ${PROXY_TIER_SUBNET}
+    # and nginx refuses to start; compose refuses even earlier
+    # (compose.override.yaml). Neither path trusts everyone.
+    # After this, $remote_addr — the access log and the brake's key — is the
+    # client, not nginx-proxy.
+    set_real_ip_from ${PROXY_TIER_SUBNET};
+    real_ip_header X-Forwarded-For;
+    real_ip_recursive off;
+
+    # The brake. Zones, and exactly what they count, are at the top of this
+    # file. Per client address, per tier:
+    #   room   2 r/s, burst 100. A join is ONE minting GET: Join.tsx fetches the
+    #          room once on submit and Conference.tsx reuses that answer. So 100
+    #          joins at the same instant from one address pass — the whole LT-7
+    #          join storm (docs/LOAD_TEST.md) arriving from a single venue — and
+    #          2 more a second after that. A 200-request burst gets 99 refusals,
+    #          and scripted minting settles at 2 tokens a second per address.
+    #   lobby  30 r/s, burst 60. A waiting participant polls once a second
+    #          (useLobby.ts POLL_INTERVAL_MS) and falls out of the lobby after
+    #          3 s without a poll (settings.py LOBBY_WAITING_TIMEOUT), so the
+    #          rate carries a full room — room.max_participants, 30 — waiting
+    #          behind one address. preflight fails if the cap outgrows it.
+    # All four numbers are provisional until the load runs (#45, #46) measure
+    # them; what a refused join looks like to a visitor, and what the brake
+    # does not limit (media), are in RUNBOOK §5 and docs/LOAD_TEST.md.
+    # nodelay: refuse at once rather than queue; a queued poll arrives late and
+    # a queued flood still holds a connection. 429 rather than the default
+    # 503: it says "slow down", and the runbook's verification counts it.
+    limit_req zone=visio_mint_room burst=100 nodelay;
+    limit_req zone=visio_mint_lobby burst=60 nodelay;
+    limit_req_status 429;
     # SAMOURAI-END
 
     location @proxy_to_meet_backend {

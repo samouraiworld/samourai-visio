@@ -156,6 +156,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Assert pinned upstream still behaves as documented
         run: scripts/check-upstream-contract.sh "$UPSTREAM_REF"
+      - name: And its lobby-poll threshold can fail, naming the value it read
+        run: scripts/check-upstream-contract.selftest.sh
 
   upstream-drift:
     name: Upstream drift (advisory)
@@ -206,9 +208,12 @@ jobs:
         # to 301 the SPA's hardcoded DINUM legal routes. A syntax error here
         # is a total outage: the frontend container's nginx refuses to start.
         # --add-host: `nginx -t` resolves upstream server names at parse time.
+        # PROXY_TIER_SUBNET: a documentation range. Unset, nginx refuses to
+        # start on set_real_ip_from — the Gateway flood brake job proves that.
         run: |
           docker run --rm --add-host backend:127.0.0.1 --add-host frontend:127.0.0.1 \
             -e BACKEND_INTERNAL_HOST=backend -e FRONTEND_INTERNAL_HOST=frontend \
+            -e PROXY_TIER_SUBNET=192.0.2.0/24 \
             -v "$PWD/nginx/default.conf.template:/etc/nginx/templates/docs.conf.template:ro" \
             nginxinc/nginx-unprivileged:1.30.3-alpine3.23 nginx -t
 
@@ -243,6 +248,39 @@ jobs:
               print(f"::error::{f}")
           sys.exit(1 if fails else 0)
           PY
+
+      - name: And it refuses to run without the proxy-tier subnet
+        working-directory: deploy
+        # The gateway believes X-Forwarded-For only from PROXY_TIER_SUBNET. A
+        # stack started without it would key the flood brake on nginx-proxy,
+        # putting every visitor in one bucket, so compose must refuse. Asserted
+        # on the message: any interpolation error also exits non-zero. Last in
+        # the job, because it edits the .env the steps above rely on.
+        run: |
+          set -euo pipefail
+          sed -i '/^PROXY_TIER_SUBNET=/d' .env
+          if docker compose config --no-env-resolution -q 2> /tmp/refusal.err; then
+            echo "::error::compose rendered the stack with PROXY_TIER_SUBNET unset"; exit 1
+          fi
+          grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/refusal.err || {
+            cat /tmp/refusal.err
+            echo "::error::compose failed, but not on the missing PROXY_TIER_SUBNET"; exit 1
+          }
+
+  gateway-brake:
+    name: Gateway flood brake
+    runs-on: ubuntu-latest
+    # preflight proves the brake's lines are present. This proves what they
+    # do, in the nginx build the frontend image is made from: nginx refuses to
+    # start without PROXY_TIER_SUBNET, a 200-request burst is refused while a
+    # venue is not, and the key is the client the proxy tier reports — never
+    # an address a stranger writes.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: The brake trips on floods, spares venues, keys on the real client
+        run: scripts/check-gateway-brake.sh
+      - name: And each of its verdicts can fail, naming its cause
+        run: scripts/check-gateway-brake.selftest.sh
 
   backup-smoke:
     name: Backup end-to-end
@@ -420,6 +458,113 @@ jobs:
           run_drill --remote | tee /tmp/drill-remote.out
           grep -q '^OK restored from remote ' /tmp/drill-remote.out ||
             { echo "::error::remote drill did not report OK"; exit 1; }
+
+      - name: backup.sh and the drill run without the gateway's PROXY_TIER_SUBNET; up still refuses
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/visio"
+          cd "$W"
+          # The gateway's `:?` line, copied verbatim from the override the host
+          # runs: a paraphrase could pass here while the real line broke both.
+          line="$(grep -m1 -E '^      - PROXY_TIER_SUBNET=[$][{]PROXY_TIER_SUBNET:[?]' \
+                    "$GITHUB_WORKSPACE/deploy/compose.override.yaml")" ||
+            { echo "::error::no PROXY_TIER_SUBNET refusal line in deploy/compose.override.yaml"; exit 1; }
+          # The fixture's postgres image under a name no other source produces,
+          # so the drill names it only if `docker compose config --images`
+          # answered. The frontend stand-in is never pulled: interpolation
+          # refuses before anything starts.
+          docker tag postgres:16 visio-drill-probe/postgres:16
+          printf '%s\n' 'services:' '  postgresql:' '    image: visio-drill-probe/postgres:16' \
+            '  frontend:' '    image: visio-drill-probe/gateway:never-started' '    environment:' \
+            "$line" > compose.override.yaml
+          unset PROXY_TIER_SUBNET
+          if docker compose up -d 2> /tmp/nosubnet-up.err; then
+            echo "::error::compose up ran with PROXY_TIER_SUBNET unset"; exit 1
+          fi
+          grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/nosubnet-up.err || {
+            cat /tmp/nosubnet-up.err
+            echo "::error::compose up failed, but not on PROXY_TIER_SUBNET"; exit 1
+          }
+          # A spy ahead of the real docker records what each script hands compose.
+          real_docker="$(command -v docker)"
+          mkdir -p "$W/spy"
+          cat > "$W/spy/docker" <<SPY
+          #!/bin/sh
+          printf '%s\n' "\${PROXY_TIER_SUBNET-<unset>}" >> "$W/spy/seen"
+          exec "$real_docker" "\$@"
+          SPY
+          chmod +x "$W/spy/docker"
+          both_scripts() {
+            PATH="$W/spy:$PATH" VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/nosubnet-backup.out
+            grep -q '^OK ' /tmp/nosubnet-backup.out ||
+              { echo "::error::backup.sh failed ($1)"; exit 1; }
+            PATH="$W/spy:$PATH" VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/restore-drill.sh" \
+              | tee /tmp/nosubnet-drill.out
+            grep -q 'into visio-drill-probe/postgres:16' /tmp/nosubnet-drill.out ||
+              { echo "::error::the drill did not read its image from compose ($1)"; exit 1; }
+          }
+          # .env lacks the variable: both scripts run, handing compose the
+          # placeholder, a name that can never resolve.
+          : > "$W/spy/seen"
+          both_scripts ".env without PROXY_TIER_SUBNET"
+          seen="$(sort -u "$W/spy/seen")"
+          [ "$seen" = "does-not-render-the-gateway.invalid" ] ||
+            { echo "::error::with .env lacking it, the scripts handed compose: $seen"; exit 1; }
+          # .env holds a value: neither script exports anything, so compose
+          # reads .env's — an exported placeholder would outrank it.
+          printf 'PROXY_TIER_SUBNET=192.0.2.0/24\n' > .env
+          : > "$W/spy/seen"
+          both_scripts ".env holding PROXY_TIER_SUBNET"
+          seen="$(sort -u "$W/spy/seen")"
+          [ "$seen" = "<unset>" ] ||
+            { echo "::error::with .env holding a value, the scripts still exported: $seen"; exit 1; }
+          resolved="$(docker compose config --no-env-resolution --format json | python3 -c '
+          import json, sys
+          print(json.load(sys.stdin)["services"]["frontend"]["environment"]["PROXY_TIER_SUBNET"])')"
+          [ "$resolved" = "192.0.2.0/24" ] ||
+            { echo "::error::compose resolved PROXY_TIER_SUBNET to '$resolved', not the value .env holds"; exit 1; }
+          rm .env
+          # And the placeholder is what made them run. Copies without that
+          # block must exit 1 on the interpolation error. Neither this job nor
+          # these runs name the compose project: given `-p` or
+          # COMPOSE_PROJECT_NAME, `exec` falls back to the running containers
+          # and never interpolates the files, so the backup control would not apply.
+          for s in backup.sh restore-drill.sh; do
+            python3 - "$GITHUB_WORKSPACE/scripts/$s" "/tmp/noplaceholder-$s" <<'PY'
+          import re, sys
+          src = open(sys.argv[1]).read()
+          out, n = re.subn(r'^if \[ -z "\$\{PROXY_TIER_SUBNET:-\}" \]; then\n.*?^fi\n', '', src, flags=re.S | re.M)
+          if n != 1:
+              sys.exit(f"{sys.argv[1]}: expected one placeholder block, found {n}")
+          open(sys.argv[2], "w").write(out)
+          PY
+          done
+          # backup.sh under a HOME of its own: the empty dump a failed run
+          # leaves must neither become nor overwrite the dump the next steps
+          # restore. DOCKER_CONFIG keeps docker's own config, plugins and
+          # context where they were — moving HOME alone can make `docker compose`
+          # itself go missing, and the run would fail for a reason this control
+          # is not about.
+          docker_config="${DOCKER_CONFIG:-$HOME/.docker}"
+          rc=0
+          DOCKER_CONFIG="$docker_config" HOME="$(mktemp -d)" VISIO_DIR="$W" \
+            bash /tmp/noplaceholder-backup.sh > /tmp/noplaceholder-backup.out 2>&1 || rc=$?
+          if [ "$rc" -ne 1 ] ||
+             ! grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/noplaceholder-backup.out; then
+            cat /tmp/noplaceholder-backup.out
+            echo "::error::backup.sh without its placeholder exited $rc; expected 1, on the interpolation error"
+            exit 1
+          fi
+          rc=0
+          VISIO_DIR="$W" bash /tmp/noplaceholder-restore-drill.sh > /tmp/noplaceholder-drill.out 2>&1 || rc=$?
+          if [ "$rc" -ne 1 ] ||
+             ! grep -q "^FAIL cannot read the stack's images" /tmp/noplaceholder-drill.out ||
+             ! grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/noplaceholder-drill.out; then
+            cat /tmp/noplaceholder-drill.out
+            echo "::error::the drill without its placeholder exited $rc; expected 1, naming the interpolation error"
+            exit 1
+          fi
+          rm compose.override.yaml
 
       - name: And it WAITS for Postgres instead of racing its startup
         run: |

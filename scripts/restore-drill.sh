@@ -22,6 +22,7 @@
 #                   classic way a drill passes while the real restore fails.
 #                   Falling back to a Docker Hub tag also makes the drill fail
 #                   on a rate-limited host that has the image locally already.
+#                   A lookup that fails stops the drill; it never guesses.
 #   DRILL_DB_USER   Role the dump expects to own its objects. Defaults to
 #                   DB_USER from env.d/postgresql.
 #   DRILL_TABLES    Space-separated tables to count as the proof that data,
@@ -36,6 +37,21 @@ cd "$DIR" || { echo "FAIL cannot cd to $DIR"; exit 1; }
 fail() { echo "FAIL $1"; exit 1; }
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
+
+# Same reason as backup.sh: `docker compose config --images` interpolates the
+# whole project, where the gateway's PROXY_TIER_SUBNET is required, so a host
+# whose .env lost that line could not read its own postgres image. When
+# neither this shell nor .env holds a value, hand compose one that can never
+# be taken for a network — a `.invalid` name never resolves (RFC 6761) — and
+# nothing while .env holds one, since an exported value would outrank it.
+# `config --images` renders no container either way.
+if [ -z "${PROXY_TIER_SUBNET:-}" ]; then
+  if [ -n "$(envval .env PROXY_TIER_SUBNET)" ]; then
+    unset PROXY_TIER_SUBNET   # an empty one from the shell would outrank .env's
+  else
+    export PROXY_TIER_SUBNET=does-not-render-the-gateway.invalid
+  fi
+fi
 
 MODE="local"
 case "${1:-}" in
@@ -60,14 +76,18 @@ done
 
 # The image the stack actually runs, so the drill restores into the same major
 # version the dump came from. `--images` prints one image per service and needs
-# no secret resolution; the grep keeps it to the postgres one.
+# no secret resolution; the grep keeps it to the postgres one. A lookup that
+# fails stops here, naming compose's own error: the fallback tag this used to
+# have restored into whatever that tag was, without a word.
 if [ -z "${DRILL_PG_IMAGE:-}" ]; then
   # No --env-file: compose already auto-loads .env from the project directory
   # when there is one, and demanding it would break the drill on a dir that
   # keeps its variables elsewhere.
-  DRILL_PG_IMAGE="$(docker compose config --images 2>/dev/null \
-                    | grep -m1 -E '(^|/)postgres:' || true)"
-  DRILL_PG_IMAGE="${DRILL_PG_IMAGE:-postgres:16}"
+  images="$(docker compose config --images 2>&1)" ||
+    fail "cannot read the stack's images: $(printf '%s\n' "$images" | head -1) — fix the compose project in $DIR, or set DRILL_PG_IMAGE"
+  DRILL_PG_IMAGE="$(printf '%s\n' "$images" | grep -m1 -E '(^|/)postgres:' || true)"
+  [ -n "$DRILL_PG_IMAGE" ] ||
+    fail "no postgres image among the stack's images ($(printf '%s' "$images" | tr '\n' ' ')) — set DRILL_PG_IMAGE"
 fi
 
 CONTAINER="restore-drill"
