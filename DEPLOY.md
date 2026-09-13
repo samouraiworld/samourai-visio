@@ -69,10 +69,17 @@ mkdir -p ~/visio && cd ~/visio
    - `deploy/env.d/postgresql.example` → `env.d/postgresql`
    - `deploy/hosts.example` → `.env` — including `PROXY_TIER_SUBNET`, the source
      of truth for the proxy network's subnet: choose a free private subnet, set
-     it there, then create the network from it with
-     `docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier` (RUNBOOK §5
-     has both commands). Never let Docker pick. `docker compose up` refuses to
-     run without it.
+     it there, then load it from `.env` and create the network from it (RUNBOOK
+     §5). Never let Docker pick: the `:?` stops the shell when the `.env` line is
+     missing, because an empty `--subnet` would let Docker pick after all.
+
+     ```bash
+     PROXY_TIER_SUBNET="$(grep -m1 '^PROXY_TIER_SUBNET=' ~/visio/.env | cut -d= -f2-)"
+     docker network create --subnet "${PROXY_TIER_SUBNET:?set PROXY_TIER_SUBNET in .env first}" proxy-tier
+     ```
+
+     Every compose command that interpolates the stack's files refuses to run
+     without it.
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
 3. Branding: copy `theme/custom.css` → `custom/style.css`, `logo.png` → `custom/logo.png`, and the icon set `theme/icons/*` → `custom/icons/` (nine files, bind-mounted per file — RUNBOOK §7).
@@ -96,7 +103,7 @@ image tags, TURN misconfig.
 
 ## 3. Reverse proxy + TLS — RUNBOOK §5
 
-- `docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier` — unless step 2 already did. Always from `.env`, never a subnet Docker picks: a rebuilt network can come back on another one, and every visitor would then share nginx-proxy's single bucket (RUNBOOK §5)
+- Create `proxy-tier` from `.env` with the two lines in step 2 — unless step 2 already did. Always from `.env`, with the `:?` guard, never a subnet Docker picks: a rebuilt network can come back on another one, and every visitor would then share nginx-proxy's single bucket (RUNBOOK §5)
 - Deploy the nginx-proxy example in **its own** compose project, with the two mandatory edits: `DEFAULT_EMAIL` (a monitored address) and **`TRUST_DOWNSTREAM_PROXY=false`** (or a client can spoof the scheme Django trusts).
 - **First issuance against Let's Encrypt _staging_**, then switch to production — the apex is shared, don't burn the rate limit.
 

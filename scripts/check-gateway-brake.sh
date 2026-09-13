@@ -77,6 +77,18 @@ refuses() { # refuses <label> [docker run args...]
 }
 refuses unset
 refuses empty -e PROXY_TIER_SUBNET=
+# And with the placeholder backup.sh and restore-drill.sh hand compose when
+# .env lacks a value. Read from the scripts themselves, so this tests what
+# they export: a `.invalid` name must fail as loudly as an empty value, never
+# render a gateway that trusts whatever a DNS search domain answered.
+for s in backup.sh restore-drill.sh; do
+  placeholder="$(grep -m1 -oE 'PROXY_TIER_SUBNET=[A-Za-z0-9.-]+[.]invalid' "scripts/$s" | cut -d= -f2)"
+  if [ -z "$placeholder" ]; then
+    bad "scripts/$s hands compose no .invalid placeholder for PROXY_TIER_SUBNET — nothing to prove"
+  else
+    refuses "set to $s's placeholder ($placeholder)" -e PROXY_TIER_SUBNET="$placeholder"
+  fi
+done
 
 # ── The gateway, a peer inside the proxy tier, and one outside it ──────────
 if ! docker network create --subnet "$TIER_SUBNET" "$TIER" >/dev/null ||

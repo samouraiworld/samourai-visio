@@ -345,7 +345,9 @@ Use the upstream [nginx-proxy example](https://github.com/suitenumerique/meet/tr
 #   docker network inspect $(docker network ls -q) -f '{{.Name}} {{range .IPAM.Config}}{{.Subnet}} {{end}}'
 # list the ones taken — and set it in ~/visio/.env first.
 PROXY_TIER_SUBNET="$(grep -m1 '^PROXY_TIER_SUBNET=' ~/visio/.env | cut -d= -f2-)"
-docker network create --subnet "$PROXY_TIER_SUBNET" proxy-tier
+# `:?` stops here when the .env line is missing: an empty --subnet would let
+# Docker pick the subnet after all.
+docker network create --subnet "${PROXY_TIER_SUBNET:?set PROXY_TIER_SUBNET in .env first}" proxy-tier
 ```
 
 Two edits to the nginx-proxy example are mandatory:
@@ -397,15 +399,15 @@ Anyone can obtain a LiveKit token without an account — that is the guest path 
 | `GET /api/v1.0/rooms/<slug>/` (and `HEAD`, and `rooms/<slug>.json`) | 2 a second, burst 100 | one join is one such request, so 100 joins at the same instant from one address pass — the whole LT-7 storm ([docs/LOAD_TEST.md](docs/LOAD_TEST.md)) arriving from a single venue |
 | `POST /api/v1.0/rooms/<id>/request-entry/` | 30 a second, burst 60 | a waiting participant polls once a second, so a full room (`max_participants: 30`) can wait in a lobby behind one address |
 
-A 200-request burst from one address gets about 100 refusals on the first and 140 on the second, answered `429`. Requests carrying a session cookie are counted in a bucket of their own — not exempted. Django sets that cookie for anonymous visitors too (the login flow keeps its state in the session), and nginx cannot verify it, so a forged cookie only moves a client to the other bucket, braked the same way. Nothing else is counted: not the rest of the API, not Django's `301` on `rooms/<slug>` without a slash, and not media, which reaches LiveKit on its own vhost. The upstream lines each number comes from are in the template's comments; `scripts/check-gateway-brake.sh` proves the behaviour in CI, and `preflight.sh config` fails if the room cap outgrows either limit or a rate is widened past its bound.
+A 200-request burst from one address gets 99 refusals on the first and 132–139 on the second (measured), answered `429`. Requests carrying a session cookie are counted in a bucket of their own — not exempted. Django sets that cookie for anonymous visitors too (the login flow keeps its state in the session), and nginx cannot verify it, so a forged cookie only moves a client to the other bucket, braked the same way. Nothing else is counted: not the rest of the API, not Django's `301` on `rooms/<slug>` without a slash, and not media, which reaches LiveKit on its own vhost. The upstream lines each number comes from are in the template's comments; `scripts/check-gateway-brake.sh` proves the behaviour in CI, and `preflight.sh config` fails if the room cap outgrows either limit or a rate is widened past its bound.
 
 **The numbers are provisional** until the load runs measure them (#45, #46). [docs/LOAD_TEST.md](docs/LOAD_TEST.md), under LT-7, carries the arithmetic for a venue behind one address.
 
-**What this does not brake: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([docs/CAPACITY.md](docs/CAPACITY.md) §3.2). That node-level limit is set from measurements, in #47, and not here: capacity is unmeasured, and only a measured number may be enforced or published.
+**What this does not brake: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([docs/CAPACITY.md](docs/CAPACITY.md) §3.2). That node-level limit is set from measurements, in #47, and not here: capacity is unmeasured, and only a measured capacity limit may be enforced or published.
 
 The key is the client's address only if the gateway believes `X-Forwarded-For` from nginx-proxy and from nobody else, so it trusts exactly one subnet: **`PROXY_TIER_SUBNET` in `.env`, the subnet of the `proxy-tier` network**. `.env` is the source of truth: the network is created from it (above), never numbered by Docker. Wrong one way, every visitor shares nginx-proxy's bucket and the brake throttles a whole meeting at once; wrong the other way, a client picks its own bucket by writing the header. Hence:
 
-- unset or empty, `docker compose up` refuses to run, and nginx itself would refuse to start. `backup.sh` and `restore-drill.sh` supply a placeholder for their own `exec` and `config --images`, which never render the gateway, so the nightly dump does not depend on it;
+- unset or empty, every compose command that interpolates the stack's files refuses to run — `up`, `exec`, `ps`, `logs`, `config` — and nginx itself would refuse to start. When `.env` lacks the variable, `backup.sh` and `restore-drill.sh` hand their own `exec` and `config --images` a placeholder that can never resolve (`does-not-render-the-gateway.invalid`), so the nightly dump does not depend on it; while `.env` holds a value they hand nothing, since an exported value would outrank it;
 - `preflight.sh config` fails on a value that is not a network, or that reaches public address space (`0.0.0.0/0`, `::/0`);
 - `preflight.sh stack` fails unless the running gateway carries the brake and trusts exactly the subnet `.env` holds, which must also be the `proxy-tier` network's own (`preflight.sh brake` runs that part alone).
 
@@ -416,7 +418,7 @@ This relies on `TRUST_DOWNSTREAM_PROXY=false` above: nginx-proxy then writes the
 - anything is placed in front of nginx-proxy — a CDN, a load balancer — since every visitor would arrive from its handful of addresses;
 - an AAAA record is added for the host name — IPv6 clients would reach nginx-proxy through docker-proxy and collapse into its address.
 
-**Apply.** In this order: the override refuses to start the stack until the variable exists.
+**Apply.** In this order: every compose command that interpolates the override refuses to run until the variable exists.
 
 ```bash
 cd ~/visio

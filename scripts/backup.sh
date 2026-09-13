@@ -48,18 +48,26 @@ esac
 DIR="${VISIO_DIR:-$PWD}"
 cd "$DIR" || { echo "FAIL cannot cd to $DIR"; exit 1; }
 
-# compose.override.yaml makes the gateway's PROXY_TIER_SUBNET required (`:?`),
-# and compose interpolates the WHOLE project on every command, `exec` included.
-# A host whose .env lost that line must still get its nightly dump: a gateway
-# setting failing the backup would show only in journald. `exec` renders no
-# container, so a placeholder is harmless here. Exported, it outranks .env for
-# this process's compose calls only; `docker compose up` in any other shell
-# still refuses.
-export PROXY_TIER_SUBNET="${PROXY_TIER_SUBNET:-exec-does-not-render-gateway}"
-
 fail() { echo "FAIL $1"; exit 1; }
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
+
+# compose.override.yaml makes the gateway's PROXY_TIER_SUBNET required (`:?`),
+# and compose interpolates the whole project on every command that loads the
+# files, the `exec` below included. A host whose .env lost that line must
+# still get its nightly dump: a gateway setting failing the backup would show
+# only in journald. So when neither this shell nor .env holds a value, hand
+# compose one that can never be taken for a network — a `.invalid` name never
+# resolves (RFC 6761), so a gateway rendered from it would refuse to start —
+# and hand it nothing while .env holds one: an exported value outranks .env.
+# `exec` renders no container either way.
+if [ -z "${PROXY_TIER_SUBNET:-}" ]; then
+  if [ -n "$(envval .env PROXY_TIER_SUBNET)" ]; then
+    unset PROXY_TIER_SUBNET   # an empty one from the shell would outrank .env's
+  else
+    export PROXY_TIER_SUBNET=does-not-render-the-gateway.invalid
+  fi
+fi
 
 [ -f env.d/backup ] || fail "env.d/backup missing (template: deploy/env.d/backup.example)"
 command -v rclone >/dev/null 2>&1 || fail "rclone not installed (apt-get install rclone)"

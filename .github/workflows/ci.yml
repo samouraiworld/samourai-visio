@@ -469,10 +469,10 @@ jobs:
           line="$(grep -m1 -E '^      - PROXY_TIER_SUBNET=[$][{]PROXY_TIER_SUBNET:[?]' \
                     "$GITHUB_WORKSPACE/deploy/compose.override.yaml")" ||
             { echo "::error::no PROXY_TIER_SUBNET refusal line in deploy/compose.override.yaml"; exit 1; }
-          # The fixture's postgres image under a name the drill's fallback
-          # (postgres:16) cannot produce, so the drill names it only if
-          # `docker compose config --images` answered. The frontend stand-in is
-          # never pulled: interpolation refuses before anything starts.
+          # The fixture's postgres image under a name no other source produces,
+          # so the drill names it only if `docker compose config --images`
+          # answered. The frontend stand-in is never pulled: interpolation
+          # refuses before anything starts.
           docker tag postgres:16 visio-drill-probe/postgres:16
           printf '%s\n' 'services:' '  postgresql:' '    image: visio-drill-probe/postgres:16' \
             '  frontend:' '    image: visio-drill-probe/gateway:never-started' '    environment:' \
@@ -485,21 +485,84 @@ jobs:
             cat /tmp/nosubnet-up.err
             echo "::error::compose up failed, but not on PROXY_TIER_SUBNET"; exit 1
           }
-          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/nosubnet-backup.out
-          grep -q '^OK ' /tmp/nosubnet-backup.out ||
-            { echo "::error::backup.sh failed while PROXY_TIER_SUBNET was unset"; exit 1; }
-          VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/restore-drill.sh" | tee /tmp/nosubnet-drill.out
-          grep -q 'into visio-drill-probe/postgres:16' /tmp/nosubnet-drill.out ||
-            { echo "::error::the drill did not read its image from compose while PROXY_TIER_SUBNET was unset"; exit 1; }
-          # And the export is what did it: the same drill without that line
-          # falls back to postgres:16 without a word. backup.sh gets no such
-          # control — some Compose releases do not interpolate for `exec`, so
-          # its dump passes either way; the export there covers the ones that do.
-          sed '/^export PROXY_TIER_SUBNET=/d' "$GITHUB_WORKSPACE/scripts/restore-drill.sh" > /tmp/drill-noexport.sh
-          VISIO_DIR="$W" bash /tmp/drill-noexport.sh > /tmp/drill-noexport.out 2>&1 || true
-          if grep -q 'into visio-drill-probe/postgres:16' /tmp/drill-noexport.out; then
-            cat /tmp/drill-noexport.out
-            echo "::error::the drill read its image without the export — this step proves nothing"; exit 1
+          # A spy ahead of the real docker records what each script hands compose.
+          real_docker="$(command -v docker)"
+          mkdir -p "$W/spy"
+          cat > "$W/spy/docker" <<SPY
+          #!/bin/sh
+          printf '%s\n' "\${PROXY_TIER_SUBNET-<unset>}" >> "$W/spy/seen"
+          exec "$real_docker" "\$@"
+          SPY
+          chmod +x "$W/spy/docker"
+          both_scripts() {
+            PATH="$W/spy:$PATH" VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/backup.sh" | tee /tmp/nosubnet-backup.out
+            grep -q '^OK ' /tmp/nosubnet-backup.out ||
+              { echo "::error::backup.sh failed ($1)"; exit 1; }
+            PATH="$W/spy:$PATH" VISIO_DIR="$W" "$GITHUB_WORKSPACE/scripts/restore-drill.sh" \
+              | tee /tmp/nosubnet-drill.out
+            grep -q 'into visio-drill-probe/postgres:16' /tmp/nosubnet-drill.out ||
+              { echo "::error::the drill did not read its image from compose ($1)"; exit 1; }
+          }
+          # .env lacks the variable: both scripts run, handing compose the
+          # placeholder, a name that can never resolve.
+          : > "$W/spy/seen"
+          both_scripts ".env without PROXY_TIER_SUBNET"
+          seen="$(sort -u "$W/spy/seen")"
+          [ "$seen" = "does-not-render-the-gateway.invalid" ] ||
+            { echo "::error::with .env lacking it, the scripts handed compose: $seen"; exit 1; }
+          # .env holds a value: neither script exports anything, so compose
+          # reads .env's — an exported placeholder would outrank it.
+          printf 'PROXY_TIER_SUBNET=192.0.2.0/24\n' > .env
+          : > "$W/spy/seen"
+          both_scripts ".env holding PROXY_TIER_SUBNET"
+          seen="$(sort -u "$W/spy/seen")"
+          [ "$seen" = "<unset>" ] ||
+            { echo "::error::with .env holding a value, the scripts still exported: $seen"; exit 1; }
+          resolved="$(docker compose config --no-env-resolution --format json | python3 -c '
+          import json, sys
+          print(json.load(sys.stdin)["services"]["frontend"]["environment"]["PROXY_TIER_SUBNET"])')"
+          [ "$resolved" = "192.0.2.0/24" ] ||
+            { echo "::error::compose resolved PROXY_TIER_SUBNET to '$resolved', not the value .env holds"; exit 1; }
+          rm .env
+          # And the placeholder is what made them run. Copies without that
+          # block must exit 1 on the interpolation error. Neither this job nor
+          # these runs name the compose project: given `-p` or
+          # COMPOSE_PROJECT_NAME, `exec` falls back to the running containers
+          # and never interpolates the files, so the backup control would not apply.
+          for s in backup.sh restore-drill.sh; do
+            python3 - "$GITHUB_WORKSPACE/scripts/$s" "/tmp/noplaceholder-$s" <<'PY'
+          import re, sys
+          src = open(sys.argv[1]).read()
+          out, n = re.subn(r'^if \[ -z "\$\{PROXY_TIER_SUBNET:-\}" \]; then\n.*?^fi\n', '', src, flags=re.S | re.M)
+          if n != 1:
+              sys.exit(f"{sys.argv[1]}: expected one placeholder block, found {n}")
+          open(sys.argv[2], "w").write(out)
+          PY
+          done
+          # backup.sh under a HOME of its own: the empty dump a failed run
+          # leaves must neither become nor overwrite the dump the next steps
+          # restore. DOCKER_CONFIG keeps docker's own config, plugins and
+          # context where they were — moving HOME alone can make `docker compose`
+          # itself go missing, and the run would fail for a reason this control
+          # is not about.
+          docker_config="${DOCKER_CONFIG:-$HOME/.docker}"
+          rc=0
+          DOCKER_CONFIG="$docker_config" HOME="$(mktemp -d)" VISIO_DIR="$W" \
+            bash /tmp/noplaceholder-backup.sh > /tmp/noplaceholder-backup.out 2>&1 || rc=$?
+          if [ "$rc" -ne 1 ] ||
+             ! grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/noplaceholder-backup.out; then
+            cat /tmp/noplaceholder-backup.out
+            echo "::error::backup.sh without its placeholder exited $rc; expected 1, on the interpolation error"
+            exit 1
+          fi
+          rc=0
+          VISIO_DIR="$W" bash /tmp/noplaceholder-restore-drill.sh > /tmp/noplaceholder-drill.out 2>&1 || rc=$?
+          if [ "$rc" -ne 1 ] ||
+             ! grep -q "^FAIL cannot read the stack's images" /tmp/noplaceholder-drill.out ||
+             ! grep -q 'required variable PROXY_TIER_SUBNET is missing a value' /tmp/noplaceholder-drill.out; then
+            cat /tmp/noplaceholder-drill.out
+            echo "::error::the drill without its placeholder exited $rc; expected 1, naming the interpolation error"
+            exit 1
           fi
           rm compose.override.yaml
 

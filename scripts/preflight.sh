@@ -578,7 +578,7 @@ phase_config() {
   case "$ptv" in
     ok)         ok "PROXY_TIER_SUBNET=$pts is a network that reaches no public address" ;;
     unset)      bad "PROXY_TIER_SUBNET unset in .env" \
-                    "docker compose up refuses to run without it. .env is its source of truth: the subnet proxy-tier is created from, or the one an existing proxy-tier already has (RUNBOOK §5)" ;;
+                    "every compose command that interpolates the stack's files refuses to run without it. .env is its source of truth: the subnet proxy-tier is created from, or the one an existing proxy-tier already has (RUNBOOK §5)" ;;
     not-a-cidr) bad "PROXY_TIER_SUBNET='$pts' is not a CIDR network" \
                     "expected one subnet as docker network inspect proxy-tier prints it, with no host bits set" ;;
     catch-all)  bad "PROXY_TIER_SUBNET=$pts is a catch-all: it reaches globally routable addresses" \

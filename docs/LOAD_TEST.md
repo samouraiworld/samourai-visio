@@ -164,7 +164,7 @@ Two things are being checked at once: backend and application-server headroom un
 - **A venue behind one address with 5 rooms × 30 joining together**: 150 room fetches at once, about 100 admitted, about 50 left waiting. Their ~50 polls a second outrun the lobby rate of 30 and drain its burst of 60 in about 60 / (50 − 30) = 3 s; after that roughly 20 of every 50 polls from that address are refused, a real lobby's among them.
 - **A lobby of N > 30 waiting behind one address** drains the burst of 60 in 60 / (N − 30) s — 6 s at 40 — and then loses (N − 30) / N of its polls. A participant whose polls are refused for 3 s (`LOBBY_WAITING_TIMEOUT`) drops off the host's waiting list until one gets through.
 
-**What the brake does not limit: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([CAPACITY.md](CAPACITY.md) §3.2). That node-level limit is set from these measurements in #47 — not before, because only a measured number may be enforced or published.
+**What the brake does not limit: media.** One address can still take about 100 tokens at once and 2 more a second, and LiveKit auto-creates a room for every token that connects; nothing limits rooms or participants across the node ([CAPACITY.md](CAPACITY.md) §3.2). That node-level limit is set from these measurements in #47 — not before, because only a measured capacity limit may be enforced or published.
 
 ---
 
