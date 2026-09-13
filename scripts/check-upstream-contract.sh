@@ -21,6 +21,30 @@ pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 fyi()  { printf '        %s\n' "$1"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=1; }
 
+# ── Flood brake · the lobby's poll pace ──────────────────────────────────────
+# The lobby brake's rate is a full room polling at the pace useLobby.ts sets.
+# A slower poll only makes that rate more generous (upstream main moved to
+# 3_000 ms); a faster one sends more than it was sized for. So this reads the
+# number — `3_000` is a numeric literal, underscore and all — fails only below
+# 1000 ms, and names the value it found either way.
+lobby_poll() { # lobby_poll <useLobby.ts>
+  local ms
+  ms="$(grep -oE '^export const POLL_INTERVAL_MS = [0-9][0-9_]*' "$1" | head -1 | sed 's/.*= //; s/_//g')"
+  if [ -z "$ms" ]; then
+    bad "useLobby.ts no longer sets POLL_INTERVAL_MS to a number — re-derive the lobby brake against the room cap"
+  elif [ "$ms" -lt 1000 ]; then
+    bad "the lobby polls every ${ms} ms, faster than the 1000 ms the lobby brake was sized for — re-size it against the room cap"
+  else
+    pass "the lobby polls every ${ms} ms, no faster than the 1000 ms the lobby brake was sized for"
+  fi
+}
+# `--lobby-poll <file>` runs that one assertion on a local file and exits: how
+# the self-test proves it in both directions without the network.
+if [ "${1:-}" = "--lobby-poll" ]; then
+  lobby_poll "${2:?usage: $0 --lobby-poll <useLobby.ts>}"
+  exit "$fail"
+fi
+
 fetch() { # fetch <remote-path> <local-name>
   local code
   code=$(curl -sS -o "$WORK/$2" -w '%{http_code}' "$MEET/$1")
@@ -36,6 +60,36 @@ fetch docs/examples/compose/compose.yaml   compose.yaml   || exit 1
 fetch src/frontend/panda.config.ts         panda.config.ts|| exit 1
 fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
 fetch docker/files/production/default.conf.template gateway.conf || exit 1
+fetch src/frontend/src/features/rooms/api/fetchRoom.ts fetchRoom.ts || exit 1
+fetch src/frontend/src/features/rooms/hooks/useLobby.ts useLobby.ts || exit 1
+
+# ── Flood brake · what its maps and its numbers were derived from ───────────
+# deploy/nginx/default.conf.template counts two URL shapes under /api/v1.0/,
+# skips the SPA's slash-less first request, and sizes the lobby bucket to one
+# poll a second. Each is an upstream fact. If one moves, the brake counts the
+# wrong requests, bills every join twice, or refuses a waiting room.
+if grep -qE '^[[:space:]]*API_VERSION = "v1\.0"$' "$WORK/settings.py"; then
+  pass "API_VERSION is still v1.0 — the flood brake's maps match /api/v1.0/"
+else
+  bad "API_VERSION changed — the flood brake's maps no longer match any minting URL"
+fi
+if grep -A2 'url_path="request-entry"' "$WORK/viewsets.py" | grep -q 'permission_classes=\[\],'; then
+  pass "request-entry is still an anonymous action (the lobby brake's endpoint)"
+else
+  bad "request-entry changed its route or its permissions — re-derive the lobby brake"
+fi
+# The SPA's room fetch has two shapes across releases, and the brake counts one
+# request per join in both: `rooms/${roomId}?username=` (v1.24.0) earns Django's
+# 301, which the room map skips, then the slashed request it counts; later
+# releases request `rooms/${roomId}/${query}` directly. Any other shape is a
+# URL the maps were not written for.
+# shellcheck disable=SC2016  # literal template strings in the SPA source
+if grep -qF -e '`/rooms/${roomId}?username=' -e '`/rooms/${roomId}/${query}`' "$WORK/fetchRoom.ts"; then
+  pass "the SPA still fetches the room in a shape the brake counts once per join"
+else
+  bad "the SPA's room URL changed shape — the room brake may now count each join twice, or not at all"
+fi
+lobby_poll "$WORK/useLobby.ts"
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then
