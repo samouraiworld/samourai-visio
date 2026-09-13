@@ -16,6 +16,7 @@
 #   scripts/preflight.sh stack     # containers running; resolved settings
 #   scripts/preflight.sh public    # DNS + TLS; the public surface
 #   scripts/preflight.sh edge      # the response-header subset of `public`
+#   scripts/preflight.sh brake     # the gateway subset of `stack`: trusted proxy tier, flood brake
 #   scripts/preflight.sh all       # config, stack, public, in order (default)
 #
 # Run from the deploy directory on the host (the one holding compose.yaml),
@@ -57,6 +58,71 @@ svc_env() {
 }
 
 dc() { docker compose "$@"; }
+
+# subnet_verdict <value>: `ok`, or why the value cannot be the proxy tier's
+# subnet — `unset`, `not-a-cidr`, or `catch-all`. A catch-all here is any
+# network reaching globally routable space, not only 0.0.0.0/0 and ::/0: a
+# Docker bridge is carved from private or reserved ranges, so a subnet that
+# reaches the internet trusts some client's own X-Forwarded-For. Containment
+# in a named list, not a prefix-length floor (0.0.0.0/1 is as wrong as /0),
+# and not ipaddress's is_private, whose answer for networks changed between
+# Python releases. The documentation ranges are never routed, so trusting one
+# trusts no client; the examples and the self-test use them.
+# Prints nothing if python3 is missing, and callers treat that as a failure.
+subnet_verdict() {
+  python3 - "$1" <<'PY' 2>/dev/null
+import ipaddress, sys
+v = sys.argv[1].strip()
+if not v:
+    print("unset"); raise SystemExit
+try:
+    net = ipaddress.ip_network(v, strict=True)
+except ValueError:
+    print("not-a-cidr"); raise SystemExit
+inner = [ipaddress.ip_network(n) for n in (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # RFC 1918
+    "100.64.0.0/10",                                   # RFC 6598
+    "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24",  # RFC 5737
+    "fc00::/7",                                        # RFC 4193
+    "2001:db8::/32")]                                  # RFC 3849
+ok = any(net.version == n.version and net.subnet_of(n) for n in inner)
+print("ok" if ok else "catch-all")
+PY
+}
+
+# brake_missing <file>: names of the flood-brake lines absent from a gateway
+# config — the template on disk, or what the running nginx loaded (`nginx -T`
+# dumps it verbatim). The three maps decide what counts, so they are matched
+# as exact lines: a pattern that drifts by one character counts nothing, and
+# a brake that counts nothing looks exactly like a quiet day. Whitespace runs
+# are collapsed first, so realigning a column is not a failure. The numbers
+# are read, not pinned; `config` sizes them against the room cap.
+brake_missing() {
+  local norm miss="" name line
+  norm="$(sed -e 's/^[[:space:]]*//' -e 's/[[:space:]][[:space:]]*/ /g' "$1")"
+  while read -r name line; do
+    printf '%s\n' "$norm" | grep -qxF -- "$line" || miss="$miss $name"
+  done <<'LINES'
+map:tier map $cookie_meet_sessionid $visio_mint_tier {
+map:tier-anon "" anon:;
+map:tier-session default session:;
+map:room-detail "~^(GET|HEAD) /api/v1\.0/rooms/[^/]+/$" $visio_mint_tier$binary_remote_addr;
+map:room-suffix "~^(GET|HEAD) /api/v1\.0/rooms/[^/]*\.[^/]*$" $visio_mint_tier$binary_remote_addr;
+map:request-entry "~^POST /api/v1\.0/rooms/[^/]+/request-entry[^/]*/?$" $visio_mint_tier$binary_remote_addr;
+LINES
+  # shellcheck disable=SC2016  # literal nginx variable names
+  printf '%s\n' "$norm" | grep -qE '^limit_req_zone \$visio_mint_room_key zone=visio_mint_room:[0-9]+[km] rate=[0-9]+r/s;$' ||
+    miss="$miss zone:room"
+  # shellcheck disable=SC2016
+  printf '%s\n' "$norm" | grep -qE '^limit_req_zone \$visio_mint_lobby_key zone=visio_mint_lobby:[0-9]+[km] rate=[0-9]+r/s;$' ||
+    miss="$miss zone:lobby"
+  # Applied at the server level (four spaces), where every location inherits
+  # it; inside one location it would brake that location only.
+  grep -qE '^    limit_req zone=visio_mint_room burst=[0-9]+ nodelay;$' "$1" || miss="$miss limit_req:room"
+  grep -qE '^    limit_req zone=visio_mint_lobby burst=[0-9]+ nodelay;$' "$1" || miss="$miss limit_req:lobby"
+  grep -qxF '    limit_req_status 429;' "$1" || miss="$miss limit_req_status:429"
+  printf '%s' "$miss"
+}
 
 MEET_HOST="$(envval "$DIR/.env" MEET_HOST)"; MEET_HOST="${MEET_HOST:-$MEET_HOST_DEFAULT}"
 LIVEKIT_HOST="$(envval "$DIR/.env" LIVEKIT_HOST)"; LIVEKIT_HOST="${LIVEKIT_HOST:-$LIVEKIT_HOST_DEFAULT}"
@@ -285,6 +351,38 @@ phase_config() {
       bad "security.txt block incomplete, or the /.well-known/ 404 catch-all is missing" \
           "RFC 9116 needs Contact and Expires as text/plain; without the catch-all the SPA shell answers any well-known path"
     fi
+    # ── Flood brake on anonymous token minting ─────────────────────────────
+    # The two endpoints that hand a LiveKit token to a caller with no account
+    # (the template's zones block names them, with upstream line references).
+    # Every piece is load-bearing: without a zone or a map nothing is counted,
+    # without limit_req nothing is refused, and without the 429 status the
+    # refusal is a 503 that the runbook's verification does not count.
+    local bmiss; bmiss="$(brake_missing nginx/default.conf.template)"
+    if [ -z "$bmiss" ]; then
+      ok "gateway carries the flood brake on anonymous token minting (room retrieve, lobby request-entry)"
+    else
+      bad "flood brake incomplete in the gateway template (missing:$bmiss)" \
+          "anonymous token requests reach the backend unthrottled; restore the SAMOURAI flood-brake blocks"
+    fi
+    # The brake keys on the client address, which is the client's only while
+    # X-Forwarded-For is taken from the proxy tier alone: exactly one
+    # set_real_ip_from, holding the variable the host supplies — a literal
+    # would be one address for every host, and a second line widens the
+    # trust — plus the header nginx-proxy writes, read at its last hop only.
+    local rmis=""
+    [ "$(grep -cE '^[[:space:]]*set_real_ip_from[[:space:]]' nginx/default.conf.template)" = 1 ] ||
+      rmis="$rmis set_real_ip_from:count"
+    # shellcheck disable=SC2016  # the literal envsubst reference, not shell
+    grep -qxF '    set_real_ip_from ${PROXY_TIER_SUBNET};' nginx/default.conf.template ||
+      rmis="$rmis set_real_ip_from:variable"
+    grep -qxF '    real_ip_header X-Forwarded-For;' nginx/default.conf.template || rmis="$rmis real_ip_header"
+    grep -qxF '    real_ip_recursive off;' nginx/default.conf.template || rmis="$rmis real_ip_recursive"
+    if [ -z "$rmis" ]; then
+      ok "gateway takes the client address from X-Forwarded-For, from \${PROXY_TIER_SUBNET} only, last hop only"
+    else
+      bad "gateway does not take the client address from the proxy tier alone (wrong or missing:$rmis)" \
+          "the brake would key on nginx-proxy — every visitor in one bucket — or on an address the client wrote"
+    fi
   else
     bad "nginx/default.conf.template missing or empty" \
         "Docker would mount a directory in its place and the gateway would not start"
@@ -421,6 +519,72 @@ phase_config() {
     bad "room.empty_timeout is ${et:-unset} in livekit-server.yaml" \
         "the privacy policy states guest rooms vanish minutes after the last participant leaves"
   fi
+
+  # ── The flood brake is sized against the room cap ────────────────────────
+  # The brake must never refuse a real meeting, and the cap above bounds a
+  # meeting: a full room can join from one address at once (the room burst)
+  # and wait in a lobby behind one address, every participant polling once a
+  # second (the lobby rate). Raising the cap without the brake turns a venue
+  # into a flood. And each burst stays under 200, or the 200-request burst the
+  # brake exists to stop goes straight through.
+  local rb lb lr
+  rb="$(grep -oE '^    limit_req zone=visio_mint_room burst=[0-9]+' nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+$')"
+  lb="$(grep -oE '^    limit_req zone=visio_mint_lobby burst=[0-9]+' nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+$')"
+  # shellcheck disable=SC2016  # a literal nginx variable name
+  lr="$(grep -oE '^limit_req_zone \$visio_mint_lobby_key +zone=visio_mint_lobby:[0-9]+[km] +rate=[0-9]+r/s' \
+          nginx/default.conf.template 2>/dev/null | grep -oE '[0-9]+r/s$' | grep -oE '^[0-9]+')"
+  case "$mp" in
+    ''|*[!0-9]*|0)
+      skip "flood brake not sized against the room cap" "there is no usable room.max_participants — see the failure above" ;;
+    *)
+      if [ -z "$rb" ] || [ -z "$lb" ] || [ -z "$lr" ]; then
+        skip "flood brake not sized against the room cap" "its limits could not be read — see the flood-brake failure above"
+      else
+        local sz=""
+        [ "$rb" -ge "$mp" ] || sz="$sz room burst $rb is under a full room of $mp joining at once;"
+        [ "$lr" -ge "$mp" ] || sz="$sz lobby rate ${lr}r/s is under a full room of $mp polling once a second;"
+        [ "$rb" -lt 200 ] || sz="$sz room burst $rb lets a whole 200-request burst through;"
+        [ "$lb" -lt 200 ] || sz="$sz lobby burst $lb lets a whole 200-request burst through;"
+        if [ -z "$sz" ]; then
+          ok "flood brake leaves a full room of $mp alone (room burst $rb, lobby ${lr}r/s) and still refuses a 200-request burst"
+        else
+          bad "flood brake mis-sized against the room cap:${sz%;}" \
+              "move the brake with the cap (deploy/nginx/default.conf.template), and keep each burst under 200"
+        fi
+      fi ;;
+  esac
+
+  # ── The proxy tier's subnet: set, a network, never a catch-all ───────────
+  # The gateway believes X-Forwarded-For from this subnet alone, and the brake
+  # keys on what it believes. compose.override.yaml refuses to run without it;
+  # this names that fault before `up` does, and catches the two values compose
+  # cannot: something that is not a network, and a network wide enough to
+  # trust a client's own header. Whether it is the proxy-tier network's OWN
+  # subnet only the running host can say — `stack` asserts that.
+  local pts ptv
+  pts="$(envval .env PROXY_TIER_SUBNET)"
+  ptv="$(subnet_verdict "$pts")"
+  case "$ptv" in
+    ok)         ok "PROXY_TIER_SUBNET=$pts is a network that reaches no public address" ;;
+    unset)      bad "PROXY_TIER_SUBNET unset in .env" \
+                    "compose refuses to run without it; set it to what docker network inspect proxy-tier -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}' prints (RUNBOOK §5)" ;;
+    not-a-cidr) bad "PROXY_TIER_SUBNET='$pts' is not a CIDR network" \
+                    "expected one subnet as docker network inspect proxy-tier prints it, with no host bits set" ;;
+    catch-all)  bad "PROXY_TIER_SUBNET=$pts is a catch-all: it reaches globally routable addresses" \
+                    "any client could then choose its own address, and its own brake bucket, with X-Forwarded-For" ;;
+    *)          bad "PROXY_TIER_SUBNET could not be evaluated" "python3 is required for this check" ;;
+  esac
+  # And compose must hand it over with the refusal intact: a default
+  # (`:-`) or a bare reference would start the stack without a trusted tier.
+  local fpts; fpts="$(svc_env frontend PROXY_TIER_SUBNET)"
+  # shellcheck disable=SC2016  # a literal compose interpolation, not shell
+  case "$fpts" in
+    '${PROXY_TIER_SUBNET:?'*)
+      ok "compose passes PROXY_TIER_SUBNET to the gateway and refuses to run without it" ;;
+    *)
+      bad "compose.override.yaml does not refuse an unset PROXY_TIER_SUBNET (frontend gets '${fpts:-nothing}')" \
+          "keep '- PROXY_TIER_SUBNET=\${PROXY_TIER_SUBNET:?...}' in the frontend environment" ;;
+  esac
 
   # ── Compose merge + pinning ──────────────────────────────────────────────
   # --no-env-resolution: leaves env_file unexpanded so no secret is printed.
@@ -763,6 +927,105 @@ PY
           "restart systemd-journald after installing the drop-in, then journalctl --vacuum-time=7d"
     fi
   fi
+
+  # ── The gateway as it runs: the proxy tier it trusts, and the brake ──────
+  gateway_brake
+}
+
+# ═══════════════════════════════════════════════════════════════════════════
+# The running gateway's trusted proxy tier and flood brake. `stack` runs it
+# last; the `brake` phase runs it alone, which is how preflight-selftest.sh
+# reaches it with a stub `docker` — the live stack is the one thing a
+# self-test must never mutate. `config` proves the files on disk; this proves
+# what nginx loaded, and what it trusts, which only the running host can say.
+gateway_brake() {
+  head_ "BRAKE — the running gateway's trusted proxy tier and flood brake"
+  cd "$DIR" || { bad "cannot cd to $DIR"; return; }
+
+  # What nginx loaded, not the file on disk: a template copied to the host
+  # without recreating the frontend leaves the old gateway serving.
+  local rendered; rendered="$(dc exec -T frontend nginx -T 2>/dev/null | tr -d '\r')"
+  if [ -z "$rendered" ]; then
+    bad "cannot read the running gateway's configuration" \
+        "docker compose exec -T frontend nginx -T printed nothing — is the frontend running?"
+    return
+  fi
+  local cfg bmiss
+  cfg="$(mktemp)"
+  printf '%s\n' "$rendered" > "$cfg"
+  bmiss="$(brake_missing "$cfg")"
+  rm -f "$cfg"
+  if [ -z "$bmiss" ]; then
+    ok "the running gateway carries the flood brake on anonymous token minting"
+  else
+    bad "the running gateway lacks the flood brake (missing:$bmiss)" \
+        "the host's template predates it, or the frontend was not recreated: docker compose up -d --force-recreate frontend"
+  fi
+
+  # Exactly one trusted source, and a network that reaches no public address.
+  local trusted n_trusted tv=""
+  trusted="$(printf '%s\n' "$rendered" | sed -n 's/^[[:space:]]*set_real_ip_from[[:space:]][[:space:]]*\([^;]*\);.*$/\1/p')"
+  n_trusted="$(printf '%s\n' "$trusted" | grep -c .)"
+  if [ "$n_trusted" -ne 1 ]; then
+    bad "the running gateway has $n_trusted set_real_ip_from lines, expected exactly 1 (${trusted//$'\n'/, })" \
+        "none: every visitor shares nginx-proxy's bucket; more than one: trust wider than the proxy tier"
+  else
+    tv="$(subnet_verdict "$trusted")"
+    if [ "$tv" = ok ]; then
+      ok "the running gateway believes X-Forwarded-For only from $trusted"
+    else
+      bad "the running gateway trusts X-Forwarded-For from '$trusted' (${tv:-not evaluated})" \
+          "PROXY_TIER_SUBNET in .env must be the proxy-tier network's subnet; recreate the frontend after changing it"
+    fi
+  fi
+
+  # And that subnet is the proxy-tier network's own, with every container on
+  # the network inside it — nginx-proxy among them. A subnet that is merely
+  # valid (another bridge, a value left from a recreated network) keys every
+  # visitor on nginx-proxy's address, and the brake throttles a whole meeting.
+  if [ "$tv" = ok ]; then
+    local netj verdict
+    netj="$(docker network inspect proxy-tier --format '{{json .}}' 2>/dev/null)"
+    if [ -z "$netj" ]; then
+      bad "cannot inspect the proxy-tier network" \
+          "docker network inspect proxy-tier — the external network the frontend joins"
+    else
+      verdict="$(python3 - "$trusted" "$netj" <<'PY' 2>&1
+import ipaddress, json, sys
+t = ipaddress.ip_network(sys.argv[1])
+d = json.loads(sys.argv[2])
+subnets = [c["Subnet"] for c in (d.get("IPAM") or {}).get("Config") or [] if c.get("Subnet")]
+if t not in [ipaddress.ip_network(s, strict=False) for s in subnets]:
+    print("not-the-network " + (" ".join(subnets) or "none"))
+    raise SystemExit
+outside = []
+for c in (d.get("Containers") or {}).values():
+    a = (c.get("IPv4Address") or "").split("/")[0]
+    if a and ipaddress.ip_address(a) not in t:
+        outside.append(f'{c.get("Name", "?")}={a}')
+print("outside " + " ".join(outside) if outside else "ok")
+PY
+)"
+      case "$verdict" in
+        ok)
+          ok "the trusted subnet is the proxy-tier network's own, and every container on it is inside" ;;
+        not-the-network*)
+          bad "the trusted subnet $trusted is not the proxy-tier network's (it has: ${verdict#not-the-network })" \
+              "every visitor would share nginx-proxy's bucket; set PROXY_TIER_SUBNET to that value and recreate the frontend" ;;
+        outside*)
+          bad "proxy-tier containers outside the trusted subnet $trusted: ${verdict#outside }" \
+              "nginx-proxy reaches the gateway from there; its X-Forwarded-For is ignored and every visitor shares one bucket" ;;
+        *)
+          bad "could not compare the trusted subnet with the proxy-tier network" "$verdict" ;;
+      esac
+    fi
+  else
+    skip "trusted subnet not compared with the proxy-tier network" \
+         "there is no single valid trusted subnet — see the failure above"
+  fi
+
+  skip "the client address in the access log, and the brake tripping, seen from outside" \
+       "a request the host makes to itself can arrive from the bridge gateway; RUNBOOK §5 verifies both from an off-host client"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1176,8 +1439,9 @@ case "$PHASE" in
   stack)  phase_stack ;;
   public) phase_public ;;
   edge)   edge_headers "${VISIO_PUBLIC_ORIGIN:-https://${MEET_HOST}}" ;;
+  brake)  gateway_brake ;;
   all)    phase_config; phase_stack; phase_public ;;
-  *)      echo "usage: $0 [config|stack|public|edge|all]"; exit 2 ;;
+  *)      echo "usage: $0 [config|stack|public|edge|brake|all]"; exit 2 ;;
 esac
 
 printf '\n\033[1m%d passed, %d failed, %d skipped\033[0m\n' "$pass" "$failed" "$skipped"

@@ -17,12 +17,23 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 
 WORK="$(mktemp -d)"
 STUB_PID=""
+FINISHED=0
 # Inlined rather than a named function: shellcheck flags an unreachable trap
 # body (SC2317/SC2329) differently across versions, and this avoids both.
-trap '[ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null; chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"' EXIT
+#
+# The last clause is the harness's own guard. Anything that ends this script
+# before the verdict at the bottom — an `exit` in a fixture step, a helper
+# that aborts — would otherwise leave whatever status the shell last had, and
+# a run that proved nothing could exit 0. It exits 1 instead, and says so.
+trap '[ -n "$STUB_PID" ] && kill "$STUB_PID" 2>/dev/null; chmod -R u+w "$WORK" 2>/dev/null; rm -rf "$WORK"; [ "$FINISHED" = 1 ] || { echo "preflight self-test ABORTED before its verdict — nothing was proven"; exit 1; }' EXIT
 
 export VISIO_DIR="$WORK"
 rc=0
+# Every mutation helper counts the cases it runs, and the verdict compares
+# that count with the helper calls written in this file. A section skipped by
+# a branch, or a helper that returns before its assertion, cannot then pass
+# by simply not happening.
+cases=0
 ok()  { printf '  \033[32mok\033[0m   %s\n' "$1"; }
 err() { printf '  \033[31mFAIL\033[0m %s\n' "$1"; rc=1; }
 
@@ -32,6 +43,9 @@ curl -sSf -o "$WORK/compose.yaml" \
   || { echo "cannot fetch upstream compose"; exit 1; }
 cp deploy/compose.override.yaml "$WORK/compose.override.yaml"
 cp deploy/hosts.example "$WORK/.env"
+# The one placeholder in the hosts template: the proxy tier's subnet, which
+# only the host can supply. A documentation range (RFC 5737) stands in for it.
+sed -i.bak 's|^PROXY_TIER_SUBNET=<[^>]*>$|PROXY_TIER_SUBNET=192.0.2.0/24|' "$WORK/.env" && rm -f "$WORK/.env.bak"
 mkdir -p "$WORK/env.d" "$WORK/custom" "$WORK/landing" "$WORK/nginx"
 # The shipped gateway copy must itself satisfy the redirect check.
 cp deploy/nginx/default.conf.template "$WORK/nginx/default.conf.template"
@@ -72,16 +86,29 @@ export VISIO_ETC="$WORK/etc"
 
 fails() { bash scripts/preflight.sh config 2>/dev/null | grep -c 'FAIL'; }
 
+# clean <phase> <label> [VAR=value ...]: the phase prints no FAIL line AND
+# exits 0. A clean baseline is what gives every mutation below its meaning: on
+# a fixture that already fails, any check looks caught.
+clean() {
+  local phase="$1" label="$2" out code
+  shift 2
+  out="$(env "$@" bash scripts/preflight.sh "$phase" 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq 0 ] && ! printf '%s\n' "$out" | grep -q 'FAIL'; then
+    ok "$label: 0 failures, exit 0"
+  else
+    err "$label: exit $code, $(printf '%s\n' "$out" | grep -c 'FAIL') failure(s) — the fixture or a check is wrong"
+    printf '%s\n' "$out" | grep FAIL
+  fi
+}
+
 echo "baseline: the good fixture must pass cleanly"
-n="$(fails)"
-if [ "$n" -eq 0 ]; then ok "good fixture: 0 failures"; else
-  err "good fixture reported $n failure(s) — the fixture or a check is wrong"
-  bash scripts/preflight.sh config 2>/dev/null | grep FAIL
-fi
+clean config "good fixture"
 
 # ── mutate <sed-expr> <file> <label>: assert failures increase, then revert ──
 mutate() {
   local expr="$1" file="$2" label="$3"
+  cases=$((cases+1))
   cp "$WORK/$file" "$WORK/$file.orig"
   sed -i.bak "$expr" "$WORK/$file"
   local n; n="$(fails)"
@@ -95,11 +122,39 @@ mutate() {
 # checks also read, so they assert on the message their own check emits.
 mutate_re() {
   local expr="$1" file="$2" re="$3" label="$4"
+  cases=$((cases+1))
   cp "$WORK/$file" "$WORK/$file.orig"
   sed -i.bak "$expr" "$WORK/$file"
   local hit
   hit="$(bash scripts/preflight.sh config 2>/dev/null | grep 'FAIL' | grep -c "$re")"
   if [ "$hit" -ge 1 ]; then ok "detected: $label"; else err "NOT detected: $label"; fi
+  mv "$WORK/$file.orig" "$WORK/$file"; rm -f "$WORK/$file.bak"
+}
+
+# ── mutate_rs: the FAIL text AND preflight's exit status ────────────────────
+# mutate_re proves the right check spoke. CI and an operator consume only the
+# exit status, though, so a check that printed its FAIL line while the script
+# still exited 0 would pass mutate_re and gate nothing. And a sed that matched
+# nothing leaves the fixture as it was: that is reported as a case that did
+# not run, never credited as a detection. Text is matched as a fixed string.
+mutate_rs() {
+  local expr="$1" file="$2" text="$3" label="$4" out code
+  cases=$((cases+1))
+  cp "$WORK/$file" "$WORK/$file.orig"
+  sed -i.bak "$expr" "$WORK/$file"
+  if cmp -s "$WORK/$file" "$WORK/$file.orig"; then
+    err "NOT exercised: $label — the mutation changed nothing in $file"
+  else
+    out="$(bash scripts/preflight.sh config 2>/dev/null)"
+    code=$?
+    if [ "$code" -eq 0 ]; then
+      err "NOT detected: $label — preflight exited 0"
+    elif ! printf '%s\n' "$out" | grep 'FAIL' | grep -qF -- "$text"; then
+      err "NOT detected: $label — exited $code, but no FAIL line says: $text"
+    else
+      ok "detected: $label"
+    fi
+  fi
   mv "$WORK/$file.orig" "$WORK/$file"; rm -f "$WORK/$file.bak"
 }
 
@@ -185,6 +240,59 @@ mutate_re "s/^RCLONE_CONFIG_VISIOPRUNE_ACCESS_KEY_ID=.*/RCLONE_CONFIG_VISIOPRUNE
   'same access key' "prune key set to the write key (one credential that writes and deletes)"
 mutate_re '/^RCLONE_CONFIG_VISIOPRUNE_/d' env.d/backup 'no visioprune remote' \
   "visioprune block missing entirely (the prune has no credential)"
+
+# ── The flood brake, and the proxy tier its key depends on ──────────────────
+# mutate_rs throughout: the FAIL text AND a non-zero exit. Each text is what
+# the owning check prints for the one piece this case breaks, so a case that a
+# neighbouring check happens to catch is reported as not detected. Brackets
+# and `$` are matched as [[] [$] so the same sed runs on GNU and BSD.
+# shellcheck disable=SC2016  # literal nginx syntax inside a sed script
+mutate_rs '/^limit_req_zone \$visio_mint_lobby_key /d' nginx/default.conf.template \
+  'zone:lobby' "lobby zone removed (request-entry is no longer counted)"
+mutate_rs 's|"~^POST |"~^GET |' nginx/default.conf.template \
+  'map:request-entry' "lobby map counts GET instead of the POST that mints"
+# shellcheck disable=SC2016  # literal nginx syntax inside a sed script
+mutate_rs 's|rooms/[[]^/[]]+/[$]"|rooms/[^/]+/?$"|' nginx/default.conf.template \
+  'map:room-detail' "room map widened to Django's 301 hop (every join billed twice)"
+mutate_rs '/^    limit_req zone=visio_mint_room burst=/d' nginx/default.conf.template \
+  'limit_req:room' "room brake counted but never applied"
+mutate_rs 's|^    limit_req_status 429;|    limit_req_status 503;|' nginx/default.conf.template \
+  'limit_req_status:429' "refusals answered 503 (the runbook's verification counts 429)"
+# shellcheck disable=SC2016  # literal envsubst reference inside a sed script
+mutate_rs 's|set_real_ip_from [$]{PROXY_TIER_SUBNET};|set_real_ip_from 0.0.0.0/0;|' nginx/default.conf.template \
+  'set_real_ip_from:variable' "trusted proxy hardcoded as a catch-all instead of the host's subnet"
+mutate_rs 's|^    real_ip_recursive off;|    real_ip_recursive off;\
+    set_real_ip_from 0.0.0.0/0;|' nginx/default.conf.template \
+  'set_real_ip_from:count' "a second, literal set_real_ip_from widening the trust"
+mutate_rs 's|^    real_ip_recursive off;|    real_ip_recursive on;|' nginx/default.conf.template \
+  'real_ip_recursive' "recursive realip (walks left into addresses a client wrote)"
+# Sized against the room cap: each clause of that check broken alone.
+mutate_rs 's/^  max_participants: 30/  max_participants: 45/' livekit-server.yaml \
+  'lobby rate 30r/s is under a full room of 45' "room cap raised past the lobby brake (a full lobby would be refused)"
+mutate_rs 's|zone=visio_mint_room burst=100 |zone=visio_mint_room burst=20 |' nginx/default.conf.template \
+  'room burst 20 is under a full room of 30' "room burst under one full room joining at once"
+mutate_rs 's|zone=visio_mint_room burst=100 |zone=visio_mint_room burst=250 |' nginx/default.conf.template \
+  'room burst 250 lets a whole 200-request burst through' "room burst wide enough to admit the flood it exists for"
+mutate_rs 's|zone=visio_mint_lobby burst=60 |zone=visio_mint_lobby burst=250 |' nginx/default.conf.template \
+  'lobby burst 250 lets a whole 200-request burst through' "lobby burst wide enough to admit the flood it exists for"
+# The subnet the host supplies.
+mutate_rs '/^PROXY_TIER_SUBNET=/d' .env \
+  'PROXY_TIER_SUBNET unset in .env' "proxy-tier subnet left unset"
+mutate_rs 's|^PROXY_TIER_SUBNET=.*|PROXY_TIER_SUBNET=0.0.0.0/0|' .env \
+  'PROXY_TIER_SUBNET=0.0.0.0/0 is a catch-all' "proxy-tier subnet set to the IPv4 catch-all"
+mutate_rs 's|^PROXY_TIER_SUBNET=.*|PROXY_TIER_SUBNET=::/0|' .env \
+  'PROXY_TIER_SUBNET=::/0 is a catch-all' "proxy-tier subnet set to the IPv6 catch-all"
+mutate_rs 's|^PROXY_TIER_SUBNET=.*|PROXY_TIER_SUBNET=0.0.0.0/1|' .env \
+  'PROXY_TIER_SUBNET=0.0.0.0/1 is a catch-all' "proxy-tier subnet wide enough to reach public space (not only /0)"
+mutate_rs 's|^PROXY_TIER_SUBNET=.*|PROXY_TIER_SUBNET=proxy-tier|' .env \
+  "PROXY_TIER_SUBNET='proxy-tier' is not a CIDR network" "proxy-tier subnet set to the network's name"
+mutate_rs 's|^PROXY_TIER_SUBNET=.*|PROXY_TIER_SUBNET=192.0.2.1/24|' .env \
+  "PROXY_TIER_SUBNET='192.0.2.1/24' is not a CIDR network" "proxy-tier subnet written as a host address with a prefix"
+# shellcheck disable=SC2016  # literal compose interpolation inside a sed script
+mutate_rs 's|[$]{PROXY_TIER_SUBNET:?[^}]*}|${PROXY_TIER_SUBNET:-0.0.0.0/0}|' compose.override.yaml \
+  'does not refuse an unset PROXY_TIER_SUBNET' "compose given a default that trusts everyone instead of refusing"
+mutate_rs '/- PROXY_TIER_SUBNET=/d' compose.override.yaml \
+  "does not refuse an unset PROXY_TIER_SUBNET (frontend gets 'nothing')" "compose no longer passes the subnet with its refusal"
 
 # A malformed (wrapped-secret-style) line: a bare continuation with no '='.
 echo "special: wrapped-secret continuation line"
@@ -344,6 +452,7 @@ else
   # emutate <mode> <fail-text-regex> <label>: the FAIL text is asserted, as
   # in mutate_re, so an unrelated red cannot vouch for a check that never fired.
   emutate() {
+    cases=$((cases+1))
     printf '%s\n' "$1" > "$WORK/stub.mode"
     local hit; hit="$(bash scripts/preflight.sh edge 2>/dev/null | grep 'FAIL' | grep -c "$2")"
     if [ "$hit" -ge 1 ]; then ok "detected: $3"; else err "NOT detected: $3"; fi
@@ -359,7 +468,86 @@ else
   if [ "$n" -eq 0 ]; then ok "stub back in good mode: 0 failures"; else err "stub not clean after the last mutation ($n)"; fi
 fi
 
+# ── brake: the running gateway's checks, against a stub docker ──────────────
+# `preflight.sh stack` reads what nginx loaded (`nginx -T` in the frontend
+# container) and what Docker reports of the proxy-tier network. A self-test
+# must not need a stack, so the `brake` phase runs those checks alone, here
+# against the stub below.
+#
+# THE STUB IS A MODEL. It answers the two calls the phase makes and refuses
+# any other: the fixture's own template rendered the way the nginx entrypoint
+# renders it, and a `docker network inspect` document of the shape Docker
+# prints. It proves each check can fail and names its cause. It proves nothing
+# about a real host — RUNBOOK §5 verifies that from outside.
+echo "brake: the running-gateway checks against a stub docker"
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/docker" <<'STUB'
+#!/usr/bin/env bash
+mode="$(cat "$STUB_MODE" 2>/dev/null)"
+case "$*" in
+  "compose exec -T frontend nginx -T")
+    subnet=192.0.2.0/24
+    case "$mode" in
+      no-gateway)         exit 1 ;;
+      trusts-everyone)    subnet=0.0.0.0/0 ;;
+      ipv6-of-dual-stack) subnet=2001:db8:1::/64 ;;
+    esac
+    sed -e "s|\${PROXY_TIER_SUBNET}|$subnet|" "$STUB_TEMPLATE" |
+      case "$mode" in
+        old-gateway)   sed -e '/limit_req/d' ;;
+        trusts-nobody) sed -e '/set_real_ip_from/d' ;;
+        *)             cat ;;
+      esac ;;
+  "network inspect proxy-tier --format {{json .}}")
+    net=192.0.2; v6=""
+    [ "$mode" = other-network ] && net=198.51.100
+    [ "$mode" = ipv6-of-dual-stack ] && v6=',{"Subnet":"2001:db8:1::/64"}'
+    printf '{"Name":"proxy-tier","IPAM":{"Config":[{"Subnet":"%s.0/24"}%s]},"Containers":{"a":{"Name":"nginx-proxy","IPv4Address":"%s.2/24"},"b":{"Name":"visio-frontend-1","IPv4Address":"%s.3/24"}}}\n' \
+      "$net" "$v6" "$net" "$net" ;;
+  *) echo "stub docker: unmodelled call: $*" >&2; exit 1 ;;
+esac
+STUB
+chmod +x "$WORK/bin/docker"
+: > "$WORK/brake.mode"
+BRAKE_ENV=(PATH="$WORK/bin:$PATH" STUB_MODE="$WORK/brake.mode" STUB_TEMPLATE="$WORK/nginx/default.conf.template")
+clean brake "stub gateway in good mode" "${BRAKE_ENV[@]}"
+# bmutate <mode> <FAIL text> <label>: the FAIL text AND a non-zero exit.
+bmutate() {
+  local out code
+  cases=$((cases+1))
+  printf '%s\n' "$1" > "$WORK/brake.mode"
+  out="$(env "${BRAKE_ENV[@]}" bash scripts/preflight.sh brake 2>/dev/null)"
+  code=$?
+  if [ "$code" -eq 0 ]; then
+    err "NOT detected: $3 — preflight exited 0"
+  elif ! printf '%s\n' "$out" | grep 'FAIL' | grep -qF -- "$2"; then
+    err "NOT detected: $3 — exited $code, but no FAIL line says: $2"
+  else
+    ok "detected: $3"
+  fi
+  : > "$WORK/brake.mode"
+}
+bmutate old-gateway 'the running gateway lacks the flood brake' \
+  "a gateway still running the old template (copied, never recreated)"
+bmutate no-gateway "cannot read the running gateway's configuration" \
+  "no rendered configuration to read (frontend down)"
+bmutate trusts-nobody 'set_real_ip_from lines, expected exactly 1' \
+  "a gateway trusting no proxy (every visitor in nginx-proxy's bucket)"
+bmutate trusts-everyone "the running gateway trusts X-Forwarded-For from '0.0.0.0/0' (catch-all)" \
+  "a gateway trusting every peer"
+bmutate other-network "is not the proxy-tier network's" \
+  "a valid subnet that belongs to some other network (a recreated proxy-tier, a typo)"
+bmutate ipv6-of-dual-stack 'proxy-tier containers outside the trusted subnet' \
+  "the IPv6 half of a dual-stack proxy-tier, while nginx-proxy connects over IPv4"
+clean brake "stub gateway back in good mode" "${BRAKE_ENV[@]}"
+
+# ── Verdict ─────────────────────────────────────────────────────────────────
 echo
-if [ "$rc" -eq 0 ]; then echo "preflight self-test passed: every check can still fail."
+declared="$(grep -cE '^[[:space:]]*(mutate|mutate_re|mutate_rs|emutate|bmutate) ' "$0")"
+if [ "$cases" -ne "$declared" ]; then
+  err "ran $cases mutation cases of the $declared this file declares — a section was skipped"
+fi
+FINISHED=1
+if [ "$rc" -eq 0 ]; then echo "preflight self-test passed: every check can still fail ($cases mutation cases)."
 else echo "preflight self-test FAILED: a check no longer detects its defect."; fi
 exit "$rc"

@@ -67,7 +67,9 @@ mkdir -p ~/visio && cd ~/visio
 2. Copy this repo's templates and fill every value — **RUNBOOK §4**:
    - `deploy/env.d/common.example` → `env.d/common`
    - `deploy/env.d/postgresql.example` → `env.d/postgresql`
-   - `deploy/hosts.example` → `.env`
+   - `deploy/hosts.example` → `.env` — including `PROXY_TIER_SUBNET`: create the
+     proxy network now (`docker network create proxy-tier`, step 3) and paste
+     its subnet (RUNBOOK §5). Every compose command refuses to run without it.
    - `deploy/livekit-server.yaml.example` → `livekit-server.yaml`
    - `deploy/compose.override.yaml` → `compose.override.yaml` (our deltas; **never edit `compose.yaml`**)
 3. Branding: copy `theme/custom.css` → `custom/style.css`, `logo.png` → `custom/logo.png`, and the icon set `theme/icons/*` → `custom/icons/` (nine files, bind-mounted per file — RUNBOOK §7).
@@ -91,7 +93,7 @@ image tags, TURN misconfig.
 
 ## 3. Reverse proxy + TLS — RUNBOOK §5
 
-- `docker network create proxy-tier`
+- `docker network create proxy-tier` — unless step 2 already did; its subnet is `PROXY_TIER_SUBNET` in `.env` (RUNBOOK §5)
 - Deploy the nginx-proxy example in **its own** compose project, with the two mandatory edits: `DEFAULT_EMAIL` (a monitored address) and **`TRUST_DOWNSTREAM_PROXY=false`** (or a client can spoof the scheme Django trusts).
 - **First issuance against Let's Encrypt _staging_**, then switch to production — the apex is shared, don't burn the rate limit.
 
@@ -111,7 +113,8 @@ scripts/preflight.sh stack
 
 Confirms the backend is healthy, env interpolation resolved (empty ≠ literal
 `${VAR}`), the resolved Django settings actually parse (this is where the JSON-list
-bug would show), Redis persistence is on, and migrations are applied.
+bug would show), Redis persistence is on, migrations are applied, and the running
+gateway carries the flood brake and trusts exactly the `proxy-tier` network's subnet.
 
 ---
 

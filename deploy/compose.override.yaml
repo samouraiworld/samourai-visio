@@ -103,6 +103,14 @@ services:
       # Verified live 2026-07-27: preflight.sh public genuinely counted two.
       # This env var is nginx-proxy's own per-vhost switch to stand down.
       - HSTS=off
+      # The proxy tier's subnet: the only peers whose X-Forwarded-For the
+      # gateway trusts (nginx/default.conf.template, the realip block), so the
+      # flood brake and the access log see the client, not nginx-proxy.
+      # `:?` makes EVERY compose command refuse while .env leaves it unset or
+      # empty — up, config, exec, and so backup.sh's dump as well — rather
+      # than render a gateway that trusts nobody (every visitor would share
+      # nginx-proxy's bucket) or everybody. Set it before copying this file.
+      - PROXY_TIER_SUBNET=${PROXY_TIER_SUBNET:?set it in .env to the proxy-tier network subnet, see RUNBOOK 5}
     volumes:
       # Serves FRONTEND_CUSTOM_CSS_URL=/custom/style.css and
       # DJANGO_EMAIL_LOGO_IMG=.../custom/logo.png. Without this both return

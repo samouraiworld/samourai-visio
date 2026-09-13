@@ -36,6 +36,40 @@ fetch docs/examples/compose/compose.yaml   compose.yaml   || exit 1
 fetch src/frontend/panda.config.ts         panda.config.ts|| exit 1
 fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
 fetch docker/files/production/default.conf.template gateway.conf || exit 1
+fetch src/frontend/src/features/rooms/api/fetchRoom.ts fetchRoom.ts || exit 1
+fetch src/frontend/src/features/rooms/hooks/useLobby.ts useLobby.ts || exit 1
+
+# ── Flood brake · what its maps and its numbers were derived from ───────────
+# deploy/nginx/default.conf.template counts two URL shapes under /api/v1.0/,
+# skips the SPA's slash-less first request, and sizes the lobby bucket to one
+# poll a second. Each is an upstream fact. If one moves, the brake counts the
+# wrong requests, bills every join twice, or refuses a waiting room.
+if grep -qE '^[[:space:]]*API_VERSION = "v1\.0"$' "$WORK/settings.py"; then
+  pass "API_VERSION is still v1.0 — the flood brake's maps match /api/v1.0/"
+else
+  bad "API_VERSION changed — the flood brake's maps no longer match any minting URL"
+fi
+if grep -A2 'url_path="request-entry"' "$WORK/viewsets.py" | grep -q 'permission_classes=\[\],'; then
+  pass "request-entry is still an anonymous action (the lobby brake's endpoint)"
+else
+  bad "request-entry changed its route or its permissions — re-derive the lobby brake"
+fi
+# The SPA's room fetch has two shapes across releases, and the brake counts one
+# request per join in both: `rooms/${roomId}?username=` (v1.24.0) earns Django's
+# 301, which the room map skips, then the slashed request it counts; later
+# releases request `rooms/${roomId}/${query}` directly. Any other shape is a
+# URL the maps were not written for.
+# shellcheck disable=SC2016  # literal template strings in the SPA source
+if grep -qF -e '`/rooms/${roomId}?username=' -e '`/rooms/${roomId}/${query}`' "$WORK/fetchRoom.ts"; then
+  pass "the SPA still fetches the room in a shape the brake counts once per join"
+else
+  bad "the SPA's room URL changed shape — the room brake may now count each join twice, or not at all"
+fi
+if grep -qE '^export const POLL_INTERVAL_MS = 1000$' "$WORK/useLobby.ts"; then
+  pass "the lobby still polls once a second (the lobby brake carries a full room at that pace)"
+else
+  bad "the lobby poll interval changed — re-size the lobby brake against the room cap"
+fi
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then

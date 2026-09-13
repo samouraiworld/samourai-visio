@@ -209,6 +209,8 @@ LIVEKIT_HOST=livekit.samourai.app
 BACKEND_INTERNAL_HOST=backend
 FRONTEND_INTERNAL_HOST=frontend
 LIVEKIT_INTERNAL_HOST=livekit
+# The proxy-tier network's subnet (§5). Compose refuses to run without it.
+PROXY_TIER_SUBNET=<proxy-tier-subnet>
 # KEYCLOAK_HOST / REALM_NAME are unused — Clerk replaces Keycloak
 ```
 
@@ -380,7 +382,85 @@ Back up the nginx-proxy `certs` and `acme` volumes. They live in a *different* c
 >
 > Do not “simplify” these to the same value. `preflight.sh config` asserts both directions and `preflight-selftest.sh` mutates each one; `preflight.sh public` additionally counts the headers on `/api/` and fails if there is not exactly one.
 
-Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
+### The proxy tier's subnet, and the flood brake on anonymous token minting
+
+Anyone can obtain a LiveKit token without an account — that is the guest path (§0). The gateway template brakes the two endpoints that hand one out, per client address:
+
+| Endpoint | Limit | Why that number |
+|---|---|---|
+| `GET /api/v1.0/rooms/<slug>/` (and `HEAD`, and `rooms/<slug>.json`) | 2 a second, burst 100 | one join is one such request, so 100 joins at the same instant from one address pass — the whole LT-7 storm ([docs/LOAD_TEST.md](docs/LOAD_TEST.md)) arriving from a single venue |
+| `POST /api/v1.0/rooms/<id>/request-entry/` | 30 a second, burst 60 | a waiting participant polls once a second, so a full room (`max_participants: 30`) can wait in a lobby behind one address |
+
+A 200-request burst from one address gets about 100 refusals on the first and 140 on the second, answered `429`. Requests carrying a session cookie are counted in a bucket of their own — not exempted: nginx cannot verify the cookie, so forging one buys a second bucket of the same size, never an unlimited one. Nothing else is counted: not the rest of the API, not Django's `301` on `rooms/<slug>` without a slash, and not media, which reaches LiveKit on its own vhost. The upstream lines each number comes from are in the template's comments; `scripts/check-gateway-brake.sh` proves the behaviour in CI, and `preflight.sh config` fails if the room cap outgrows either limit.
+
+The key is the client's address only if the gateway believes `X-Forwarded-For` from nginx-proxy and from nobody else, so it trusts exactly one subnet: **`PROXY_TIER_SUBNET` in `.env`, the subnet of the `proxy-tier` network**. Wrong one way, every visitor shares nginx-proxy's bucket and the brake throttles a whole meeting at once; wrong the other way, a client picks its own bucket by writing the header. Hence:
+
+- unset or empty, **every compose command refuses to run** — `up`, `config`, `exec`, and therefore the nightly `backup.sh` — and nginx itself would refuse to start;
+- `preflight.sh config` fails on a value that is not a network, or that reaches public address space (`0.0.0.0/0`, `::/0`);
+- `preflight.sh stack` fails unless the running gateway carries the brake and trusts exactly the `proxy-tier` network's own subnet (`preflight.sh brake` runs that part alone).
+
+This relies on `TRUST_DOWNSTREAM_PROXY=false` above: nginx-proxy then writes the header itself and drops the client's. If anything is ever placed in front of nginx-proxy — a CDN, a load balancer — every visitor would arrive from its handful of addresses; re-derive this section before that happens.
+
+**Apply.** In this order: the override refuses to run until the variable exists.
+
+```bash
+cd ~/visio
+# 1. Read the subnet from Docker — never from memory. One CIDR; if two are
+#    printed, the IPv4 one (nginx-proxy reaches the gateway over IPv4).
+docker network inspect proxy-tier -f '{{range .IPAM.Config}}{{.Subnet}} {{end}}'
+#    Add it to .env, e.g. (a documentation range — use the printed value):
+#      PROXY_TIER_SUBNET=192.0.2.0/24
+# 2. Keep the two files being replaced, then copy the new ones.
+cp compose.override.yaml ~/backups/compose.override.yaml.pre-brake
+cp nginx/default.conf.template ~/backups/default.conf.template.pre-brake
+cp ~/repo/deploy/compose.override.yaml .
+cp ~/repo/deploy/nginx/default.conf.template nginx/
+# 3. Gate, recreate the gateway only, gate again.
+/path/to/repo/scripts/preflight.sh config
+docker compose up -d --force-recreate frontend
+/path/to/repo/scripts/preflight.sh stack
+```
+
+Recreating `frontend` costs a few seconds of `502` on the site and API. Calls in progress keep their media: LiveKit is not touched.
+
+**Verify.** The first line on the host; the rest from a test client **off the host**, on another network — a request the host makes to itself can arrive from the bridge gateway's address, which proves nothing.
+
+```bash
+scripts/preflight.sh brake       # on the host: the brake and the subnet, as nginx loaded them
+
+H=https://visio.samourai.app
+# a) The access log shows the client, not nginx-proxy. From the test client:
+curl -s -o /dev/null "$H/api/v1.0/config/?probe=brake-check"
+#    then on the host — the first field must be the test client's public
+#    address, never an address inside PROXY_TIER_SUBNET:
+docker compose logs --since 5m frontend | grep 'probe=brake-check'
+
+# b) A flood trips it: 200 requests at once, for throwaway slugs.
+seq 200 | xargs -P 50 -I{} curl -s -o /dev/null -w '%{http_code}\n' \
+  "$H/api/v1.0/rooms/brake-check-{}/" | sort | uniq -c
+#    Expected: about 100 × 200 and about 100 × 429.
+#    All 200: the brake is not counting, or not keying on the client — stop.
+#    429 from the very first: this address was already braked — wait a
+#    minute and repeat.
+
+# c) A real join does not: wait one minute (the bucket refills at 2 a
+#    second), then join a room in a browser from that same client, and a
+#    second participant from another device on the same network. Both join.
+```
+
+The throwaway slugs in (b) are synthetic rooms: nothing is stored and nothing reaches LiveKit, since no client connects with those tokens. Refusals appear in `docker compose logs frontend` as `limiting requests`, with the client address.
+
+**Roll back.**
+
+```bash
+cp ~/backups/compose.override.yaml.pre-brake compose.override.yaml
+cp ~/backups/default.conf.template.pre-brake nginx/default.conf.template
+docker compose up -d --force-recreate frontend
+```
+
+`PROXY_TIER_SUBNET` can stay in `.env`; the old files ignore it. `preflight.sh config` and `stack` then fail on the brake checks, which is correct for a gateway that no longer carries it. To loosen rather than remove, change the numbers in the repository's template — `preflight.sh config` refuses a burst of 200 or more, which would let the flood it exists for straight through.
+
+Caddy alternative: expose `frontend` on `8086:8086` and proxy to it. The peer is then no longer on `proxy-tier`: `PROXY_TIER_SUBNET` must become the address Caddy connects from, and the stack check above must be re-derived for it.
 
 ---
 
@@ -396,7 +476,7 @@ Caddy alternative: expose `frontend` on `8086:8086` and proxy to it.
 > VISIO_DIR=~/visio /path/to/repo/scripts/preflight.sh public   # after TLS   — the live surface
 > ```
 >
-> It fails on: unfilled placeholders, a wrapped secret, JSON-shaped lists, a LiveKit-secret mismatch, the wrong CSS variable, a missing bind-mount (checking content-type, not status, because the SPA fallback returns 200 for a missing file), a floating image tag, an unresolved `${VAR}`, a spoofable `X-Forwarded-Proto`, a guest-join path that does not actually work, and a log-retention setup that does not match what the privacy policy publishes (§8bis). It prints `SKIP` for the handful of things a script cannot prove — UDP reachability, the Scaleway security group, `prompt=none` — and each SKIP explains why. **A SKIP is not a pass.**
+> It fails on: unfilled placeholders, a wrapped secret, JSON-shaped lists, a LiveKit-secret mismatch, the wrong CSS variable, a missing bind-mount (checking content-type, not status, because the SPA fallback returns 200 for a missing file), a floating image tag, an unresolved `${VAR}`, a spoofable `X-Forwarded-Proto`, a guest-join path that does not actually work, a gateway without the flood brake on anonymous token minting or trusting a proxy subnet that is unset, a catch-all, or not the `proxy-tier` network's own (§5), and a log-retention setup that does not match what the privacy policy publishes (§8bis). It prints `SKIP` for the handful of things a script cannot prove — UDP reachability, the Scaleway security group, `prompt=none` — and each SKIP explains why. **A SKIP is not a pass.**
 
 ```bash
 docker compose up -d
@@ -578,6 +658,8 @@ under us.
       ```
       Expected `['preferred_username'] ['visio.samourai.app']` — it must match whatever §4 sets `OIDC_USERINFO_FULLNAME_FIELDS` to (`preferred_username` by the 2026-07-22 decision, because first/last name are disabled on this Clerk instance). The outer brackets are normal Python list repr; a bracket or quote **inside an item** is trap 2.
 - [ ] `X-Forwarded-Proto` cannot be spoofed — `curl -H "X-Forwarded-Proto: https" http://visio.samourai.app/` must redirect to `https://`, not serve a 200 over plaintext
+- [ ] **Flood brake** — from a test client off the host, 200 requests at once on `/api/v1.0/rooms/<throwaway>/` answer about 100 × `429`, and a minute later a browser join from that same network works (§5)
+- [ ] **Real client address** — `docker compose logs frontend` shows visitors' public addresses, never an address inside `PROXY_TIER_SUBNET` (§5)
 - [ ] "Log in" → Clerk → back to Meet, **name and email correct** (validates traps 3 and 4). Test with a **freshly created** account: a pre-existing Clerk user may simply have no name stored
 - [ ] Anonymous first visit does not bounce — silent login (`prompt=none`) succeeds or fails gracefully
 - [ ] Create a room as a logged-in user
@@ -838,9 +920,12 @@ exact failures a 40–100 person community call with mixed hardware hits, and
 they are fixed upstream and not here. Batch the upgrade **before** an event,
 not after, with the 24 h canary.
 
-`scripts/check-upstream-contract.sh v1.30.0` passes — **all fifteen
+`scripts/check-upstream-contract.sh v1.30.0` passes — **all nineteen
 assumptions still hold** — the OIDC traps, the CSS variable names, the
-synthetic-room claim, the gateway template, and the LiveKit room-cap keys. So
+synthetic-room claim, the gateway template, the LiveKit room-cap keys, and
+what the flood brake's maps and lobby rate were derived from (v1.30.0's SPA
+requests `rooms/<slug>/` directly, without v1.24.0's 301 hop; the brake counts
+one request per join either way). So
 the remaining risk in this batch is runtime behaviour, not contract drift: what
 the canary is for. Re-run the gate against the tag you actually pick, since
 head moves.

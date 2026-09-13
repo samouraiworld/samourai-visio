@@ -156,7 +156,7 @@ The run that reflects venue and corporate reality, and the only one that proves 
 
 **One HTTP request per participant of the class's target count, within 60 seconds** — 100 requests on the reference shape (§3) — against the room endpoint (`/api/v1.0/rooms/<slug>`), from **many source addresses** rather than one — a real audience arriving at a scheduled start time comes from many addresses, and testing from one address measures the rate limiter instead of the application.
 
-Two things are being checked at once: backend and application-server headroom under a join storm, and that the edge's flood brake does **not** throttle a legitimate burst. Authenticated sessions are exempt from the brake; the anonymous path is the one to watch. A run that trips the brake for legitimate traffic is a failure of the edge configuration, recorded as such, and it blocks the cap just as a media failure would.
+Two things are being checked at once: backend and application-server headroom under a join storm, and that the edge's flood brake does **not** throttle a legitimate burst. Requests carrying a session cookie are counted in a bucket of their own, not exempted — the edge cannot verify a cookie — so the anonymous path is the one to watch. A run that trips the brake for legitimate traffic is a failure of the edge configuration, recorded as such, and it blocks the cap just as a media failure would.
 
 ---
 
