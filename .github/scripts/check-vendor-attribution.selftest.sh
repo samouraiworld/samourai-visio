@@ -279,6 +279,13 @@ expect_clean "the tree is clean once the path fixtures are removed"
 
 # ── "could not look" must not read as "clean" ────────────────────────────────
 # Both of these reported a clean tree and exited 0 before this change.
+# `chmod 000` does not stop root reading a file, so under a root container this
+# case would read the file, find nothing, exit 0 and fail the suite for an
+# environment reason. Skipped audibly instead: a silent skip is the thing this
+# file exists to refuse.
+if [ "$(id -u)" = 0 ]; then
+  printf '  SKIP  %s\n' "unreadable-file cases: running as root, where chmod 000 is inert"
+else
 printf 'readable for now\n' > "$work/locked.txt"
 git -C "$work" add -A >/dev/null
 chmod 000 "$work/locked.txt"
@@ -294,6 +301,7 @@ fi
 expect_status "an unreadable tracked file is reported, not skipped" 1
 printf '  ok  %s\n' "an unreadable tracked file is reported, not skipped"
 chmod 644 "$work/locked.txt"; rm "$work/locked.txt"
+fi
 
 ln -s nowhere/at/all "$work/ghost.txt"
 run
@@ -329,8 +337,161 @@ printf '{"integrity":"sha512-R8gLRTZeyp03ymzP6Lil28tGeGEzhx1q2k703KGWRAI1VdvPIXd
 expect_clean "four characters inside an integrity hash are not a manifest"
 rm "$work/package-lock.json"
 
+# ── the surfaces that are not files ─────────────────────────────────────────
+# The rule names five of them — commit messages, branch names, pull-request
+# titles and bodies, tags and release notes — and `git ls-files` can see none.
+# `--text LABEL` takes one on stdin. These cases are the only thing standing
+# between that mode and a step that pipes the wrong expression into it, so the
+# label and the byte count are asserted as well as the finding.
+
+# Output first, status second. Reading `$?` after a pipe gives the pipe's
+# status, which is the writer's, not the checker's.
+run_text() {
+  local input="$1"; shift
+  if _out="$(printf '%s' "$input" | python3 "$check" --text "$@" 2>&1)"; then
+    _status=0
+  else
+    _status=$?
+  fi
+}
+
+expect_text_line() {
+  local label="$1" want="$2" input="$3"; shift 3
+  run_text "$input" "$@"
+  if ! printf '%s\n' "$_out" | grep -qxF -- "$want"; then
+    fail "$label
+  expected line: $want
+  actual output: $_out"
+  fi
+  expect_status "$label: reported the finding but exited wrong" 1
+  printf '  ok  %s\n' "$label"
+}
+
+# A clean surface says so AND says how much it looked at. The byte count is the
+# only evidence in the log that the step's input arrived at all — a step whose
+# expression produced the wrong field has no other tell when the wrong field is
+# also clean. Two fixtures of different lengths, so a hard-coded number in the
+# message could not satisfy both.
+expect_clean_surface() {
+  local label="$1" input="$2" surface="$3"
+  run_text "$input" "$surface"
+  # Bytes, not characters. `${#input}` counts characters, and the checker counts
+  # bytes; the two agree only while every fixture is ASCII, which is not a
+  # property anyone adding the next fixture would think to preserve.
+  local size
+  size="$(printf '%s' "$input" | wc -c | tr -d ' ')"
+  local want="no assistant attribution in the $surface ($size bytes scanned)"
+  if ! printf '%s\n' "$_out" | grep -qxF -- "$want"; then
+    fail "$label
+  expected line: $want
+  actual output: $_out"
+  fi
+  expect_status "$label: said clean but exited wrong" 0
+  printf '  ok  %s\n' "$label"
+}
+
+expect_clean_surface "a clean surface reads clean and reports how much it scanned" \
+  'docs/state-the-attribution-rule' 'branch name'
+expect_clean_surface "and the size it reports is the size it was given" \
+  'fix/range' 'branch name'
+
+# The finding names the surface. Two different labels, because a message that
+# hard-coded one of them would pass a single-label test.
+expect_text_line "a commit message is caught, and the message names the surface" \
+  "::error::$needle appears in the commit messages on this branch" \
+  "feat: a change
+
+Co-Authored-By: $needle <noreply@example.invalid>" \
+  "commit messages on this branch"
+
+expect_text_line "a pull-request title is caught under its own label" \
+  "::error::$needle appears in the pull request title" \
+  "chore: generated with $needle" \
+  "pull request title"
+
+# Case, because a branch name is often capitalised differently than prose.
+expect_text_line "an uppercase name in a branch is caught" \
+  "::error::$needle appears in the branch name" \
+  "feat/$(printf '%s' "$needle" | tr '[:lower:]' '[:upper:]')-review" \
+  "branch name"
+
+# Base64 reaches a text surface too: a footer can arrive encoded in a body.
+body_payload="$(printf 'padding%.0s' $(seq 1 40))$needle"
+body_encoded="$(printf '%s' "$body_payload" | base64 | tr -d '\n')"
+if printf '%s' "$body_encoded" | grep -qi "$needle"; then
+  fail "the base64 body fixture is not actually hidden"
+fi
+expect_text_line "base64 inside a body is decoded, and reported as base64" \
+  "::error::$needle (base64) appears in the pull request body" \
+  "see the attached manifest: $body_encoded" \
+  "pull request body"
+
+# ── an empty surface is "could not look", not "clean" ────────────────────────
+# This is the whole reason the mode refuses by default. A range that resolved
+# to nothing, or an expression naming a field the event does not carry, arrives
+# here as empty — and reporting it clean is how a gate becomes a comment.
+run_text '' 'commit messages on this branch'
+if ! printf '%s\n' "$_out" | grep -qF -- 'nothing was scanned: the commit messages on this branch arrived empty'; then
+  fail "an empty surface should be refused, not passed
+  actual output: $_out"
+fi
+expect_status "an empty surface was refused but exited wrong" 1
+printf '  ok  %s\n' "an empty surface is refused, and says the step is wrong"
+
+# Whitespace is empty. A step whose expression produced only a newline is the
+# same defect, and would otherwise slip past as a one-byte scan.
+run_text '
+   
+' 'commit messages on this branch'
+if ! printf '%s\n' "$_out" | grep -qF -- 'arrived empty. This surface is never legitimately empty'; then
+  fail "a whitespace-only surface should be refused
+  actual output: $_out"
+fi
+expect_status "a whitespace-only surface was refused but exited wrong" 1
+printf '  ok  %s\n' "a whitespace-only surface counts as empty"
+
+# ...and the opt-out works, for the surfaces that really are absent most runs.
+run_text '' 'release notes' --allow-empty
+if ! printf '%s\n' "$_out" | grep -qxF -- 'nothing to scan: no release notes on this event'; then
+  fail "a declared-empty surface should pass and say so
+  actual output: $_out"
+fi
+expect_status "a declared-empty surface said so but exited wrong" 0
+printf '  ok  %s\n' "--allow-empty lets a legitimately absent surface pass, audibly"
+
+# The flag must affect EMPTINESS only. Spelled as "ignore this surface" it
+# would silently exempt every release note ever published, and no case above
+# would notice — both exit 0.
+expect_text_line "--allow-empty does not exempt a surface that carries the name" \
+  "::error::$needle appears in the release notes" \
+  "published with help from $needle" \
+  "release notes" --allow-empty
+
+# ── a miswired step must not read as a pass ─────────────────────────────────
+# `--text` with no label, the shape a workflow typo actually takes. Status 2,
+# distinct from a finding's 1: "this step is wrong" and "this surface is dirty"
+# are repaired differently, and one bit cannot tell them apart.
+expect_usage() {
+  local label="$1"; shift
+  if _out="$(printf 'x' | python3 "$check" "$@" 2>&1)"; then _status=0; else _status=$?; fi
+  printf '%s\n' "$_out" | grep -qF -- '--text LABEL' || fail "$label
+  expected the usage text
+  actual output: $_out"
+  expect_status "$label: printed usage but exited wrong" 2
+  printf '  ok  %s\n' "$label"
+}
+
+expect_usage "--text with no label exits 2 with usage, not 0" --text
+# The dispatch is two clauses -- `--text` must be FIRST and there must be
+# exactly one label -- and each was unprovable on its own: mutating either one
+# away left every case above passing. These two kill them separately.
+expect_usage "a label after a root argument is not a surface scan" . --text
+expect_usage "two labels are refused rather than one being picked" --text a b
+
 echo "self-test passed: plain text, binary metadata, base64 long and short, a"
 echo "permitted compressed chunk, a forbidden chunk type, the summary count,"
 echo "the listing order, the allowlist, the path scan, the unreadable-file"
 echo "report and the manifest namespace each proved by their own message AND"
-echo "their own exit status"
+echo "their own exit status — and, for the surfaces that are not files, the"
+echo "label, the scanned size, base64, the refusal of an empty surface, the"
+echo "narrowness of --allow-empty and the usage status of a miswired step"
