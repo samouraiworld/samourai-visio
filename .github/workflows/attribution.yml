@@ -202,19 +202,21 @@ jobs:
       # The body keeps `--allow-empty`: GitHub requires a title and does not
       # require a body, so an empty body here is a real empty body.
       #
-      # A bot's body is exempt (organisation owner decision B4, 2026-09-09):
+      # A bot's body is exempt (the organisation's bot-body decision):
       # Dependabot quotes an upstream changelog it did not write. The title, the
       # commits and the diff of a bot's pull request are still scanned.
       #
-      # Nothing gates this condition. If B4 is ever overturned, this comment is
-      # the only record that the exemption was deliberate.
+      # Nothing gates this condition. If that decision is ever overturned, this
+      # comment is the only record that the exemption was deliberate.
       #
-      # B4's stated premise is that a pull-request body never enters git history.
+      # That decision's stated premise is that a pull-request body never enters
+      # git history.
       # On this repository it does: `squash_merge_commit_message` is `PR_BODY`, so
       # an exempt bot body becomes the squash commit's message and the push-to-
       # `main` run scans it as a commit message. The hole is loud rather than
       # silent (`main` goes red) but it is a hole, and closing it properly
-      # means either setting that option away from `PR_BODY` or overturning B4.
+      # means either setting that option away from `PR_BODY` or overturning
+      # that decision.
       # Both are the owner's call, so neither is taken here.
       - name: The pull request body carries no attribution
         if: >-
@@ -239,8 +241,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Every other gate refuses something PRESENT. None of them has an opinion
       # about a rule going ABSENT, which is how a merge taking `main..branch` as
-      # a stale branch's residue reverted an attribution policy elsewhere in
-      # this organisation on 2026-09-12 with CI green throughout.
+      # a stale branch's residue once reverted an attribution policy elsewhere
+      # in this organisation, with CI green throughout.
       - name: Prove the clause check can fail
         run: .github/scripts/check-required-clauses.selftest.sh
       - name: Every clause this repository must carry is still there

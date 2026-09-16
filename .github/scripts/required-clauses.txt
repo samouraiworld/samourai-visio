@@ -13,18 +13,18 @@
 # merge nobody read.
 #
 # Every clause below quotes THIS repository's own wording. The checker and its
-# self-test are byte-for-byte copies from kodera-internal; this file is not, and
-# must never be copied from another repository.
+# self-test are byte-for-byte copies of the organisation's canonical scripts;
+# this file is not, and must never be copied from another repository.
 #
 # ── what does NOT belong here ───────────────────────────────────────────────
 # A workflow's behaviour. Pinning a step by its text is a category error, and a
-# measured one: the first version of kodera-internal's manifest pinned six
-# fragments of its CI workflow, and deleting the steps outright while leaving a
-# YAML comment that quoted the same text kept every clause satisfied. One
-# fragment was worse than useless: a self-test's filename occurred twice in
-# that workflow, so deleting one job's self-test step left the clause satisfied
-# by the other job's copy, and six gates ran with nothing proving they could
-# refuse.
+# measured one: the first version of the canonical repository's manifest
+# pinned six fragments of its CI workflow, and deleting the steps outright
+# while leaving a YAML comment that quoted the same text kept every clause
+# satisfied. One fragment was worse than useless: a self-test's filename
+# occurred twice in that workflow, so deleting one job's self-test step left
+# the clause satisfied by the other job's copy, and six gates ran with nothing
+# proving they could refuse.
 #
 # What guards the workflow is `check-aggregate-covers-jobs.py`, which proves
 # every job in `attribution.yml` is in `ci-ok`'s `needs:`. A deleted *job* is
@@ -43,7 +43,7 @@
 # So: pin files whose CONTENT is the policy. Not files whose content is code.
 
 # ── the attribution rule ────────────────────────────────────────────────────
-# In kodera-internal this section was deleted for real on 2026-09-12, by a
+# In the canonical repository this section was once deleted for real, by a
 # merge taking `main..branch` as a stale branch's residue, and CI stayed green:
 # the attribution gate scans tracked files for the vendor name and has no
 # opinion about the policy mandating it going away. The heading, the rule, the
