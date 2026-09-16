@@ -1,0 +1,82 @@
+# Clauses this repository must keep carrying. One per line:
+#
+#     path/to/file :: text that must appear somewhere in it
+#
+# `#` starts a comment only at the beginning of a line, because a clause is a
+# fragment of prose and markdown headings begin with one. Whitespace is
+# collapsed on both sides before matching, so a rewrap is not a policy change.
+#
+# Pin the shortest fragment that cannot survive the deletion you are guarding
+# against. A whole paragraph reddens the branch on an innocent rewording; one
+# common word guards nothing. Retiring a clause is a deliberate act: do it in
+# its own commit, so the decision is visible in the history rather than in a
+# merge nobody read.
+#
+# Every clause below quotes THIS repository's own wording. The checker and its
+# self-test are byte-for-byte copies of the organisation's canonical scripts;
+# this file is not, and must never be copied from another repository.
+#
+# ── what does NOT belong here ───────────────────────────────────────────────
+# A workflow's behaviour. Pinning a step by its text is a category error, and a
+# measured one: the first version of the canonical repository's manifest
+# pinned six fragments of its CI workflow, and deleting the steps outright
+# while leaving a YAML comment that quoted the same text kept every clause
+# satisfied. One fragment was worse than useless: a self-test's filename
+# occurred twice in that workflow, so deleting one job's self-test step left
+# the clause satisfied by the other job's copy, and six gates ran with nothing
+# proving they could refuse.
+#
+# What guards the workflow is `check-aggregate-covers-jobs.py`, which proves
+# every job in `attribution.yml` is in `ci-ok`'s `needs:`. A deleted *job* is
+# caught by it. A deleted *step* is caught by nothing, and will not be until
+# something parses the workflow's structure rather than its bytes. That gap is
+# real and is stated here rather than papered over with a clause that cannot
+# see it.
+#
+# Nor a claim the tree or this repository's settings contradict, or a
+# convention nobody has ratified. CONTRIBUTING.md says conventions live in
+# `AGENTS.md`, and this repository has no `AGENTS.md`; it says the default
+# branch requires six CI checks, and it requires nine. Neither sentence is
+# pinned: a clause makes a sentence harder to change, and those two need
+# changing, not protecting.
+#
+# So: pin files whose CONTENT is the policy. Not files whose content is code.
+
+# ── the attribution rule ────────────────────────────────────────────────────
+# In the canonical repository this section was once deleted for real, by a
+# merge taking `main..branch` as a stale branch's residue, and CI stayed green:
+# the attribution gate scans tracked files for the vendor name and has no
+# opinion about the policy mandating it going away. The heading, the rule, the
+# sentence extending it to encoded content and the one refusing a waiver are
+# each pinned, because the heading can survive while the rule under it is
+# emptied or softened.
+CONTRIBUTING.md :: ## Assistant attribution — hard rule
+CONTRIBUTING.md :: Never name an AI assistant, its vendor, or a model
+CONTRIBUTING.md :: **It covers binary and encoded content too.**
+CONTRIBUTING.md :: It is not waivable in review
+
+# ── branching ───────────────────────────────────────────────────────────────
+CONTRIBUTING.md :: Never commit to the default branch.
+
+# ── secrets ─────────────────────────────────────────────────────────────────
+# Bare `docker compose config` expands `env_file` and prints every secret into
+# a terminal or a CI log. README.md states the tracked-files half of the rule.
+CONTRIBUTING.md :: **Never run bare `docker compose config`.**
+README.md :: Never commit real secrets. Only `*.example` files are tracked
+
+# ── checks must be able to fail ─────────────────────────────────────────────
+CONTRIBUTING.md :: **If you add a preflight check, add a mutation for it to the self-test**
+
+# ── the supply-chain policy ─────────────────────────────────────────────────
+# `.github/dependabot.yml` is policy configuration, not workflow code. Without
+# the cap, `patterns: ["*"]` collects majors into the weekly bundle, which is
+# how one pull request elsewhere in this organisation carried six major steps
+# under a header promising that a major is never merged as opened. The two
+# sentences are the review rules the file states for SHA-pinned actions and
+# for the hash-pinned Pillow requirement. They are YAML comments that wrap, and
+# whitespace collapsing does not remove a comment marker, so each carries the
+# ` # ` its line break leaves: the sentence is pinned whole, premise and verdict,
+# rather than by whichever half happens to fit on one line.
+.github/dependabot.yml :: update-types: ["minor", "patch"]
+.github/dependabot.yml :: Reverting a `uses:` to a bare tag silently opts that action out of # pinning, so a pull request that does it is a reject, not a nit.
+.github/dependabot.yml :: So a Dependabot pull request here is a SIGNAL THAT THE PIN IS STALE, and # never a merge as it stands

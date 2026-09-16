@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fail if a tracked file carries assistant-vendor attribution.
+"""Fail if anything published from this repository carries assistant-vendor
+attribution.
 
 AGENTS.md: the name of the assistant that helped build this never appears in a
 samouraiworld repository. The recursive case-insensitive grep that rule
@@ -19,6 +20,19 @@ only for today's vendor name would miss tomorrow's. Competitor product names
 are NOT flagged — naming Microsoft Copilot in a pricing benchmark is
 legitimate research. What is forbidden is attribution of the assistant used to
 produce the work.
+
+Tracked files are only the surface `git ls-files` can see. The rule names five
+more that it cannot: commit messages, branch names, pull-request titles and
+bodies, tags and release notes. None of those is a file, so `--text LABEL`
+takes one of them on stdin and applies the same needles to it. The workflow
+supplies the text, because most of these live in the event payload rather than
+in git.
+
+An empty surface is refused rather than passed. A step whose input silently
+came out empty — a range that resolved to nothing, an expression that named a
+field the event does not carry — would otherwise report the surface clean
+without having looked at it. `--allow-empty` marks the surfaces that are
+legitimately absent most of the time, and only those.
 """
 
 import base64
@@ -129,8 +143,15 @@ def inflate(body):
 
 def findings(path):
     with open(path, "rb") as handle:
-        raw = handle.read()
+        return findings_in(handle.read())
 
+
+def findings_in(raw):
+    """Every reason these bytes should not be published, sorted.
+
+    Split out from reading a file so the same needles reach the surfaces that
+    are not files: a commit message, a branch name, a pull-request body.
+    """
     hits = []
 
     def note(label):
@@ -193,8 +214,54 @@ def path_findings(rel):
     return [n.decode() + " (in the path)" for n in VENDOR if n in low]
 
 
-def main():
-    root = sys.argv[1] if len(sys.argv) > 1 else "."
+USAGE = (
+    "usage: check-vendor-attribution.py [ROOT]\n"
+    "       check-vendor-attribution.py --text LABEL [--allow-empty] < surface"
+)
+
+
+def scan_text(label, allow_empty):
+    """Check one non-file surface, read as bytes from stdin.
+
+    The LABEL is the only thing in the output that says which surface failed,
+    so the caller names it: nothing here can work out whether these bytes were
+    a branch name or a release note.
+    """
+    raw = sys.stdin.buffer.read().strip()
+
+    # Every message below puts the label in a prepositional phrase rather than
+    # making it the subject. Labels are both singular and plural -- "branch
+    # name", "commit messages on this branch" -- and a sentence built around
+    # one of them disagrees with the other half of the time.
+    if not raw:
+        if allow_empty:
+            # Declared absent-by-default, so this is the ordinary case and not
+            # a result worth dressing up as a pass. Said out loud all the same,
+            # because a surface that is empty EVERY time is a broken expression
+            # and the log is where that shows.
+            print(f"nothing to scan: no {label} on this event")
+            return 0
+        print(
+            f"::error::nothing was scanned: the {label} arrived empty. This "
+            f"surface is never legitimately empty, so the step that produced "
+            f"it is wrong"
+        )
+        return 1
+
+    hits = findings_in(raw)
+    for hit in hits:
+        print(f"::error::{hit} appears in the {label}")
+    if hits:
+        print(
+            f"\nThis must not be published. Unlike a file, a surface cannot be "
+            f"allowlisted: rewrite the {label}."
+        )
+        return 1
+    print(f"no assistant attribution in the {label} ({len(raw)} bytes scanned)")
+    return 0
+
+
+def scan_tracked(root):
     allow = load_allowlist()
     # S603/S607 are suppressed rather than fixed, with reason: the argv is a
     # fixed list with no shell, and `root` is this script's own argument, not
@@ -237,6 +304,20 @@ def main():
         return 1
     print("no tracked file carries assistant attribution")
     return 0
+
+
+def main():
+    argv = sys.argv[1:]
+    if "--text" not in argv:
+        return scan_tracked(argv[0] if argv else ".")
+    rest = [arg for arg in argv if arg not in ("--text", "--allow-empty")]
+    if argv[0] != "--text" or len(rest) != 1:
+        # A mangled invocation must not be able to read as a pass. The status
+        # is distinct from a finding's, because "this step is miswired" and
+        # "this surface is dirty" call for different repairs.
+        print(USAGE)
+        return 2
+    return scan_text(rest[0], "--allow-empty" in argv)
 
 
 if __name__ == "__main__":
