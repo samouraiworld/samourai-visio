@@ -2,12 +2,16 @@
 """Fail if anything published from this repository carries assistant-vendor
 attribution.
 
-AGENTS.md: the name of the assistant that helped build this never appears in a
-samouraiworld repository. The recursive case-insensitive grep that rule
-prescribes misses the two ways it has actually arrived here:
+The policy this enforces: the name of the assistant that helped build a
+repository never appears in anything that repository publishes. The obvious
+check, a recursive case-insensitive grep, misses two ways such attribution can
+arrive:
 
-  1. Binary metadata. `grep -I` skips binaries, and PNG provenance lives in an
-     ancillary chunk, so a whole icon set can carry attribution invisibly.
+  1. Binary metadata. `grep -I` skips binaries, and without it a match in one
+     is reported only as a one-line "binary file matches" notice. PNG
+     provenance lives in an ancillary chunk, and when that chunk is compressed
+     no grep sees the name at all, so a whole icon set can carry attribution
+     unnoticed.
   2. Base64. A provenance manifest embedded in an SVG holds the name encoded,
      so it is not present as text at all and no plain grep can see it.
 
@@ -17,16 +21,16 @@ compressed PNG text chunks.
 It also fails on the metadata containers themselves, whoever wrote them: a
 design asset has no reason to carry a text or provenance chunk, and checking
 only for today's vendor name would miss tomorrow's. Competitor product names
-are NOT flagged — naming Microsoft Copilot in a pricing benchmark is
+are NOT flagged — naming a competing product in a comparison or a benchmark is
 legitimate research. What is forbidden is attribution of the assistant used to
 produce the work.
 
-Tracked files are only the surface `git ls-files` can see. The rule names five
-more that it cannot: commit messages, branch names, pull-request titles and
-bodies, tags and release notes. None of those is a file, so `--text LABEL`
-takes one of them on stdin and applies the same needles to it. The workflow
-supplies the text, because most of these live in the event payload rather than
-in git.
+Tracked files are only the surface `git ls-files` can see. At least five more
+published surfaces are invisible to it: commit messages, branch names,
+pull-request titles and bodies, tags and release notes. None of those is a
+file, so `--text LABEL` takes one of them on stdin and applies the same needles
+to it. The caller, normally a CI step, supplies the text, because most of these
+live in the event payload rather than in git.
 
 An empty surface is refused rather than passed. A step whose input silently
 came out empty — a range that resolved to nothing, an expression that named a
@@ -80,7 +84,8 @@ FORBIDDEN_CHUNKS = tuple(
 )
 
 # 40 characters decode to 30 bytes — short enough to catch a name tucked into a
-# small blob. The earlier threshold of 120 let a 96-character run through.
+# small blob. A much higher threshold, such as 120, would let a short encoded
+# name through.
 B64_RUN = re.compile(rb"[A-Za-z0-9+/=]{40,}")
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -166,10 +171,12 @@ def findings_in(raw):
             if needle in low:
                 note(needle.decode() + suffix)
         # The namespace needle is FOUR bytes, and four bytes over base64's
-        # alphabet collide by chance: on 2026-09-11 it refused an npm lockfile
-        # whose only crime was a sha512- integrity hash containing those four
-        # characters. One such collision exists across every branch of the nine
-        # repositories today, which reads as a freak and is in fact a rate.
+        # alphabet collide by chance: matched as a bare substring, it can refuse
+        # an npm lockfile whose only crime is a sha512- integrity hash
+        # containing those four characters. Each sha512 hash offers about 85
+        # positions, so a lockfile with a few hundred hashes collides from under
+        # one to about three percent of the time: rare in one tree, a rate
+        # across many.
         #
         # So it is recognised only where a manifest actually puts it: as a
         # declared XML namespace, or as a namespace-qualified name. This is the
@@ -207,8 +214,8 @@ def path_findings(rel):
     """Findings in the repo-relative PATH itself, directory components included.
 
     A file whose NAME is the marker publishes it as loudly as one whose contents
-    do, and a scan of contents alone cannot see it -- which is exactly the shape
-    of the artefact the rule names first.
+    do, and a scan of contents alone cannot see it -- an instructions file named
+    after the assistant, for instance.
     """
     low = rel.lower().encode("utf-8", "surrogateescape")
     return [n.decode() + " (in the path)" for n in VENDOR if n in low]
@@ -284,7 +291,7 @@ def scan_tracked(root):
             hits += findings(os.path.join(root, rel))
         except OSError as exc:
             # A tracked path that could not be read is not a path known to be
-            # clean. Skipping it here reported a clean tree and exited 0 for a
+            # clean. Skipping it here would report a clean tree and exit 0 for a
             # file at mode 000 and for a dangling symlink alike.
             hits.append(f"could not be read ({exc.strerror})")
         if hits:
