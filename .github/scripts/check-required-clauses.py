@@ -2,14 +2,15 @@
 """Fail if a clause this repository has decided it must carry has gone missing.
 
 The attribution gate scans tracked files for the vendor name. It has no opinion
-about the *policy that mandates it* being deleted, and on 2026-09-12 that gap
-was not hypothetical: a stale branch merged with the two-dot residue of
-`main..branch` silently reverted the "Assistant attribution — hard rule" section
-of `AGENTS.md`, the Dependabot `update-types` cap and the `CODEOWNERS` entry.
-Every check stayed green, because none of them was watching for an absence.
+about the *policy that mandates it* being deleted, and that gap is not
+hypothetical: a stale branch merged as the two-dot residue of `main..branch`
+silently reverts everything `main` gained since the branch was cut, which can
+be a policy section of `AGENTS.md`, a Dependabot `update-types` cap or a
+`CODEOWNERS` entry. Every other check stays green, because none of them is
+watching for an absence.
 
-A net deletion in those files was already the house rule; it was a command
-someone had to remember to run after a merge. This is that rule as a gate.
+Looking for a net deletion in those files after a merge is a rule someone has
+to remember to apply. This is that rule as a gate.
 
 The clauses are declared in `required-clauses.txt` beside this script, one per
 line:
@@ -41,12 +42,16 @@ def flatten(text):
     """Collapse every run of whitespace to one space.
 
     A clause is a fragment of prose, and prose gets rewrapped. Matched
-    literally, the clause pinned below broke at 80 columns and survived at 100
-    -- a tripwire that reddens a branch for a reformatting nobody meant as a
-    policy change, and this repository has already been bitten once by a
-    formatter reflowing a file a text parser was reading. Collapsing whitespace
-    on both sides also lets a clause match across a line break, which is the
-    same thing from the other direction.
+    literally, a clause that fits on one line at 100 columns can break when the
+    paragraph is rewrapped at 80 -- a tripwire that reddens a branch for a
+    reformatting nobody meant as a policy change, and formatters do reflow
+    files that something else reads as text. Collapsing whitespace on both
+    sides also lets a clause match across a line break, which is the same thing
+    from the other direction.
+
+    It does not cover prefixed prose. When a comment (`# `) or a quotation
+    (`> `) is rewrapped, the prefix lands between two words, and a pinned clause
+    spanning that line break no longer matches.
     """
     return WHITESPACE.sub(" ", text)
 
@@ -140,8 +145,8 @@ def main():
         full = os.path.join(root, path)
         # A symlink is refused rather than followed. This manifest quotes every
         # clause verbatim, so it is itself a file that satisfies all of them:
-        # pointing a policy file at the manifest deleted the policy and left
-        # every gate green. A policy file has no reason to be a symlink.
+        # pointing a policy file at the manifest would delete the policy and
+        # leave every gate green. A policy file has no reason to be a symlink.
         if os.path.islink(full):
             missing.append((path, lineno, "is a symlink, so what it contains is another file's"))
             continue
@@ -149,9 +154,9 @@ def main():
             with open(full, encoding="utf-8") as handle:
                 body = handle.read()
         except (OSError, UnicodeDecodeError) as exc:
-            # Both are "could not look", and both used to leave here differently:
-            # an OSError was reported, a decoding error escaped as a traceback
-            # with no annotation naming the file.
+            # Both are "could not look", and both must leave here the same way:
+            # left uncaught, a decoding error escapes as a traceback with no
+            # annotation naming the file.
             reason = exc.strerror if isinstance(exc, OSError) else "not valid UTF-8"
             missing.append((path, lineno, f"could not be read ({reason})"))
             continue

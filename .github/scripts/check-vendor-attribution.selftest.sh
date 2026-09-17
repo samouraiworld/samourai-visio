@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # Proves the attribution check can fail, and that it fails for the right reason.
 #
-# Every assertion below is on the MESSAGE the check prints, never on its exit
-# status. An exit status is one bit, and this check has several separate ways
-# of finding something: plain text, base64, an inflated compressed chunk, a
-# forbidden chunk type, and the allowlist that can exempt any of them. One bit
-# cannot tell those apart, so a run in which every branch but one still works
-# is indistinguishable from a run in which all of them work. Each case here
-# names the file it expects reported and the reason it expects given — the
-# part that differs between branches — and matches the whole line, so an extra
-# or a missing reason fails too.
+# Every assertion below is on the MESSAGE the check prints; all but the order
+# check and the allowlist cases also assert the exact exit status beside it. An
+# exit status is one bit, and this check has several separate ways of finding
+# something: plain text, base64, an inflated compressed chunk, a forbidden chunk
+# type, and the allowlist that can exempt any of them. One bit cannot tell those
+# apart, so a run in which every branch but one still works is indistinguishable
+# from a run in which all of them work. Each case here names the file it expects
+# reported and the reason it expects given — the part that differs between
+# branches — and matches the whole line, so an extra or a missing reason fails
+# too.
 
 set -euo pipefail
 
@@ -32,9 +33,8 @@ git -C "$work" config user.name ci
 
 fail() { echo "self-test FAILED: $1" >&2; exit 1; }
 
-# Stages whatever the fixture left behind and returns the check's output. The
-# exit status is deliberately discarded rather than returned: nothing in this
-# file is allowed to assert on it.
+# Stages whatever the fixture left behind, returns the check's output, and
+# records the exit status for `expect_status`.
 _out=""
 _status=0
 run() {
@@ -44,9 +44,9 @@ run() {
 }
 
 # The message tells the branches apart; the exit status is the only thing CI
-# consumes. Asserting one without the other is how a refusal flipped to a pass
-# went unnoticed: the 13 message assertions all still passed with the checker's
-# `return 1` changed to `return 0`.
+# consumes. Asserting the message without the status lets a refusal flipped to
+# a pass go unnoticed: message assertions alone all still pass with the
+# checker's `return 1` changed to `return 0`.
 #
 # The EXACT status, not merely non-zero: a traceback also exits non-zero, and
 # "could not look" must never read as "found something".
@@ -106,24 +106,25 @@ echo "vendor-attribution self-test"
 printf 'nothing to declare\n' > "$work/clean.txt"
 expect_clean "a clean tree says so, and reports nothing"
 
-# 1. Plain text — what the rule always assumed, and the only one of these a
-#    recursive grep would have caught on its own.
+# 1. Plain text — what a grep-based rule assumes, and the only one of these a
+#    recursive grep would catch on its own.
 printf 'produced with %s assistance\n' "$needle" > "$work/plain.txt"
 expect_line "plain text names the file and the needle" \
   "::error file=plain.txt::carries $needle"
 rm "$work/plain.txt"
 
-# 2. Binary metadata — a NUL byte makes grep treat the file as binary and skip
-#    it. One of the two ways attribution actually arrived in these repos.
+# 2. Binary metadata — a NUL byte makes grep treat the file as binary: `grep -I`
+#    skips it, and plain grep reports only a one-line "binary file matches"
+#    notice. One of the ways attribution arrives unseen.
 printf 'PNG\000metadata\000%s\000' "$needle" > "$work/blob.bin"
 expect_line "attribution inside binary metadata is caught" \
   "::error file=blob.bin::carries $needle"
 rm "$work/blob.bin"
 
-# 3. Base64 — the other way it actually arrived. The name is not text anywhere
-#    in the file, and the reported reason has to say so: matching the whole
-#    line proves the decoding branch is what caught it, rather than a stray
-#    plain-text match that would leave the base64 path untested.
+# 3. Base64 — another. The name is not text anywhere in the file, and the
+#    reported reason has to say so: matching the whole line proves the decoding
+#    branch is what caught it, rather than a stray plain-text match that would
+#    leave the base64 path untested.
 payload="$(printf 'padding%.0s' $(seq 1 40))$needle"
 encoded="$(printf '%s' "$payload" | base64 | tr -d '\n')"
 printf '<svg><metadata>%s</metadata></svg>\n' "$encoded" > "$work/hidden.svg"
@@ -135,8 +136,8 @@ expect_line "base64 is caught, and reported as base64" \
 rm "$work/hidden.svg"
 
 # 4. The decoding threshold. The fixture above is long enough to be decoded
-#    under the old 120-character minimum too, so on its own it proves nothing
-#    about the lowered bound.
+#    under a much higher minimum, such as 120 characters, so on its own it
+#    proves nothing about how short an encoded name the check still decodes.
 short="$(printf '%s' "$(printf 'x%.0s' $(seq 1 24))$needle" | base64 | tr -d '\n')"
 if [ "${#short}" -lt 40 ] || [ "${#short}" -gt 50 ]; then
   fail "threshold fixture is ${#short} chars, wanted 40 to 50"
@@ -247,8 +248,9 @@ fi
 printf '  ok  %s\n' "a commented-out allowlist entry exempts nothing"
 
 # ── the PATH is published as loudly as the contents ──────────────────────────
-# The rule names a filename explicitly, and a scan of contents alone cannot see
-# one. Each fixture below is innocuous INSIDE, so only the path scan can catch it.
+# A filename is published as surely as a file's contents, and a scan of contents
+# alone cannot see one. Each fixture below is innocuous INSIDE, so only the path
+# scan can catch it.
 rm -f "$work"/*.txt "$work"/*.md 2>/dev/null || true
 git -C "$work" add -A >/dev/null 2>&1 || true
 
@@ -278,7 +280,8 @@ rm "$work/plain.txt"
 expect_clean "the tree is clean once the path fixtures are removed"
 
 # ── "could not look" must not read as "clean" ────────────────────────────────
-# Both of these reported a clean tree and exited 0 before this change.
+# Skipped rather than reported, both of these would read as a clean tree and
+# exit 0.
 # `chmod 000` does not stop root reading a file, so under a root container this
 # case would read the file, find nothing, exit 0 and fail the suite for an
 # environment reason. Skipped audibly instead: a silent skip is the thing this
@@ -315,9 +318,9 @@ printf '  ok  %s\n' "a dangling symlink is reported, not skipped"
 rm "$work/ghost.txt"
 expect_clean "the tree is clean once the unreadable fixtures are removed"
 
-# ── the manifest namespace, which had no fixture at all ──────────────────────
+# ── the manifest namespace, in both directions ─────────────────────────────
 # It is FOUR bytes. Matched as a bare substring it collides with base64: it
-# refused an npm lockfile whose only crime was an integrity hash containing
+# can refuse an npm lockfile whose only crime is an integrity hash containing
 # those four characters. Both directions are asserted, because an anchor that
 # is too tight stops catching real manifests and no existing case would notice.
 ns="$(printf '\x63\x32\x70\x61')"
@@ -331,18 +334,18 @@ expect_line "a namespace-qualified name is caught" \
   "::error file=qualified.xml::carries $ns"
 rm "$work/qualified.xml"
 
-# The negative, which is the one that was failing in production: the four
-# characters inside a base64 integrity hash, with no manifest anywhere.
+# The negative, which is the collision real trees produce: the four characters
+# inside a base64 integrity hash, with no manifest anywhere.
 printf '{"integrity":"sha512-R8gLRTZeyp03ymzP6Lil28tGeGEzhx1q2k703KGWRAI1VdvPIXdG70VJ%sMw3NA6JKL5hhFu1sJX0Mnn"}\n' "$ns" > "$work/package-lock.json"
 expect_clean "four characters inside an integrity hash are not a manifest"
 rm "$work/package-lock.json"
 
 # ── the surfaces that are not files ─────────────────────────────────────────
-# The rule names five of them — commit messages, branch names, pull-request
-# titles and bodies, tags and release notes — and `git ls-files` can see none.
-# `--text LABEL` takes one on stdin. These cases are the only thing standing
-# between that mode and a step that pipes the wrong expression into it, so the
-# label and the byte count are asserted as well as the finding.
+# Five of them are what this mode is built for — commit messages, branch names,
+# pull-request titles and bodies, tags and release notes — and `git ls-files`
+# can see none. `--text LABEL` takes one on stdin. These cases are the only
+# thing standing between that mode and a step that pipes the wrong expression
+# into it, so the label and the byte count are asserted as well as the finding.
 
 # Output first, status second. Reading `$?` after a pipe gives the pipe's
 # status, which is the writer's, not the checker's.
