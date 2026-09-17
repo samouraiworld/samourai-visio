@@ -167,9 +167,9 @@ expect_refusal "a line with an empty path is refused too" \
   "line 1 names an empty path or clause"
 
 # ── a rewrap is not a policy change ────────────────────────────────────────
-# Matched literally, the clause pinned in this repository broke at 80 columns
-# and survived at 100: a tripwire that reddens a branch for a reformatting
-# nobody meant as a change of policy. Whitespace is collapsed on both sides.
+# Matched literally, a pinned clause survives at 100 columns and can break when
+# rewrapped at 80: a tripwire that reddens a branch for a reformatting nobody
+# meant as a change of policy. Whitespace is collapsed on both sides.
 printf '## Policy — hard rule\nNever do\n   the thing.\n' > "$work/AGENTS.md"
 printf 'AGENTS.md :: Never do the thing.\n' > "$manifest"
 expect_clean "a clause still matches across a line break and a re-indent" \
@@ -192,8 +192,8 @@ expect_refusal "a clause is not satisfied by a word that merely contains it unsp
   "no longer contains: do not"
 
 # ── the manifest is itself a file that satisfies every clause it quotes ─────
-# Pointing the policy file at the manifest deleted the policy and left the gate
-# green, because the manifest quotes each clause verbatim.
+# Pointing the policy file at the manifest would delete the policy and leave
+# the gate green, because the manifest quotes each clause verbatim.
 printf '## Policy — hard rule\nNever do the thing.\n' > "$work/AGENTS.md"
 printf 'AGENTS.md :: Never do the thing.\n' > "$manifest"
 run
@@ -216,15 +216,15 @@ expect_refusal "a repeated clause is refused rather than counted twice" \
   "line 2 repeats a clause already declared"
 
 # ── a path spelled in a way git never emits ────────────────────────────────
-# `git ls-files` has no leading `./`, so this used to report "is not tracked"
-# for a file that is tracked: a true refusal with a false reason.
+# `git ls-files` has no leading `./`, so if accepted this would report "is not
+# tracked" for a file that is tracked: a true refusal with a false reason.
 printf './AGENTS.md :: Never do the thing.\n' > "$manifest"
 expect_refusal "a './'-prefixed path is refused, naming the real problem" \
   "must spell the path as git does"
 
 # ── "could not look" covers a decoding failure too ─────────────────────────
-# This escaped as a traceback with no annotation naming the file: the status was
-# right and the reader was given nothing to act on.
+# Uncaught, this escapes as a traceback with no annotation naming the file: the
+# status is right and the reader is given nothing to act on.
 printf 'AGENTS.md :: Never do the thing.\n' > "$manifest"
 printf 'policy \351 latin-1\n' > "$work/AGENTS.md"
 expect_refusal "a file that is not UTF-8 is reported, not raised" \
