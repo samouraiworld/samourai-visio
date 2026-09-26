@@ -20,22 +20,17 @@ When creating an issue, please provide the following details:
 
 ## Commit Message Format
 
-All commit messages must adhere to the following format:
+All commit messages must be one line, with no body or trailers. Use this format:
 
-`<gitmoji>(type) title description`
+`<gitmoji>(scope) concise reason`
 
 *   <**gitmoji**>: Use a gitmoji to represent the purpose of the commit. For example, ✨ for adding a new feature or 🔥 for removing something, see the list here: <https://gitmoji.dev/>.
-*   **(type)**: Describe the type of change. Common types include `backend`, `frontend`, `CI`, `docker` etc...
-*   **title**: A short, descriptive title for the change, starting with a lowercase character.
-*   **description**: Include additional details about what was changed and why.
+*   **(scope)**: Name the area changed, such as `backend`, `frontend`, `ci` or `docker`.
+*   **concise reason**: Start with a lowercase character and explain why the change is needed.
 
 ### Example Commit Message
 
-```
-✨(frontend) add user authentication logic 
-
-Implemented login and signup features, and integrated OAuth2 for social login.
-```
+`🔒️(ci) bound attribution checks on develop`
 
 ## Changelog Update
 
