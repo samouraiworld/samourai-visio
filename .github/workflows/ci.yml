@@ -269,9 +269,9 @@ jobs:
 
       - name: Start MinIO
         env:
-          # Docker Hub refuses minio/minio anonymously; quay.io serves the same
-          # release. Pinned to the manifest list, which carries linux/amd64.
-          MINIO_IMAGE: quay.io/minio/minio@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
+          # The official image is unavailable. This CI-only mirror carries the
+          # same MinIO release and mc client, pinned to a multi-platform digest.
+          MINIO_IMAGE: docker.io/tobi312/minio:RELEASE.2025-09-07T16-13-09Z@sha256:e2226dea4b9aef896db02f7396102d48eb58cd339d930332e3d8bdac80012a78
         run: |
           docker pull "$MINIO_IMAGE"
           docker run -d --name minio \
