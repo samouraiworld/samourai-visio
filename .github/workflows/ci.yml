@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+      - develop
+    tags:
+      - "**"
   pull_request:
     branches:
       - "**"
+    types: [opened, synchronize, reopened, edited]
 permissions:
   contents: read
 
@@ -24,6 +28,104 @@ jobs:
         run: .github/scripts/check-vendor-attribution.selftest.sh
       - name: No tracked file carries assistant attribution
         run: python3 .github/scripts/check-vendor-attribution.py .
+
+  metadata-attribution:
+    timeout-minutes: 10
+    name: Vendor attribution (metadata)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository and commit history
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - name: Prove these checks can fail
+        run: .github/scripts/check-vendor-attribution.selftest.sh
+      - name: The branch name carries no attribution
+        env:
+          REF: ${{ github.event.pull_request.head.ref || github.ref_name }}
+        run: >-
+          printf '%s' "$REF" |
+          python3 .github/scripts/check-vendor-attribution.py --text "branch name"
+      - name: No commit message on this branch carries attribution
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          PUSHED: ${{ github.sha }}
+          APP_BRANCH: develop
+        run: |
+          # Pull requests scan their authored commits, not GitHub's merge commit.
+          # Pushes scan every newly reachable commit. A newly created tag has
+          # no previous tip, so compare it to the protected application branch.
+          # Refuse when a force push's previous tip cannot be read.
+          created=0000000000000000000000000000000000000000
+          if [ -n "$BASE" ]; then
+            set -- "$BASE..$HEAD_SHA"
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "$created" ]; then
+            if ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+              echo "::error::the previous tip $BEFORE is not in this clone, so none was scanned"
+              exit 1
+            fi
+            set -- "$BEFORE..$PUSHED"
+          elif [ -n "$BEFORE" ]; then
+            held="refs/remotes/origin/$APP_BRANCH"
+            if ! git rev-parse --verify --quiet "$held^{commit}" >/dev/null; then
+              echo "::error::$held is unavailable, so none was scanned"
+              exit 1
+            fi
+            unread="$(git rev-list "$PUSHED" --not "$held")"
+            if [ -n "$unread" ]; then
+              set -- "$PUSHED" --not "$held"
+            else
+              set -- -1 "$PUSHED"
+            fi
+          else
+            echo "::error::no commit range is available, so none was scanned"
+            exit 1
+          fi
+          git log --format=%B "$@" |
+            python3 .github/scripts/check-vendor-attribution.py \
+              --text "commit messages on this branch"
+      - name: The pull request title carries no attribution
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: >-
+          printf '%s' "$TITLE" |
+          python3 .github/scripts/check-vendor-attribution.py --text "pull request title"
+      - name: The pull request body carries no attribution
+        if: github.event_name == 'pull_request'
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: >-
+          printf '%s' "$BODY" |
+          python3 .github/scripts/check-vendor-attribution.py
+          --text "pull request body" --allow-empty
+      - name: No tag on this commit carries attribution
+        if: github.ref_type == 'tag'
+        run: >-
+          git tag --points-at HEAD --format='%(refname:strip=2)%0a%(contents)' |
+          python3 .github/scripts/check-vendor-attribution.py
+          --text "tags on this commit"
+
+  required-clauses:
+    timeout-minutes: 10
+    name: Required clauses
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prove the clause check can fail
+        run: .github/scripts/check-required-clauses.selftest.sh
+      - name: Every required clause remains present
+        run: python3 .github/scripts/check-required-clauses.py .
 
   lint-git:
     runs-on: ubuntu-latest

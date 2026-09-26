@@ -15,6 +15,7 @@ and this project adheres to
 
 ### Changed
 
+- 🔒️(ci) check develop metadata and required policy clauses
 - 🔒️(ci) bound attribution checks and honor one-line commits
 - ⬆️(dev) pin LiveKit server to v1.13.6
 - 🔒️(assets) strip editor metadata from tracked PNG files
