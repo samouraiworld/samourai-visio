@@ -24,22 +24,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Prove required verdict can fail
+        run: .github/scripts/check-required-gates.selftest.sh
       - name: Require metadata and clause gates to pass
         env:
           RESULTS: ${{ toJSON(needs) }}
-        run: |
-          printf '%s' "$RESULTS" | python3 -c '
-          import json, sys
-          results = json.load(sys.stdin)
-          expected = {"metadata-attribution", "required-clauses"}
-          bad = sorted(name for name in expected if results.get(name, {}).get("result") != "success")
-          if bad:
-              print("::error::required gates did not pass: " + ", ".join(bad))
-              sys.exit(1)
-          print("metadata and clause gates passed")
-          '
-      - name: Checkout repository
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        run: printf '%s' "$RESULTS" | python3 .github/scripts/check-required-gates.py
       - name: Prove this check can fail
         run: .github/scripts/check-vendor-attribution.selftest.sh
       - name: No tracked file carries assistant attribution
