@@ -19,9 +19,25 @@ jobs:
     timeout-minutes: 10
     name: Vendor attribution
     runs-on: ubuntu-latest
+    needs: [metadata-attribution, required-clauses]
+    if: always()
     permissions:
       contents: read
     steps:
+      - name: Require metadata and clause gates to pass
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s' "$RESULTS" | python3 -c '
+          import json, sys
+          results = json.load(sys.stdin)
+          expected = {"metadata-attribution", "required-clauses"}
+          bad = sorted(name for name in expected if results.get(name, {}).get("result") != "success")
+          if bad:
+              print("::error::required gates did not pass: " + ", ".join(bad))
+              sys.exit(1)
+          print("metadata and clause gates passed")
+          '
       - name: Checkout repository
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Prove this check can fail
