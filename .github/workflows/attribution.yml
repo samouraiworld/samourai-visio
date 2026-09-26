@@ -50,6 +50,7 @@ concurrency:
 
 jobs:
   attribution:
+    timeout-minutes: 10
     name: Vendor attribution (tracked files)
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +69,7 @@ jobs:
         run: python3 .github/scripts/check-vendor-attribution.py .
 
   metadata-attribution:
+    timeout-minutes: 10
     name: Vendor attribution (the surfaces that are not files)
     runs-on: ubuntu-latest
     defaults:
