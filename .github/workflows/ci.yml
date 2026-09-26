@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   attribution:
+    timeout-minutes: 10
     name: Vendor attribution
     runs-on: ubuntu-latest
     permissions:
