@@ -20,6 +20,7 @@ and this project adheres to
 
 ### Fixed
 
+- ⬆️(ci) restore backend tests with an available MinIO image mirror
 - 🐛(ci) judge the print-statement rule on added lines only
 - 🐛(frontend) keep the sending resolution picked while the camera is off #1667
 
