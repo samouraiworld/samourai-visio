@@ -1,0 +1,5 @@
+# Policy prose that Visio develop must retain. One file and fragment per row.
+# Retire a clause explicitly when the policy changes.
+CONTRIBUTING.md :: All commit messages must be one line, with no body or trailers.
+.github/scripts/vendor-attribution-allowlist.txt :: Deliberately empty, and it should stay that way.
+.github/scripts/vendor-attribution-allowlist.txt :: forbidden is attribution of the assistant used to produce the work
