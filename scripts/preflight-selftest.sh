@@ -203,6 +203,8 @@ mutate 's|^    location ~ \^/admin .*||' nginx/default.conf.template "admin 404 
 # shellcheck disable=SC2016  # literal nginx variable names inside a sed script
 mutate 's|\$cookie_meet_sessionid|$cookie_sessionid|' nginx/default.conf.template "share-card redirect keyed on the wrong session cookie name"
 mutate 's|^    add_header Content-Security-Policy .*||' nginx/default.conf.template "CSP frame-ancestors header dropped"
+mutate_re 's|https://memba.club|https://other.example|' nginx/default.conf.template \
+  'room embedding policy differs' "room framing is widened to an unapproved origin"
 mutate 's|^        proxy_hide_header Strict-Transport-Security;||' nginx/default.conf.template "HSTS no longer hidden from upstream (the 60s policy would win)"
 # The header set Django also emits. Each mutation targets one line of one
 # scope, so the indentation anchors matter: 4 spaces is the server level, 8
@@ -394,7 +396,17 @@ class H(http.server.BaseHTTPRequestHandler):
     def sec(self, hsts=True):
         if hsts:
             self.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
-        self.send_header("Content-Security-Policy", "frame-ancestors 'self'")
+        mode = self.mode()
+        room = self.path == "/abc-defg-hij"
+        ancestors = "'self' https://memba.club" if room and mode != "room-self-only" else "'self'"
+        if ((self.path == "/" and mode == "root-open")
+            or (self.path == "/accueil/" and mode == "landing-open")
+            or (self.path == "/api/v1.0/config/" and mode == "api-open")
+            or (self.path == "/abc-defg-hij/" and mode == "near-match-open")):
+            ancestors += " https://memba.club"
+        self.send_header("Content-Security-Policy", f"frame-ancestors {ancestors}")
+        if room and mode == "room-xfo":
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "same-origin")
 
@@ -465,6 +477,12 @@ else
     : > "$WORK/stub.mode"
   }
   emutate root-no-hsts        'the / redirect ships'      "HSTS missing from the / redirect (the if-block scope bug, as served)"
+  emutate root-open           'the / redirect has unexpected frame ancestors' "the landing redirect can be framed outside Visio"
+  emutate room-self-only      'room invitation cannot be framed' "room path loses the Memba OS allowlist"
+  emutate room-xfo            'room invitation cannot be framed' "room path gains conflicting X-Frame-Options"
+  emutate landing-open        '/accueil/ has unexpected frame ancestors' "landing page becomes frameable from Memba OS"
+  emutate api-open            '/api/v1.0/config/ has unexpected frame ancestors' "API response becomes frameable from Memba OS"
+  emutate near-match-open     '/abc-defg-hij/ has unexpected frame ancestors' "near-match room path becomes frameable from Memba OS"
   emutate api-dup-referrer    'duplicate or conflicting'  "a second, looser Referrer-Policy on /api (the browser takes the last)"
   emutate securitytxt-html    'security.txt answers'      "security.txt served as text/html (the SPA fallback shape)"
   emutate securitytxt-missing 'security.txt answers'      "security.txt absent (404)"

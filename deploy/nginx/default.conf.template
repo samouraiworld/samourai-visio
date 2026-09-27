@@ -69,6 +69,16 @@ limit_req_zone $visio_mint_room_key  zone=visio_mint_room:10m  rate=2r/s;
 limit_req_zone $visio_mint_lobby_key zone=visio_mint_lobby:10m rate=30r/s;
 # SAMOURAI-END
 
+# SAMOURAI-BEGIN Memba OS room embedding
+# Room URLs are the only Visio documents that Memba OS frames. Keep the
+# landing, account and admin surfaces unavailable to other origins. Match
+# only the exact 3-4-3 invitation path; query strings are not part of $uri.
+map $uri $visio_frame_ancestors {
+    default "'self'";
+    "~^/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}$" "'self' https://memba.club";
+}
+# SAMOURAI-END
+
 upstream meet_backend {
     server ${BACKEND_INTERNAL_HOST}:8000 fail_timeout=0;
 }
@@ -96,12 +106,9 @@ server {
     # advertising `preload`. Verified live 2026-07-25. Hide the upstream one in
     # the proxy blocks below and emit exactly one policy here.
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-    # frame-ancestors, not X-Frame-Options: it is the standard, and CSP wins
-    # where both are understood. TRADE-OFF: this blocks embedding in third-party
-    # pages, which disables upstream's /sdk/create-popup and /sdk/create-button
-    # embed routes. We do not use them; if that ever changes, relax this to a
-    # per-location policy rather than dropping it wholesale.
-    add_header Content-Security-Policy "frame-ancestors 'self'" always;
+    # The map permits only Memba OS to frame exact room invitation paths.
+    # All other pages stay self-only; never replace this with a wildcard.
+    add_header Content-Security-Policy "frame-ancestors $visio_frame_ancestors" always;
     add_header X-Content-Type-Options "nosniff" always;
     # Room slugs ARE the access secret, so a full-URL Referer must never leave
     # this origin — a shared room link in a Referer header is a room invite.
@@ -287,7 +294,7 @@ server {
         if ($cookie_meet_sessionid = "") {
             add_header Cache-Control "no-store" always;
             add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
-            add_header Content-Security-Policy "frame-ancestors 'self'" always;
+            add_header Content-Security-Policy "frame-ancestors $visio_frame_ancestors" always;
             add_header X-Content-Type-Options "nosniff" always;
             add_header Referrer-Policy "same-origin" always;
             return 302 /accueil/;
