@@ -1,28 +1,16 @@
 # samourai-visio
 
-Self-hosted [La Suite Meet](https://github.com/suitenumerique/meet) for **visio.samourai.app** — free video conferencing, open to everyone, run by Samouraï Coop.
+Samouraï Visio offers free public video conferencing at
+**visio.samourai.app**, powered by
+[La Suite Meet](https://github.com/suitenumerique/meet).
 
-Upstream is MIT-licensed and built by [DINUM](https://www.numerique.gouv.fr/). This repo contains **only our deployment configuration and theme** — no fork of the application.
+Upstream is MIT-licensed and built by [DINUM](https://www.numerique.gouv.fr/).
+This `main` branch contains deployment configuration and templates, a runtime
+theme, public landing and legal pages, and validation scripts. It uses
+unmodified upstream images and does not contain an application fork. The
+separate `develop` branch contains application source code.
 
 ---
-
-## Where this sits
-
-`samourai.app` is the Samouraï product hub, unified by a single Clerk SSO org.
-
-| Subdomain | Product | Repo | Status |
-|---|---|---|---|
-| `clerk.` / `accounts.` | **Clerk auth — shared by everything** | — | live ⚠️ do not touch |
-| `memba.` | Memba | `samouraiworld/memba` | live |
-| `zentai.` | Zentai | `Code/Zentai` | deployed (Scaleway) |
-| `visio.` | **La Suite Meet** | **this repo** | **live** (free public instance) |
-
-Related but separate:
-
-| Path | What | Note |
-|---|---|---|
-| `Code/La Suite Numerique/` | 32 upstream clones | **read-only reference.** Don't put our work here |
-| `Code/reportz.dev/reportz` | Contributors dashboard (Gnolove fork) | own repo, unrelated deploy |
 
 ## Layout
 
