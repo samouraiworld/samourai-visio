@@ -634,6 +634,16 @@ files-without-a-URL case it is designed to catch.
 > `check-upstream-contract.sh` pins the template against upstream so gateway
 > drift cannot ship silently on a version bump (§10).
 
+The gateway permits `https://memba.club` to frame only exact 3-4-3 room
+invitation paths. Its landing, account, API and admin paths retain
+`frame-ancestors 'self'`. When updating `deploy/nginx/default.conf.template`,
+copy it to the host as described above and run `scripts/preflight.sh config`
+before applying the stack, then `scripts/preflight.sh edge` against the live
+site. The edge check verifies the room response has the Memba allowlist and no
+conflicting `X-Frame-Options`. Finally, join a real room inside the deployed
+Memba OS preview with guest camera and microphone access before releasing the
+Memba OS Meet window.
+
 ### No third-party resource, and it is enforced
 
 The landing and the privacy policy both state that the service loads nothing

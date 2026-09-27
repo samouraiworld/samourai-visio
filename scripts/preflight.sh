@@ -338,6 +338,22 @@ phase_config() {
       bad "the / redirect drops security headers (missing:${rmiss:- the whole location = / block})" \
           "add_header inside an if-block inherits nothing from the server level; the 302 would ship no HSTS"
     fi
+    if python3 - <<'PYEMBED'
+from pathlib import Path
+text = Path('nginx/default.conf.template').read_text()
+policy = '''map $uri $visio_frame_ancestors {
+    default "'self'";
+    "~^/[a-z0-9]{3}-[a-z0-9]{4}-[a-z0-9]{3}$" "'self' https://memba.club";
+}'''
+header = 'add_header Content-Security-Policy "frame-ancestors $visio_frame_ancestors" always;'
+raise SystemExit(0 if policy in text and text.count(header) == 2 else 1)
+PYEMBED
+    then
+      ok "only exact room paths allow Memba OS as a frame ancestor"
+    else
+      bad "room embedding policy differs from the exact Memba OS allowlist" \
+          "keep all non-room pages self-only and both CSP header scopes on the same mapped value"
+    fi
     # security.txt (RFC 9116) answered from the template, and everything else
     # under /.well-known/ a 404 — the SPA fallback would answer 200 text/html
     # for any such path, making a missing file look like a served one.
@@ -1080,6 +1096,35 @@ edge_headers() {
     bad "the / redirect ships an incomplete header set (missing:${rmiss:- none}; HSTS x${rhn}, max-age=${rmax:-none})" \
         "the gateway's location = / if-block must repeat the server-level headers; add_header inherits nothing there"
   fi
+  local root_csp; root_csp="$(printf '%s\n' "$rh" | grep -i '^content-security-policy:' | cut -d: -f2- | sed 's/^ *//')"
+  if [ "$root_csp" = "frame-ancestors 'self'" ]; then
+    ok "the / redirect stays self-only for framing"
+  else
+    bad "the / redirect has unexpected frame ancestors: ${root_csp:-none}" \
+        "only exact room invitation paths should permit Memba OS embedding"
+  fi
+
+  local roomh; roomh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin/abc-defg-hij" 2>/dev/null | tr -d '\r')"
+  local roomcsp; roomcsp="$(printf '%s\n' "$roomh" | grep -i '^content-security-policy:' | cut -d: -f2- | sed 's/^ *//')"
+  local roomxfo; roomxfo="$(printf '%s\n' "$roomh" | grep -ci '^x-frame-options:')"
+  if printf '%s\n' "$roomh" | grep -qE '^HTTP/[^ ]+ 200 ' &&
+     [ "$roomcsp" = "frame-ancestors 'self' https://memba.club" ] && [ "$roomxfo" = "0" ]; then
+    ok "room invitations allow Memba OS framing with no X-Frame-Options conflict"
+  else
+    bad "room invitation cannot be framed only by Memba OS (CSP: ${roomcsp:-none}; XFO x${roomxfo})" \
+        "the room path must answer 200 with a single exact frame-ancestors allowlist and no X-Frame-Options"
+  fi
+  local self_path selfh selfcsp
+  for self_path in /accueil/ /api/v1.0/config/ /abc-defg-hij/; do
+    selfh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin$self_path" 2>/dev/null | tr -d '\r')"
+    selfcsp="$(printf '%s\n' "$selfh" | grep -i '^content-security-policy:' | cut -d: -f2- | sed 's/^ *//')"
+    if [ "$selfcsp" = "frame-ancestors 'self'" ]; then
+      ok "$self_path stays self-only for framing"
+    else
+      bad "$self_path has unexpected frame ancestors: ${selfcsp:-none}" \
+          "landing, API and near-match room paths must not be framed by Memba OS"
+    fi
+  done
 
   # ── /api: Django sets these two as well; each must arrive exactly once ───
   # Browsers take the LAST Referrer-Policy they see, so a second, looser
