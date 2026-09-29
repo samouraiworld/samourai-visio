@@ -222,7 +222,9 @@ class RoomViewSet(
         else:
             data = self.get_serializer(instance).data
 
-        return drf_response.Response(data)
+        response = drf_response.Response(data)
+        LobbyService.prepare_response(response, request)
+        return response
 
     def list(self, request, *args, **kwargs):
         """Limit listed rooms to the ones related to the authenticated user."""
@@ -436,7 +438,7 @@ class RoomViewSet(
             **serializer.validated_data,
         )
         response = drf_response.Response({**participant.to_dict(), "livekit": livekit})
-        lobby_service.prepare_response(response, participant.id)
+        lobby_service.prepare_response(response, request)
 
         return response
 

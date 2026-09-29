@@ -22,6 +22,7 @@ and this project adheres to
 
 - ⬆️(ci) restore backend tests with an available MinIO image mirror
 - 🐛(ci) judge the print-statement rule on added lines only
+- 🔒️(backend) sign guest identities and scope them to each room
 
 ## [1.32.1] - 2026-09-25
 
