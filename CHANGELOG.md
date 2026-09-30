@@ -11,6 +11,7 @@ and this project adheres to
 ### Added
 
 - ✅(frontend) add vitest so the frontend can carry unit tests
+- ✨(fullstack) split a meeting into breakout rooms and bring everyone back
 
 ### Changed
 

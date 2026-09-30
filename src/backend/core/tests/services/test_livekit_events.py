@@ -11,6 +11,7 @@ import pytest
 from livekit.api import EgressStatus
 
 from core.factories import RecordingFactory, RoomFactory
+from core.models import BreakoutSession, BreakoutSessionStatusChoices
 from core.recording.enums import RecordingWorkerEvent
 from core.recording.services.recording_events import RecordingEventsService
 from core.services.livekit_events import (
@@ -914,3 +915,43 @@ def test_participant_left_without_identity_is_ignored(mock_delete, service, sett
 
     service._handle_participant_left(data)  # pylint: disable=protected-access
     mock_delete.assert_not_called()
+
+
+@mock.patch.object(api.WebhookReceiver, "receive")
+@mock.patch.object(LiveKitEventsService, "_handle_room_finished")
+@mock.patch.object(LiveKitEventsService, "_handle_room_started")
+def test_receive_ignores_breakout_room(
+    mock_handle_room_started, mock_handle_room_finished, mock_receive, service
+):
+    """A breakout room is no meeting: its events are acknowledged and ignored."""
+    mock_request = mock.MagicMock()
+    mock_request.headers = {"Authorization": "test_token"}
+    mock_data = mock.MagicMock()
+    mock_data.room.name = f"breakout_{uuid.uuid4()}_0"
+    mock_data.event = "room_started"
+    mock_receive.return_value = mock_data
+
+    service.receive(mock_request)
+
+    mock_handle_room_started.assert_not_called()
+    mock_handle_room_finished.assert_not_called()
+
+
+@mock.patch.object(LobbyService, "clear_room_cache")
+@mock.patch.object(SIPManagement, "delete_dispatch_rule")
+def test_handle_room_finished_keeps_lobby_during_breakout(
+    mock_delete_dispatch_rule, mock_clear_cache, service
+):
+    """Admissions outlive the main room while its people are in breakout rooms."""
+    room = RoomFactory()
+    session = BreakoutSession.objects.create(room=room)
+    mock_data = mock.MagicMock()
+    mock_data.room.name = str(room.id)
+
+    service._handle_room_finished(mock_data)
+    mock_clear_cache.assert_not_called()
+
+    session.status = BreakoutSessionStatusChoices.CLOSED
+    session.save()
+    service._handle_room_finished(mock_data)
+    mock_clear_cache.assert_called_once_with(room.id)

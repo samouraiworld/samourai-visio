@@ -335,7 +335,8 @@
         "exit": "Stop volledig scherm stand"
       },
       "support": "Contact ondersteuning",
-      "documentation": "Documentatie"
+      "documentation": "Documentatie",
+      "breakout": "Aparte ruimtes"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Opnemen",
       "admin": "Beheerdersbediening",
       "tools": "Meer tools",
-      "info": "Vergaderinformatie"
+      "info": "Vergaderinformatie",
+      "breakout": "Aparte ruimtes"
     },
     "content": {
       "participants": "deelnemers",
@@ -433,7 +435,8 @@
       "transcript": "transcriberen",
       "admin": "beheerdersbediening",
       "tools": "meer tools",
-      "info": "vergaderinformatie"
+      "info": "vergaderinformatie",
+      "breakout": "aparte ruimtes"
     },
     "closeButton": "Verberg {{content}} (Escape)",
     "escapeHint": "Druk op Escape om te sluiten"
@@ -824,5 +827,30 @@
   },
   "participantTile": {
     "screenShare": "{{name}} scherm"
+  },
+  "breakout": {
+    "roomName": "Ruimte {{number}}",
+    "error": "De actie is mislukt. Probeer het opnieuw.",
+    "setup": {
+      "roomCount": "Aantal ruimtes",
+      "unassignedOption": "Niet toegewezen",
+      "nobody": "Nog niemand om toe te wijzen",
+      "unassigned_one": "{{count}} persoon niet toegewezen",
+      "unassigned_other": "{{count}} personen niet toegewezen",
+      "allAssigned": "Iedereen is toegewezen",
+      "shuffle": "Willekeurig toewijzen",
+      "assign": "Ruimte voor {{name}}",
+      "open": "Ruimtes openen"
+    },
+    "active": {
+      "empty": "Niemand toegewezen",
+      "close": "Ruimtes sluiten"
+    },
+    "participant": {
+      "currentRoom": "Je bent in {{room}}",
+      "moving": "Naar {{room}}…",
+      "returning": "Terug naar de hoofdvergadering…",
+      "moveFailed": "Je kon niet naar je ruimte worden verplaatst"
+    }
   }
 }

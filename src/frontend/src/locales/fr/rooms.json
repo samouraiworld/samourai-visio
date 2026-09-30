@@ -335,7 +335,8 @@
         "exit": "Quitter le mode plein écran"
       },
       "support": "Contacter l'aide",
-      "documentation": "Documentation"
+      "documentation": "Documentation",
+      "breakout": "Salles de sous-groupe"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Enregistrer",
       "admin": "Commandes de l'organisateur",
       "tools": "Outils de réunion",
-      "info": "Informations sur la réunion"
+      "info": "Informations sur la réunion",
+      "breakout": "Salles de sous-groupe"
     },
     "content": {
       "participants": "les participants",
@@ -433,7 +435,8 @@
       "screenRecording": "enregistrer",
       "admin": "commandes de l'organisateur",
       "tools": "outils de réunion",
-      "info": "informations sur la réunion"
+      "info": "informations sur la réunion",
+      "breakout": "salles de sous-groupe"
     },
     "closeButton": "Masquer {{content}} (Échap)",
     "escapeHint": "Appuyez sur Échap pour fermer"
@@ -824,5 +827,30 @@
   },
   "participantTile": {
     "screenShare": "Écran de {{name}}"
+  },
+  "breakout": {
+    "roomName": "Salle {{number}}",
+    "error": "L'action a échoué. Veuillez réessayer.",
+    "setup": {
+      "roomCount": "Nombre de salles",
+      "unassignedOption": "Non assigné",
+      "nobody": "Personne à répartir pour l'instant",
+      "unassigned_one": "{{count}} personne non assignée",
+      "unassigned_other": "{{count}} personnes non assignées",
+      "allAssigned": "Tout le monde est assigné",
+      "shuffle": "Répartir aléatoirement",
+      "assign": "Salle de {{name}}",
+      "open": "Ouvrir les salles"
+    },
+    "active": {
+      "empty": "Personne n'est assigné",
+      "close": "Fermer les salles"
+    },
+    "participant": {
+      "currentRoom": "Vous êtes dans {{room}}",
+      "moving": "Déplacement vers {{room}}…",
+      "returning": "Retour à la réunion principale…",
+      "moveFailed": "Impossible de vous déplacer vers votre salle"
+    }
   }
 }

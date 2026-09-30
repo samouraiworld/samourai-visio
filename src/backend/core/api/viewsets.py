@@ -205,6 +205,9 @@ class RoomViewSet(
             if not settings.ALLOW_UNREGISTERED_ROOMS:
                 raise
             slug = slugify(self.kwargs["pk"])
+            if slug.startswith(models.BreakoutRoom.LIVEKIT_ROOM_PREFIX):
+                # A breakout room's pass comes only from its assignment-checked join.
+                raise
             username = request.query_params.get("username", None)
             data = {
                 "id": None,
