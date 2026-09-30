@@ -335,7 +335,8 @@
         "exit": "Salir del modo de pantalla completa"
       },
       "support": "Contactar con el soporte",
-      "documentation": "Documentación"
+      "documentation": "Documentación",
+      "breakout": "Salas para grupos"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Grabar",
       "admin": "Controles del organizador",
       "tools": "Herramientas de reunión",
-      "info": "Información sobre la reunión"
+      "info": "Información sobre la reunión",
+      "breakout": "Salas para grupos"
     },
     "content": {
       "participants": "los participantes",
@@ -433,7 +435,8 @@
       "screenRecording": "grabar",
       "admin": "controles del organizador",
       "tools": "herramientas de reunión",
-      "info": "información sobre la reunión"
+      "info": "información sobre la reunión",
+      "breakout": "salas para grupos"
     },
     "closeButton": "Ocultar {{content}}"
   },
@@ -479,7 +482,7 @@
       "destination": "Se creará un nuevo documento en",
       "destinationUnknown": "Se creará un nuevo documento",
       "language": "Idioma de la reunión:",
-      "recording": "Iniciar también una grabación"
+      "recording": "Iniciar también una grabación de vídeo"
     },
     "button": {
       "start": "Empezar a transcribir la reunión",
@@ -755,6 +758,24 @@
     "muteParticipant": "Silenciar el micrófono de {{name}}",
     "fullScreen": "Pantalla completa"
   },
+  "screenShareZoom": {
+    "toolbarLabel": "Controles de zoom de la pantalla compartida",
+    "zoomIn": "Acercar",
+    "zoomInWithShortcut": "Acercar ({{shortcut}})",
+    "zoomOut": "Alejar",
+    "zoomOutWithShortcut": "Alejar ({{shortcut}})",
+    "wheelShortcut": "Control más rueda del ratón",
+    "wheelShortcutMac": "⌘+rueda del ratón",
+    "wheelShortcutHint": "Atajo: Control más rueda del ratón para acercar o alejar.",
+    "wheelShortcutHintMac": "Atajo: Comando más rueda del ratón para acercar o alejar.",
+    "fitToWindow": "Ajustar a la ventana",
+    "fullScreen": "Pantalla completa",
+    "exitFullScreen": "Salir de pantalla completa",
+    "currentZoomLevel": "Zoom {{level}} %",
+    "panHint": "Zoom {{level}} %. Arrastra con el ratón, o vuelve a la pantalla compartida y usa las flechas para moverte por la imagen.",
+    "fullScreenEntered": "Pantalla completa activada",
+    "fullScreenExited": "Pantalla completa desactivada"
+  },
   "shortcutsPanel": {
     "title": "Atajos de teclado",
     "categories": {
@@ -774,7 +795,11 @@
       "raise-hand": "Levantar o bajar la mano",
       "toggle-chat": "Mostrar/Ocultar el chat",
       "toggle-participants": "Mostrar/Ocultar los participantes",
-      "open-shortcuts-settings": "Abrir los ajustes de los atajos"
+      "open-shortcuts-settings": "Abrir los ajustes de los atajos",
+      "zoom-in": "Acercar una pantalla compartida",
+      "zoom-out": "Alejar una pantalla compartida",
+      "zoom-reset": "Restablecer el zoom de la pantalla compartida",
+      "zoom-pan": "Moverse por una pantalla compartida ampliada"
     },
     "sr": {
       "control": "Control",
@@ -797,5 +822,30 @@
   },
   "participantTile": {
     "screenShare": "Pantalla de {{name}}"
+  },
+  "breakout": {
+    "roomName": "Sala {{number}}",
+    "error": "La acción ha fallado. Inténtalo de nuevo.",
+    "setup": {
+      "roomCount": "Número de salas",
+      "unassignedOption": "Sin asignar",
+      "nobody": "Todavía no hay nadie para asignar",
+      "unassigned_one": "{{count}} persona sin asignar",
+      "unassigned_other": "{{count}} personas sin asignar",
+      "allAssigned": "Todos están asignados",
+      "shuffle": "Asignar al azar",
+      "assign": "Sala para {{name}}",
+      "open": "Abrir salas"
+    },
+    "active": {
+      "empty": "Nadie asignado",
+      "close": "Cerrar salas"
+    },
+    "participant": {
+      "currentRoom": "Estás en {{room}}",
+      "moving": "Pasando a {{room}}…",
+      "returning": "Volviendo a la reunión principal…",
+      "moveFailed": "No se pudo moverte a tu sala"
+    }
   }
 }

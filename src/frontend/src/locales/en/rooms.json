@@ -335,7 +335,8 @@
         "exit": "Exit fullscreen mode"
       },
       "support": "Contact support",
-      "documentation": "Documentation"
+      "documentation": "Documentation",
+      "breakout": "Breakout rooms"
     }
   },
   "effects": {
@@ -423,7 +424,8 @@
       "screenRecording": "Record",
       "admin": "Host settings",
       "tools": "More tools",
-      "info": "Meeting information"
+      "info": "Meeting information",
+      "breakout": "Breakout rooms"
     },
     "content": {
       "participants": "participants",
@@ -433,7 +435,8 @@
       "screenRecording": "record",
       "admin": "host settings",
       "tools": "more tools",
-      "info": "meeting information"
+      "info": "meeting information",
+      "breakout": "breakout rooms"
     },
     "closeButton": "Hide {{content}} (Escape)",
     "escapeHint": "Press Escape to close"
@@ -480,7 +483,7 @@
       "destination": "A new document will be created on",
       "destinationUnknown": "A new document will be created",
       "language": "Meeting language:",
-      "recording": "Also start a recording"
+      "recording": "Also start a video recording"
     },
     "button": {
       "start": "Start transcribing the meeting",
@@ -756,6 +759,24 @@
     "muteParticipant": "Mute {{name}}",
     "fullScreen": "Full screen"
   },
+  "screenShareZoom": {
+    "toolbarLabel": "Screen share zoom controls",
+    "zoomIn": "Zoom in",
+    "zoomInWithShortcut": "Zoom in ({{shortcut}})",
+    "zoomOut": "Zoom out",
+    "zoomOutWithShortcut": "Zoom out ({{shortcut}})",
+    "wheelShortcut": "Control plus scroll wheel",
+    "wheelShortcutMac": "⌘+scroll wheel",
+    "wheelShortcutHint": "Shortcut: Control plus scroll wheel to zoom in or out.",
+    "wheelShortcutHintMac": "Shortcut: Command plus scroll wheel to zoom in or out.",
+    "fitToWindow": "Fit to window",
+    "fullScreen": "Full screen",
+    "exitFullScreen": "Exit full screen",
+    "currentZoomLevel": "Zoom {{level}} %",
+    "panHint": "Zoom {{level}} %. Drag with mouse, or move focus back to the screen share and use arrow keys to navigate the picture.",
+    "fullScreenEntered": "Full screen enabled",
+    "fullScreenExited": "Full screen disabled"
+  },
   "shortcutsPanel": {
     "title": "Keyboard shortcuts",
     "categories": {
@@ -775,7 +796,11 @@
       "raise-hand": "Raise or lower hand",
       "toggle-chat": "Toggle chat",
       "toggle-participants": "Toggle participants",
-      "open-shortcuts-settings": "Open shortcuts settings"
+      "open-shortcuts-settings": "Open shortcuts settings",
+      "zoom-in": "Zoom in on a shared screen",
+      "zoom-out": "Zoom out on a shared screen",
+      "zoom-reset": "Reset the shared screen zoom",
+      "zoom-pan": "Move around a zoomed shared screen"
     },
     "sr": {
       "control": "Control",
@@ -785,10 +810,14 @@
       "shift": "Shift",
       "plus": "plus",
       "hold": "Hold {{key}}",
+      "arrows": "Arrow keys",
+      "plusKey": "Plus key",
+      "minusKey": "Minus key",
       "noShortcut": "No shortcut"
     },
     "visual": {
-      "hold": "Hold {{key}}"
+      "hold": "Hold {{key}}",
+      "arrows": "↑ ↓ ← →"
     }
   },
   "fullScreenWarning": {
@@ -798,5 +827,30 @@
   },
   "participantTile": {
     "screenShare": "{{name}}'s screen"
+  },
+  "breakout": {
+    "roomName": "Room {{number}}",
+    "error": "The action failed. Please try again.",
+    "setup": {
+      "roomCount": "Number of rooms",
+      "unassignedOption": "Unassigned",
+      "nobody": "Nobody to assign yet",
+      "unassigned_one": "{{count}} person unassigned",
+      "unassigned_other": "{{count}} people unassigned",
+      "allAssigned": "Everyone is assigned",
+      "shuffle": "Assign randomly",
+      "assign": "Room for {{name}}",
+      "open": "Open rooms"
+    },
+    "active": {
+      "empty": "Nobody assigned",
+      "close": "Close rooms"
+    },
+    "participant": {
+      "currentRoom": "You are in {{room}}",
+      "moving": "Moving to {{room}}…",
+      "returning": "Returning to the main meeting…",
+      "moveFailed": "Could not move you to your room"
+    }
   }
 }
