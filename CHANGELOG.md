@@ -8,6 +8,10 @@ and this project adheres to
 
 ## [Unreleased]
 
+### Added
+
+- ✅(frontend) add vitest so the frontend can carry unit tests
+
 ### Changed
 
 - 🔒️(ci) check develop metadata and required policy clauses
