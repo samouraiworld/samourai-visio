@@ -1,15 +1,17 @@
 """Lobby Service"""
 
 import logging
-import uuid
+import secrets
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, FrozenSet, Optional, Sequence, Tuple
 from uuid import UUID
 
 from django.conf import settings
+from django.core import signing
 from django.core.cache import cache
 from django.utils import timezone
+from django.utils.crypto import salted_hmac
 
 from core import models, utils
 
@@ -85,6 +87,10 @@ class LobbyService:
     using cache for state management and LiveKit for real-time updates.
     """
 
+    GUEST_COOKIE_SALT = "meet.guest-capability.v1"
+    GUEST_IDENTITY_SALT = "meet.guest-identity.v1"
+    _REQUEST_CAPABILITY_ATTRIBUTE = "_meet_guest_capability"
+
     @staticmethod
     def _get_cache_key(room_id: UUID, participant_id: str) -> str:
         """Generate cache key for participant(s) data."""
@@ -131,22 +137,59 @@ class LobbyService:
         if participant_ids:
             self._redis().srem(self._get_index_key(room_id), *participant_ids)
 
-    @staticmethod
-    def _get_or_create_participant_id(request) -> str:
-        """Extract unique participant identifier from the request."""
-        return request.COOKIES.get(settings.LOBBY_COOKIE_NAME, str(uuid.uuid4()))
+    @classmethod
+    def read_guest_capability(cls, request) -> Optional[str]:
+        """Return the capability signed into the browser's cookie, if still valid.
 
-    @staticmethod
-    def prepare_response(response, participant_id):
-        """Set participant cookie if needed."""
-        if not response.cookies.get(settings.LOBBY_COOKIE_NAME):
-            response.set_cookie(
-                key=settings.LOBBY_COOKIE_NAME,
-                value=participant_id,
-                httponly=True,
-                secure=True,
-                samesite="Lax",
+        The signature is checked against the same age as the cookie, and both
+        are renewed together by prepare_response on every visit.
+        """
+        cookie_value = request.COOKIES.get(settings.LOBBY_COOKIE_NAME)
+        if not cookie_value:
+            return None
+        try:
+            return signing.loads(
+                cookie_value,
+                salt=cls.GUEST_COOKIE_SALT,
+                max_age=settings.SESSION_COOKIE_AGE,
             )
+        except signing.BadSignature:
+            return None
+
+    @classmethod
+    def get_or_create_participant_id(cls, request, room_id: UUID) -> str:
+        """Return the guest's identity in one room, issuing a capability if needed.
+
+        One capability per browser, never shown to anyone, gives a different
+        identity in every room, so one cookie serves every meeting.
+        """
+        capability = getattr(request, cls._REQUEST_CAPABILITY_ATTRIBUTE, None)
+        if capability is None:
+            capability = cls.read_guest_capability(request)
+            if capability is None:
+                capability = secrets.token_urlsafe(32)
+            setattr(request, cls._REQUEST_CAPABILITY_ATTRIBUTE, capability)
+        digest = salted_hmac(
+            cls.GUEST_IDENTITY_SALT, f"{room_id}:{capability}"
+        ).hexdigest()
+        return f"guest_{digest}"
+
+    @classmethod
+    def prepare_response(cls, response, request) -> None:
+        """Re-sign the capability used by this request into the guest cookie."""
+        capability = getattr(request, cls._REQUEST_CAPABILITY_ATTRIBUTE, None)
+        if capability is None:
+            return
+        # A token plus a Set-Cookie must never be served from a shared cache.
+        response["Cache-Control"] = "no-store"
+        response.set_cookie(
+            key=settings.LOBBY_COOKIE_NAME,
+            value=signing.dumps(capability, salt=cls.GUEST_COOKIE_SALT),
+            max_age=settings.SESSION_COOKIE_AGE,
+            httponly=True,
+            secure=True,
+            samesite="Lax",
+        )
 
     @staticmethod
     def can_bypass_lobby(room, user, role) -> bool:
@@ -194,7 +237,7 @@ class LobbyService:
         5. If denied, do nothing.
         """
 
-        participant_id = self._get_or_create_participant_id(request)
+        participant_id = self.get_or_create_participant_id(request, room.id)
         participant = self._get_participant(room.id, participant_id)
 
         room_id = str(room.id)
