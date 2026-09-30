@@ -54,6 +54,7 @@ export const BreakoutSetup = ({ roomId }: { roomId: string }) => {
   return (
     <>
       <Select
+        aria-label={t('setup.roomCount')}
         label={t('setup.roomCount')}
         items={ROOM_COUNTS.map((n) => ({ value: n, label: String(n) }))}
         selectedKey={roomCount}
@@ -133,7 +134,7 @@ export const BreakoutSetup = ({ roomId }: { roomId: string }) => {
       <Button
         variant="primary"
         fullWidth
-        isDisabled={open.isPending}
+        isDisabled={open.isPending || unassigned === people.length}
         onPress={() => open.mutate()}
       >
         {t('setup.open')}

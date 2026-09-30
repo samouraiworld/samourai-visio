@@ -849,7 +849,8 @@
     "participant": {
       "currentRoom": "Je bent in {{room}}",
       "moving": "Naar {{room}}…",
-      "returning": "Terug naar de hoofdvergadering…"
+      "returning": "Terug naar de hoofdvergadering…",
+      "moveFailed": "Je kon niet naar je ruimte worden verplaatst"
     }
   }
 }

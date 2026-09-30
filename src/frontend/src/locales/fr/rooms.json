@@ -849,7 +849,8 @@
     "participant": {
       "currentRoom": "Vous êtes dans {{room}}",
       "moving": "Déplacement vers {{room}}…",
-      "returning": "Retour à la réunion principale…"
+      "returning": "Retour à la réunion principale…",
+      "moveFailed": "Impossible de vous déplacer vers votre salle"
     }
   }
 }

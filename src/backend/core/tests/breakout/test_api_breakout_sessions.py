@@ -240,6 +240,44 @@ def test_api_breakout_sessions_create_signal_fails(livekit, owner_room, main_roo
     assert not models.BreakoutSession.objects.exists()
 
 
+def test_api_breakout_sessions_create_signal_times_out_after_landing(
+    livekit, owner_room
+):
+    """A signal write that times out is taken back, in case it landed."""
+    room, client = owner_room
+    livekit.room.update_room_metadata.side_effect = [TimeoutError, None]
+
+    response = client.post(url(room), payload(["alice"], ["bob"]), "json")
+
+    assert response.status_code == 503
+    assert livekit.room.update_room_metadata.await_count == 2
+    assert written_metadata(livekit) == {"access_level": "public"}
+    assert not models.BreakoutSession.objects.exists()
+
+
+def test_api_breakout_sessions_create_races_another_open(livekit, owner_room):
+    """An Open landing during this one's media server calls wins; this one is undone."""
+    room, client = owner_room
+    run = services._run  # pylint: disable=protected-access
+    competing = []
+
+    def run_then_compete(step, *args):
+        result = run(step, *args)
+        if step is services._create_rooms:  # pylint: disable=protected-access
+            competing.append(make_session(room, ["carol"]))
+        return result
+
+    with mock.patch.object(services, "_run", side_effect=run_then_compete):
+        response = client.post(url(room), payload(["alice"], ["bob"]), "json")
+
+    assert response.status_code == 409
+    created = {c.args[0].name for c in livekit.room.create_room.await_args_list}
+    deleted = {c.args[0].room for c in livekit.room.delete_room.await_args_list}
+    assert len(created) == 2 and deleted == created
+    assert list(models.BreakoutSession.objects.all()) == competing
+    livekit.room.update_room_metadata.assert_not_awaited()
+
+
 def test_api_breakout_sessions_media_server_call_is_bounded(livekit, owner_room):
     """A media server that never answers costs one deadline, not a worker."""
     room, client = owner_room

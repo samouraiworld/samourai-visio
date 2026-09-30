@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useMutation, useQuery } from '@tanstack/react-query'
 import { useRoomInfo } from '@livekit/components-react'
 import { useTranslation } from 'react-i18next'
 import { css } from '@/styled-system/css'
@@ -74,6 +74,7 @@ export const BreakoutPanel = () => {
     queryFn: () => fetchBreakoutSession(roomId as string),
     enabled: !!roomId,
     retry: false,
+    placeholderData: keepPreviousData,
   })
   // The list answers 404 with the flag off; the metadata still allows a close.
   const session: BreakoutSession | null =
@@ -82,7 +83,8 @@ export const BreakoutPanel = () => {
       ? { id: announced, status: 'active', rooms: [] }
       : null)
 
-  if (!roomId || isPending) return null
+  // A failed list with nothing announced: Open would fail as well, so no form.
+  if (!roomId || isPending || (isError && !session)) return null
 
   return (
     <Div

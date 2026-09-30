@@ -847,9 +847,10 @@
       "close": "Räume schließen"
     },
     "participant": {
-      "currentRoom": "Sie sind in {{room}}",
+      "currentRoom": "Du bist in {{room}}",
       "moving": "Wechsel zu {{room}}…",
-      "returning": "Rückkehr zur Hauptbesprechung…"
+      "returning": "Rückkehr zur Hauptbesprechung…",
+      "moveFailed": "Du konntest nicht in deinen Raum verschoben werden"
     }
   }
 }

@@ -57,6 +57,8 @@ export const returnToMainRoom = async (
   username: string,
   connect: Connect
 ) => {
+  // A failed join reaches both onDisconnected and onError; return once.
+  if (breakoutStore.target === 'main' && breakoutStore.room) return
   breakoutStore.target = 'main'
   breakoutStore.pendingMedia = breakoutStore.media
   const entry = await requestEntry({ roomId: slug, username }).catch(
@@ -88,9 +90,14 @@ export const useBreakout = (mainRoomId: string, connect: Connect) => {
 
   const sessionId = readBreakoutSessionId(metadata)
   useEffect(() => {
+    if (!sessionId && breakoutStore.moveFailed) breakoutStore.moveFailed = false
     if (state !== ConnectionState.Connected) return
     if (!shouldFetchAssignment(sessionId, breakoutStore)) return
-    breakoutStore.sessionId = sessionId
-    void moveToAssignedRoom(room, mainRoomId, connect)
+    Object.assign(breakoutStore, { sessionId, moveFailed: false })
+    moveToAssignedRoom(room, mainRoomId, connect).catch((error) => {
+      // Forgotten, so the next metadata change or reconnect tries again.
+      Object.assign(breakoutStore, { sessionId: null, moveFailed: true })
+      reportError('generic_failure', error, { path: 'breakout_move' })
+    })
   }, [state, sessionId, room, mainRoomId, connect])
 }

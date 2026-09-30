@@ -3,6 +3,7 @@
 # pylint: disable=no-name-in-module
 
 import asyncio
+import contextlib
 import json
 from datetime import timedelta
 from logging import getLogger
@@ -192,6 +193,9 @@ def open_session(room, user, rooms):
         is_live = _run(_write_metadata, str(room.id), signal)
     except MediaServerError:
         is_live = False
+        # A write cut off by its deadline may still have landed; take it back.
+        with contextlib.suppress(MediaServerError):
+            _run(_write_metadata, str(room.id), None)
     if not is_live:
         session.delete()
         _discard_rooms(names)

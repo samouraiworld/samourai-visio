@@ -12,6 +12,8 @@ type BreakoutState = {
   leaving: boolean
   // The session whose assignment was fetched, so each is fetched once.
   sessionId: string | null
+  // The last move failed; cleared by the next attempt or when the session ends.
+  moveFailed: boolean
   // Camera and microphone as last seen while connected.
   media: MediaIntent | null
   // Restored once the next connection is up.
@@ -23,6 +25,7 @@ const initialState = (): BreakoutState => ({
   target: null,
   leaving: false,
   sessionId: null,
+  moveFailed: false,
   media: null,
   pendingMedia: null,
 })

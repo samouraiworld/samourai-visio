@@ -844,7 +844,8 @@
     "participant": {
       "currentRoom": "Estás en {{room}}",
       "moving": "Pasando a {{room}}…",
-      "returning": "Volviendo a la reunión principal…"
+      "returning": "Volviendo a la reunión principal…",
+      "moveFailed": "No se pudo moverte a tu sala"
     }
   }
 }

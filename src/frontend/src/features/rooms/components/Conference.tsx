@@ -28,7 +28,7 @@ import { InviteDialog } from './InviteDialog'
 import { VideoConference } from '../livekit/prefabs/VideoConference'
 import { css } from '@/styled-system/css'
 import { BackgroundProcessorFactory } from '../livekit/components/blur'
-import { LocalUserChoices } from '@/stores/userChoices'
+import { LocalUserChoices, userChoicesStore } from '@/stores/userChoices'
 import {
   captureEvent,
   captureMediaEvent,
@@ -230,10 +230,10 @@ export const Conference = ({
       reportError('livekit_room_error', e, {
         path: 'connect_publish',
       })
-      breakoutStore.target = null
       // A breakout pass that fails to connect leads back to the main meeting.
       if (breakoutStore.room && room.state !== ConnectionState.Connected)
-        void leaveBreakout()
+        return void leaveBreakout()
+      breakoutStore.target = null
     },
     [room, leaveBreakout]
   )
@@ -302,7 +302,7 @@ export const Conference = ({
                 await Promise.all([
                   room.localParticipant.setCameraEnabled(media.camera, {
                     processor: BackgroundProcessorFactory.fromProcessorConfig(
-                      userConfig.processorConfig
+                      userChoicesStore.processorConfig
                     ),
                   }),
                   room.localParticipant.setMicrophoneEnabled(media.microphone),

@@ -13,7 +13,7 @@ export const BreakoutParticipant = ({
   connect: Connect
 }) => {
   const { t } = useTranslation('rooms', { keyPrefix: 'breakout.participant' })
-  const { room, target } = useSnapshot(breakoutStore)
+  const { room, target, moveFailed } = useSnapshot(breakoutStore)
   useBreakout(mainRoomId, connect)
 
   if (target) {
@@ -42,7 +42,7 @@ export const BreakoutParticipant = ({
     )
   }
 
-  if (!room) return null
+  if (!room && !moveFailed) return null
   return (
     <div
       role="status"
@@ -59,7 +59,7 @@ export const BreakoutParticipant = ({
         color: 'white',
       })}
     >
-      {t('currentRoom', { room: room.name })}
+      {room ? t('currentRoom', { room: room.name }) : t('moveFailed')}
     </div>
   )
 }
