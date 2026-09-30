@@ -163,6 +163,10 @@ class LiveKitEventsService:
             )
             return
 
+        if room_name.startswith(models.BreakoutRoom.LIVEKIT_ROOM_PREFIX):
+            logger.info("Ignoring webhook event for breakout room '%s'.", room_name)
+            return
+
         if self._filter_regex and not self._filter_regex.search(room_name):
             logger.info("Filtered webhook event for room '%s'", room_name)
             return
@@ -304,6 +308,13 @@ class LiveKitEventsService:
                 ) from e
 
         self.presence_cache.clear_room(room_id)
+
+        if models.BreakoutSession.objects.filter(
+            room_id=room_id, status=models.BreakoutSessionStatusChoices.ACTIVE
+        ).exists():
+            # Everyone may be in breakout rooms; closing the session clears these.
+            logger.info("Keeping lobby admissions of room %s for its breakout", room_id)
+            return
 
         try:
             self.lobby_service.clear_room_cache(room_id)

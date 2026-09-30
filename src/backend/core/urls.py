@@ -8,6 +8,7 @@ from rest_framework.routers import DefaultRouter, SimpleRouter
 
 from core.addons import viewsets as addons_viewsets
 from core.api import get_frontend_configuration, viewsets
+from core.breakout.urls import urlpatterns as breakout_urls
 from core.external_api import viewsets as external_viewsets
 from core.roomkit import viewsets as roomkit_viewsets
 
@@ -57,6 +58,10 @@ urlpatterns = [
                 *router.urls,
                 *oidc_urls,
                 path("config/", get_frontend_configuration, name="config"),
+                path(
+                    "rooms/<uuid:room_id>/breakout-sessions/",
+                    include(breakout_urls),
+                ),
             ]
         ),
     ),
