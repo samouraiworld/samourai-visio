@@ -140,7 +140,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Assert pinned upstream still behaves as documented
         run: scripts/check-upstream-contract.sh "$UPSTREAM_REF"
-      - name: And its lobby-poll threshold can fail, naming the value it read
+      - name: And its lobby-poll and sign-in assertions can fail, naming what they read
         run: scripts/check-upstream-contract.selftest.sh
 
   upstream-drift:

@@ -118,3 +118,17 @@
   opacity: 0.7;
   margin-top: 0.25rem;
 }
+
+/* Sign-in is off on this instance: its identity provider no longer serves
+   this domain, so the button led to a TLS error. No upstream setting hides
+   it (FRONTEND_IS_SILENT_LOGIN_ENABLED only stops the silent redirect), so
+   the theme does. Every sign-in button goes through LoginButton.tsx, which
+   tags it data-attr="login": the header above the room join screen, the
+   settings dialog and its account tab. Panda's own rules sit in cascade
+   layers; this one is unlayered, so it wins without !important.
+   Guests are unaffected: joining and opening a room need no account
+   (ALLOW_UNREGISTERED_ROOMS). scripts/check-upstream-contract.sh fails if
+   upstream drops the attribute or this rule goes away. */
+a[data-attr="login"] {
+  display: none;
+}

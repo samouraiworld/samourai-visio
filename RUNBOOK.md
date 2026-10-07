@@ -3,6 +3,17 @@
 > La Suite Meet, self-hosted on Scaleway, authenticated against the existing **Clerk** org (`clerk.samourai.app`).
 > Written 2026-07-22. Execute top to bottom.
 
+> [!IMPORTANT]
+> **Sign-in is off since 2026-10-07.** The Clerk instance no longer serves `clerk.samourai.app`
+> (the TLS handshake fails), so signing in cannot succeed. `theme/custom.css` hides every sign-in
+> button (`a[data-attr="login"]`, set by upstream `LoginButton.tsx`; no upstream setting does it),
+> and `scripts/check-upstream-contract.sh` fails if that rule or that attribute goes away.
+> Guests are unaffected: joining a room and starting one from any URL need no account (§0 access
+> table). What is lost is everything an account buys: owned, administrable rooms, and admitting
+> waiting guests into rooms whose access is restricted. `/api/v1.0/authenticate/` still answers a
+> typed URL with a redirect to the dead Clerk host. Sections 1-3 below describe sign-in as it
+> was set up; they apply again only once a working identity provider is configured.
+
 > [!WARNING]
 > **Verified against the local clone of `suitenumerique/meet`, which is from 2026-02-24 (5 months stale, shallow).**
 > The `curl` commands in Step 3 pull **current** upstream config, which may have drifted from the analysis here.
@@ -32,7 +43,7 @@
 |---|---|---|
 | Anonymous visitor | **Join** any room by link | Nothing — they type a display name on the join screen |
 | Anonymous visitor | **Create** a room from any URL | Nothing (`ALLOW_UNREGISTERED_ROOMS=True`) |
-| Signed-in user | Own an **administrable, persistent** room | Clerk login |
+| Signed-in user | Own an **administrable, persistent** room | Clerk login — **off since 2026-10-07** (top of this file) |
 
 How the guest path works, end to end:
 
@@ -701,7 +712,8 @@ under us.
 - [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
 - [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
-- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
+- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis). While sign-in is off (top of this file), only the first half can be checked
+- [ ] **No sign-in button** while sign-in is off — `curl -sS https://visio.samourai.app/custom/style.css | grep -cF 'a[data-attr="login"]'` prints `1` (the deployed theme carries the rule), and a room slug opened in a private window shows a join screen with no "Se connecter" button
 - [ ] **Legal pages reachable** from the landing footer, and they name **Samouraï Coop** — not DINUM (§7bis)
 - [ ] **No third-party request** — open devtools → Network on the landing *and* inside a room, and confirm every request goes to `visio.samourai.app` or `livekit.samourai.app`. This is what the privacy policy asserts
 - [ ] **A guest never contacts Clerk** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit must produce no `clerk.samourai.app` request and leave no `silent-login-retry` key in `localStorage`

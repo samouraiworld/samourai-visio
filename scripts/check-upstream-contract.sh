@@ -45,6 +45,32 @@ if [ "${1:-}" = "--lobby-poll" ]; then
   exit "$fail"
 fi
 
+# ── Sign-in hidden · the theme's selector and the upstream attribute ────────
+# Sign-in is off on this instance and no upstream setting hides the button,
+# so theme/custom.css does, by the data-attr="login" that LoginButton.tsx puts
+# on every sign-in button. Two facts, one per file: upstream still sets the
+# attribute, and the theme still hides it. Either missing brings the button
+# back, and it leads to an identity provider that no longer serves this host.
+login_hidden() { # login_hidden <LoginButton.tsx> <custom.css>
+  local ok=1
+  if ! grep -qF 'data-attr="login"' "$1"; then
+    bad 'LoginButton.tsx no longer tags its button data-attr="login" — theme/custom.css cannot hide sign-in; re-derive the selector'
+    ok=0
+  fi
+  if ! grep -A3 '^a\[data-attr="login"\] {$' "$2" | grep -qE '^[[:space:]]+display: none;$'; then
+    bad 'theme/custom.css no longer hides a[data-attr="login"] — the sign-in button is back, and sign-in is off on this instance'
+    ok=0
+  fi
+  [ "$ok" = 1 ] && pass 'sign-in buttons still carry data-attr="login" and theme/custom.css hides them'
+}
+# `--login-hidden <LoginButton.tsx> <custom.css>` runs that one assertion on
+# local files and exits, for the self-test.
+if [ "${1:-}" = "--login-hidden" ]; then
+  login_hidden "${2:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}" \
+               "${3:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}"
+  exit "$fail"
+fi
+
 fetch() { # fetch <remote-path> <local-name>
   local code
   code=$(curl -sS -o "$WORK/$2" -w '%{http_code}' "$MEET/$1")
@@ -62,6 +88,7 @@ fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
 fetch docker/files/production/default.conf.template gateway.conf || exit 1
 fetch src/frontend/src/features/rooms/api/fetchRoom.ts fetchRoom.ts || exit 1
 fetch src/frontend/src/features/rooms/hooks/useLobby.ts useLobby.ts || exit 1
+fetch src/frontend/src/components/LoginButton.tsx LoginButton.tsx || exit 1
 
 # ── Flood brake · what its maps and its numbers were derived from ───────────
 # deploy/nginx/default.conf.template counts two URL shapes under /api/v1.0/,
@@ -90,6 +117,7 @@ else
   bad "the SPA's room URL changed shape — the room brake may now count each join twice, or not at all"
 fi
 lobby_poll "$WORK/useLobby.ts"
+login_hidden "$WORK/LoginButton.tsx" "$(dirname "$0")/../theme/custom.css"
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then
