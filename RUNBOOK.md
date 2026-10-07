@@ -3,6 +3,24 @@
 > La Suite Meet, self-hosted on Scaleway, authenticated against the existing **Clerk** org (`clerk.samourai.app`).
 > Written 2026-07-22. Execute top to bottom.
 
+> [!IMPORTANT]
+> **Sign-in is off since 2026-10-07.** The Clerk instance no longer serves `clerk.samourai.app`
+> (the TLS handshake fails), so a new sign-in cannot succeed. `theme/custom.css` hides every
+> sign-in button (`[data-attr="login"]`, set by upstream `LoginButton.tsx`; no upstream setting
+> does it), and `scripts/check-upstream-contract.sh` fails if that rule or that attribute goes
+> away. **This hides a button; it is not an access control.** `/api/v1.0/authenticate/` and
+> `/api/v1.0/callback/` stay live: a typed URL, or the `/sdk/` pages (which load no theme),
+> still start a sign-in towards the dead Clerk host.
+>
+> - Guests can still join any public room, and start one from any URL (§0 access
+>   table).
+> - A guest waiting at a room whose access is restricted can no longer be let in once its
+>   owner's session has expired: nobody can sign in to admit them.
+> - Sessions opened before the outage stay valid until they expire (12 h); no new one can start.
+>
+> Sections 1-3 below describe sign-in as it was set up. They are a record, not the current
+> state, and apply again only once a working identity provider is configured.
+
 > [!WARNING]
 > **Verified against the local clone of `suitenumerique/meet`, which is from 2026-02-24 (5 months stale, shallow).**
 > The `curl` commands in Step 3 pull **current** upstream config, which may have drifted from the analysis here.
@@ -32,7 +50,7 @@
 |---|---|---|
 | Anonymous visitor | **Join** any room by link | Nothing — they type a display name on the join screen |
 | Anonymous visitor | **Create** a room from any URL | Nothing (`ALLOW_UNREGISTERED_ROOMS=True`) |
-| Signed-in user | Own an **administrable, persistent** room | Clerk login |
+| Signed-in user | Own an **administrable, persistent** room | Clerk login — **off since 2026-10-07** (top of this file) |
 
 How the guest path works, end to end:
 
@@ -56,7 +74,8 @@ Session: Django cookie, 12 h.
 
 ## 1. Clerk — create the OAuth application
 
-Your instance is **already a working OIDC provider**. Verified live:
+*Record of the 2026-07-22 setup — sign-in is off since 2026-10-07, see the top of this file.*\
+Your instance was **already a working OIDC provider**. Verified live then:
 
 ```
 https://clerk.samourai.app/.well-known/openid-configuration → HTTP 200
@@ -701,7 +720,8 @@ under us.
 - [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
 - [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
-- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
+- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis). While sign-in is off (top of this file), only the first half can be checked
+- [ ] **No sign-in button** while sign-in is off — `curl -sS https://visio.samourai.app/custom/style.css | grep -cE '^\[data-attr="login"\] \{$'` prints `1` (the deployed theme carries the rule), and a room slug opened in a private window shows a join screen with no "Se connecter" button
 - [ ] **Legal pages reachable** from the landing footer, and they name **Samouraï Coop** — not DINUM (§7bis)
 - [ ] **No third-party request** — open devtools → Network on the landing *and* inside a room, and confirm every request goes to `visio.samourai.app` or `livekit.samourai.app`. This is what the privacy policy asserts
 - [ ] **A guest never contacts Clerk** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit must produce no `clerk.samourai.app` request and leave no `silent-login-retry` key in `localStorage`
