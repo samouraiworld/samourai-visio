@@ -165,6 +165,16 @@ mutate 's/^FRONTEND_CUSTOM_CSS_URL=/FRONTEND_CSS_URL=/' env.d/common "wrong CSS 
 mutate 's|^#DJANGO_SENTRY_DSN=.*|SENTRY_DSN=https://k@sentry.example/1|' env.d/common "Sentry DSN under the bare name that resolves to None"
 mutate 's/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=<openssl rand -base64 64>/' env.d/common "unfilled placeholder"
 mutate 's/^OIDC_OP_TOKEN_ENDPOINT=/OIDC_OP_LOGOUT_ENDPOINT=https:\/\/x\/logout\nOIDC_OP_TOKEN_ENDPOINT=/' env.d/common "Keycloak-style logout endpoint present"
+# Sign-in closed: each OIDC provider or client setting set again, one unset,
+# and a later duplicate line (Docker keeps the last) setting one again.
+mutate_rs 's|^OIDC_OP_JWKS_ENDPOINT=$|OIDC_OP_JWKS_ENDPOINT=https://clerk.samourai.app/.well-known/jwks.json|' env.d/common \
+  "sign-in is not closed: env.d/common still sets OIDC_OP_JWKS_ENDPOINT" "the old provider's JWKS endpoint set again"
+mutate_rs 's|^OIDC_RP_CLIENT_SECRET=$|OIDC_RP_CLIENT_SECRET=selftest_client_secret|' env.d/common \
+  "sign-in is not closed: env.d/common still sets OIDC_RP_CLIENT_SECRET" "a client secret set again"
+mutate_rs 's|^OIDC_STORE_ID_TOKEN=false$|OIDC_OP_USER_ENDPOINT=https://idp.example/userinfo|' env.d/common \
+  "sign-in is not closed: env.d/common still sets OIDC_OP_USER_ENDPOINT" "a later duplicate line sets the userinfo endpoint again"
+mutate_rs '/^OIDC_OP_TOKEN_ENDPOINT=$/d' env.d/common \
+  "OIDC settings missing from env.d/common: OIDC_OP_TOKEN_ENDPOINT" "the token endpoint unset, not empty (every signed-in request would fail)"
 mutate 's/^  tls_port: 0/  tls_port: 5349/' livekit-server.yaml "TURN without tls_port: 0"
 mutate 's/^  max_participants: 30/  max_participants: 0/' livekit-server.yaml "participant cap removed (0 = unlimited)"
 mutate 's/^  max_participants: 30/  max_participants:/' livekit-server.yaml "participant cap key present but empty"
@@ -376,7 +386,8 @@ if [ "$n" -eq 0 ]; then ok "0 failures after all reverts"; else err "fixture not
 # per request — the same one-mutation-at-a-time shape as the fixture above.
 # Good mode answers exactly what the gateway template is written to answer:
 # a 302 on / with the four headers, /api with each header once, security.txt
-# as text/plain with a future Expires, and a 404 for any other well-known path.
+# as text/plain with a future Expires, a 404 for any other well-known path,
+# and a 410 with the server-level headers on each sign-in route.
 echo "edge: header checks against a local stub"
 cat > "$WORK/stub.py" <<'PYSTUB'
 import datetime, http.server, sys
@@ -423,6 +434,25 @@ class H(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         m = self.mode()
+        signin = {"/api/v1.0/authenticate/": "authenticate-open",
+                  "/api/v1.0/authenticate": "authenticate-bare-open",
+                  "/api/v1.0/callback/": "callback-open",
+                  "/api/v1.0/callback": "callback-bare-open"}
+        if self.path in signin:
+            if m == signin[self.path]:
+                # Reopened: the backend's sign-in redirect, as it would answer.
+                self.send_response(302)
+                self.send_header("Location", "https://idp.example/authorize")
+                self.sec()
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if m == "signin-410-bare":
+                self.send_response(410)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            return self.body(410, "text/html", b"<html>410 Gone</html>")
         if self.path == "/":
             self.send_response(302)
             self.send_header("Location", "/accueil/")
@@ -488,6 +518,11 @@ else
   emutate securitytxt-missing 'security.txt answers'      "security.txt absent (404)"
   emutate securitytxt-expired 'security.txt expires'      "security.txt past its Expires date (must not be trusted)"
   emutate wellknown-spa       'well-known/ path answers'  "an unknown /.well-known/ path answered by the SPA shell"
+  emutate authenticate-open      'sign-in route /api/v1.0/authenticate/ answers HTTP' "authenticate/ reopened at the gateway"
+  emutate authenticate-bare-open 'sign-in route /api/v1.0/authenticate answers HTTP'  "authenticate (no slash) reopened at the gateway"
+  emutate callback-open          'sign-in route /api/v1.0/callback/ answers HTTP'     "callback/ reopened at the gateway"
+  emutate callback-bare-open     'sign-in route /api/v1.0/callback answers HTTP'      "callback (no slash) reopened at the gateway"
+  emutate signin-410-bare        'answers 410 without the server-level security headers' "the 410 ships without HSTS and CSP (an add_header in its location)"
   n="$(efails)"
   if [ "$n" -eq 0 ]; then ok "stub back in good mode: 0 failures"; else err "stub not clean after the last mutation ($n)"; fi
 fi

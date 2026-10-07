@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Build the Samourai (Clerk-backed) Greffon catalog entry for Visio.
+"""Build the Samourai Greffon catalog entry for Visio.
 
 Mirrors the exact validated structure of greffon-catalog's existing visio/1.0
-entry, but swaps the bundled Keycloak demo for the external Clerk org, drops
-recording (MinIO/Celery) from v1, and injects our theme. Emits metadata.json.
+entry, but drops the bundled Keycloak demo (sign-in is closed: guests join by
+link), drops recording (MinIO/Celery) from v1, and injects our theme. Emits
+metadata.json.
 """
 import base64, json, pathlib
 
@@ -17,7 +18,7 @@ def b64(s: str, mime: str) -> str:
 
 
 # ── Gateway nginx: single public origin -> frontend / backend / livekit ──────
-# No /identity (Clerk is external), no /media (no recording in v1).
+# No /identity (sign-in is closed), no /media (no recording in v1).
 # X-Forwarded-Proto is set to https authoritatively here — the gateway always
 # sits behind Greffon's TLS, so it never trusts a client-supplied value.
 GATEWAY = r"""
@@ -117,34 +118,16 @@ def secret(title, key, containers, minlen, alnum=False):
     }
 
 
-def user_input(title, key, container, env_key, description, secret_field=False):
-    prop = {"type": "string", "title": title, "description": description}
-    if secret_field:
-        prop["writeOnly"] = True
-    return {
-        "title": title,
-        "schema": {
-            "type": "object", "required": ["value"],
-            "properties": {"value": prop},
-            "x-greffon-visibility": "visible",
-        },
-        "default_value": {"value": ""},
-        "destinations": [{"type": "env", "container": container, "key": env_key}],
-    }
-
-
 metadata = {
     "name": "Samouraï Visio",
     "min_greffer_version": "0.3.3",
     "logo": "https://raw.githubusercontent.com/samouraiworld/samourai-visio/main/theme/icons/android-chrome-512x512.png",
     "description": (
         "Free video conferencing by Samouraï Coop — La Suite Meet (DINUM), "
-        "themed and authenticated against the Samouraï Clerk SSO, which is off "
-        "since 2026-10-07: sign-in cannot succeed. Guests join by "
-        "link with no account. WebRTC media uses one UDP port published on the "
-        "host. Requires: a Clerk OAuth application whose redirect URI is set to "
-        "{{ instance_url }}/api/v1.0/callback/, and this instance bound to a "
-        "stable domain. No recording in v1."
+        "themed, with sign-in closed since 2026-10-07: guests join by link "
+        "with no account. WebRTC media uses one UDP port published on the "
+        "host. Requires: this instance bound to a stable domain. No recording "
+        "in v1."
     ),
     "categories": ["productivity", "collaboration"],
     "images": [],
@@ -183,12 +166,8 @@ metadata = {
         secret("Database password", "DB_PASSWORD",
                [("backend", "DB_PASSWORD"), ("postgresql", "POSTGRES_PASSWORD")], 24),
         secret("LiveKit API secret", "LIVEKIT_API_SECRET", [("backend", "LIVEKIT_API_SECRET")], 32),
-        user_input("Clerk client ID", "OIDC_RP_CLIENT_ID", "backend", "OIDC_RP_CLIENT_ID",
-                   "From the Clerk OAuth application. Register redirect URI "
-                   "{{ instance_url }}/api/v1.0/callback/ and scopes 'openid email profile'."),
-        user_input("Clerk client secret", "OIDC_RP_CLIENT_SECRET", "backend", "OIDC_RP_CLIENT_SECRET",
-                   "Shown once in the Clerk dashboard when the OAuth app is created.",
-                   secret_field=True),
+        # No client ID or secret to ask for: sign-in is closed, and the
+        # compose sets both empty. An injected value would override that.
         {
             "title": "SMTP",
             "schema": {"type": "object", "properties": {}},

@@ -18,7 +18,7 @@
 # ────────────────────────────────────────────────────────────────────────────
 #
 # Differs from upstream in five deliberate places:
-#   1. OIDC points at Clerk, not Keycloak
+#   1. OIDC points at no provider: sign-in is closed (Keycloak upstream)
 #   2. OIDC_RP_SCOPES adds `profile`   (default "openid email" -> names empty)
 #   3. OIDC_USERINFO_FULLNAME_FIELDS overridden (default contains `usual_name`,
 #      a ProConnect-only claim Clerk does not emit)
@@ -78,13 +78,21 @@ DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
 # rather than a 404, so a naive curl check will not catch it.
 DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
 
-# ── OIDC — Clerk (clerk.samourai.app) ──
-# Verified live: https://clerk.samourai.app/.well-known/openid-configuration
-OIDC_OP_JWKS_ENDPOINT=https://clerk.samourai.app/.well-known/jwks.json
-OIDC_OP_AUTHORIZATION_ENDPOINT=https://clerk.samourai.app/oauth/authorize
-OIDC_OP_TOKEN_ENDPOINT=https://clerk.samourai.app/oauth/token
-OIDC_OP_USER_ENDPOINT=https://clerk.samourai.app/oauth/userinfo
-# OIDC_OP_LOGOUT_ENDPOINT intentionally unset — Clerk reports
+# ── OIDC — sign-in closed ──
+# Sign-in is off on this instance. These six lines named the old Clerk
+# provider at clerk.samourai.app, whose name no longer resolves; whoever
+# revived it could sign tokens for any user, so the backend trusts nothing.
+# Keep each line, EMPTY: unset, Django falls back to None and every request
+# carrying a session cookie fails with ImproperlyConfigured (RS256 needs a
+# JWKS endpoint); an empty string passes that check and trusts no provider.
+# The gateway answers authenticate/ and callback/ with 410 (gateway template).
+# `preflight.sh config` asserts all six present and empty.
+# Never re-create the old CNAME clerk.samourai.app -> frontend-api.clerk.services.
+OIDC_OP_JWKS_ENDPOINT=
+OIDC_OP_AUTHORIZATION_ENDPOINT=
+OIDC_OP_TOKEN_ENDPOINT=
+OIDC_OP_USER_ENDPOINT=
+# OIDC_OP_LOGOUT_ENDPOINT intentionally unset — Clerk reported
 # backchannel_logout_supported:false and frontchannel_logout_supported:false.
 # Verified safe in source: django-lasuite oidc_login/views.py:89-92 returns the
 # plain redirect URL when this is falsy, and post() then calls auth.logout().
@@ -92,13 +100,12 @@ OIDC_OP_USER_ENDPOINT=https://clerk.samourai.app/oauth/userinfo
 # log-out-then-log-in silently re-authenticates.
 # Do NOT copy upstream's Keycloak value at env.d/production.dist/common:33.
 
-# Redirect URI to register at Clerk, exactly (trailing slash included):
-#   https://visio.samourai.app/api/v1.0/callback/
-# Nothing else needs registering: `authenticate/` is a local entry point,
-# `logout-callback/` is used only when a logout endpoint is set, and Clerk
-# does not support backchannel logout.
-OIDC_RP_CLIENT_ID=<from Clerk dashboard>
-OIDC_RP_CLIENT_SECRET=<from Clerk dashboard — shown once, never again>
+# Client credentials: empty while sign-in is closed (see above). A future
+# provider registers exactly https://visio.samourai.app/api/v1.0/callback/
+# (trailing slash included); `authenticate/` is a local entry point.
+OIDC_RP_CLIENT_ID=
+OIDC_RP_CLIENT_SECRET=
+# (both empty while sign-in is closed)
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
