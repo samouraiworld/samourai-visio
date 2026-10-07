@@ -123,6 +123,9 @@ services:
       LOGOUT_REDIRECT_URL: "{{ instance_url }}"
       # Our runtime theme, served same-origin from the frontend mount below.
       FRONTEND_CUSTOM_CSS_URL: /custom/style.css
+      # Upstream defaults this to true: every anonymous visitor would be sent to
+      # the identity provider without a click. Guests need no account here.
+      FRONTEND_IS_SILENT_LOGIN_ENABLED: "false"
       # ── Mail (operator SMTP integration; stripped when unset) ──
       DJANGO_EMAIL_HOST: "{{ smtp.host }}"
       DJANGO_EMAIL_PORT: "{{ smtp.port }}"

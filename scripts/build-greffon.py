@@ -139,7 +139,8 @@ metadata = {
     "logo": "https://raw.githubusercontent.com/samouraiworld/samourai-visio/main/theme/icons/android-chrome-512x512.png",
     "description": (
         "Free video conferencing by Samouraï Coop — La Suite Meet (DINUM), "
-        "themed and authenticated against the Samouraï Clerk SSO. Guests join by "
+        "themed and authenticated against the Samouraï Clerk SSO, which is off "
+        "since 2026-10-07: sign-in cannot succeed. Guests join by "
         "link with no account. WebRTC media uses one UDP port published on the "
         "host. Requires: a Clerk OAuth application whose redirect URI is set to "
         "{{ instance_url }}/api/v1.0/callback/, and this instance bound to a "

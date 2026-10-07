@@ -118,3 +118,21 @@
   opacity: 0.7;
   margin-top: 0.25rem;
 }
+
+/* Sign-in is off on this instance: its identity provider no longer serves
+   this domain, so the button led to a TLS error. No upstream setting hides
+   it (FRONTEND_IS_SILENT_LOGIN_ENABLED only stops the silent redirect), so
+   the theme does. Every sign-in button goes through LoginButton.tsx, which
+   tags it data-attr="login": the header above the room join screen, the
+   home page, the settings dialog and its account tab, the recording prompt.
+   The bare attribute selector keeps matching if the button stops being a
+   link. Panda's own rules sit in cascade layers; this one is unlayered, so
+   it wins without !important.
+   This hides a button and nothing more. It is not an access control: the
+   sign-in endpoints stay reachable by URL, the /sdk/ pages load no theme and
+   can still start a sign-in, and a slow page can show the button until this
+   stylesheet arrives. scripts/check-upstream-contract.sh fails if upstream
+   drops the attribute or this rule stops hiding it. */
+[data-attr="login"] {
+  display: none;
+}
