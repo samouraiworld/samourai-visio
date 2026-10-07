@@ -29,7 +29,7 @@ supply, then walks the runbook with a preflight gate at each stage.
 
 ## Quick orientation
 
-- **Auth**: Clerk, as OIDC provider — **off since 2026-10-07**: `clerk.samourai.app` no longer serves TLS and the theme hides the sign-in button. See the top of [RUNBOOK.md](RUNBOOK.md)
+- **Auth**: Clerk, as OIDC provider — **off since 2026-10-07**: `clerk.samourai.app` no longer serves TLS. The theme hides the sign-in button once deployed; that is not an access control, and the sign-in endpoints stay live. See the top of [RUNBOOK.md](RUNBOOK.md)
 - **Access**: `ALLOW_UNREGISTERED_ROOMS=True` — a room materialises from any URL, so **no account is needed to create one**. What an account buys is a *persistent, owned, administrable* room. See [RUNBOOK §4 trap 1](RUNBOOK.md)
 - **Branding**: `FRONTEND_CUSTOM_CSS_URL` injects CSS at runtime. No fork, survives upstream upgrades. Tokens are **Panda CSS** (`--colors-*`), not Cunningham
 - **Not in v1**: recording, transcription, telephony

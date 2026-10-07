@@ -49,16 +49,30 @@ fi
 # Sign-in is off on this instance and no upstream setting hides the button,
 # so theme/custom.css does, by the data-attr="login" that LoginButton.tsx puts
 # on every sign-in button. Two facts, one per file: upstream still sets the
-# attribute, and the theme still hides it. Either missing brings the button
-# back, and it leads to an identity provider that no longer serves this host.
+# attribute on a JSX element (not in a comment), and the theme's last word on
+# a bare [data-attr="login"] rule — comments stripped, later rules winning —
+# is display: none. Bare, not a[...]: the button may stop being a link.
+# Either missing brings the button back, and it leads to an identity provider
+# that no longer serves this host. This hides a button; it closes nothing.
 login_hidden() { # login_hidden <LoginButton.tsx> <custom.css>
   local ok=1
-  if ! grep -qF 'data-attr="login"' "$1"; then
+  if ! grep -vE '^[[:space:]]*(//|\*|/\*|\{/\*)' "$1" \
+       | grep -qE '<[A-Za-z][A-Za-z.]*[[:space:]][^>]*data-attr="login"'; then
     bad 'LoginButton.tsx no longer tags its button data-attr="login" — theme/custom.css cannot hide sign-in; re-derive the selector'
     ok=0
   fi
-  if ! grep -A3 '^a\[data-attr="login"\] {$' "$2" | grep -qE '^[[:space:]]+display: none;$'; then
-    bad 'theme/custom.css no longer hides a[data-attr="login"] — the sign-in button is back, and sign-in is off on this instance'
+  if ! python3 - "$2" <<'PY'
+import re, sys
+css = re.sub(r'/\*.*?\*/', '', open(sys.argv[1], encoding='utf-8').read(), flags=re.S)
+last = None
+for selectors, body in re.findall(r'([^{}]+)\{([^{}]*)\}', css):
+    if '[data-attr="login"]' in (s.strip() for s in selectors.split(',')):
+        for value in re.findall(r'(?:^|;)\s*display\s*:\s*([^;]+)', body):
+            last = value.strip()
+sys.exit(0 if last is not None and re.fullmatch(r'none(\s*!important)?', last) else 1)
+PY
+  then
+    bad 'theme/custom.css no longer hides [data-attr="login"] — the sign-in button is back, and sign-in is off on this instance'
     ok=0
   fi
   [ "$ok" = 1 ] && pass 'sign-in buttons still carry data-attr="login" and theme/custom.css hides them'
@@ -68,6 +82,27 @@ login_hidden() { # login_hidden <LoginButton.tsx> <custom.css>
 if [ "${1:-}" = "--login-hidden" ]; then
   login_hidden "${2:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}" \
                "${3:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}"
+  exit "$fail"
+fi
+
+# ── Silent login off · in every deployment this repository ships ───────────
+# Upstream defaults FRONTEND_IS_SILENT_LOGIN_ENABLED to true: every anonymous
+# visitor is then redirected to the identity provider with no click at all,
+# which the theme cannot hide. Both the host env template and the Greffon
+# compose must turn it off.
+silent_login_off() { # silent_login_off <env-or-compose file>...
+  local f
+  for f in "$@"; do
+    if grep -qE '^[[:space:]]*FRONTEND_IS_SILENT_LOGIN_ENABLED(=|:[[:space:]]*)"?[Ff]alse"?[[:space:]]*$' "$f"; then
+      pass "$(basename "$f") turns silent login off"
+    else
+      bad "$(basename "$f") does not set FRONTEND_IS_SILENT_LOGIN_ENABLED to false — upstream defaults it to true, and every anonymous visitor is redirected to the identity provider"
+    fi
+  done
+}
+if [ "${1:-}" = "--silent-login-off" ]; then
+  shift
+  silent_login_off "${@:?usage: $0 --silent-login-off <file>...}"
   exit "$fail"
 fi
 
@@ -118,6 +153,8 @@ else
 fi
 lobby_poll "$WORK/useLobby.ts"
 login_hidden "$WORK/LoginButton.tsx" "$(dirname "$0")/../theme/custom.css"
+silent_login_off "$(dirname "$0")/../deploy/env.d/common.example" \
+                 "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then
