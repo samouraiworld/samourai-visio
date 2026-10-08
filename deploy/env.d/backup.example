@@ -22,6 +22,10 @@ RCLONE_CONFIG_VISIO_ENDPOINT=s3.fr-par.scw.cloud
 RCLONE_CONFIG_VISIO_REGION=fr-par
 RCLONE_CONFIG_VISIO_ACCESS_KEY_ID=<Scaleway API access key: objects read + write, no delete>
 RCLONE_CONFIG_VISIO_SECRET_ACCESS_KEY=<its secret key>
+# The write key has no bucket-creation right. Without this line rclone
+# tries to create the bucket before each upload, and every upload fails
+# with AccessDenied. The prune key never uploads and needs no such line.
+RCLONE_CONFIG_VISIO_NO_CHECK_BUCKET=true
 
 # `visioprune` — the DELETE key. Used only by `backup.sh prune` (delete past
 # retention, list for the invariant). A different key from the one above:

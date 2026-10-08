@@ -843,7 +843,10 @@ sudo apt-get install -y rclone
 #      write key   objects read + write   (ObjectStorageObjectsRead, ObjectStorageObjectsWrite)
 #      prune key   objects read + delete  (ObjectStorageObjectsRead, ObjectStorageObjectsDelete)
 #    If listing the prefix fails with AccessDenied on the first run, add
-#    ObjectStorageBucketsRead to both.
+#    ObjectStorageBucketsRead to both. The write key cannot create
+#    buckets, so keep RCLONE_CONFIG_VISIO_NO_CHECK_BUCKET=true from the
+#    example: without it rclone tries to create the bucket first and
+#    every upload fails with AccessDenied.
 cp deploy/env.d/backup.example ~/visio/env.d/backup
 vi ~/visio/env.d/backup          # both key pairs + the bucket name
 chmod 600 ~/visio/env.d/backup
