@@ -4,13 +4,25 @@
 > Written 2026-07-22. Execute top to bottom.
 
 > [!IMPORTANT]
-> **Sign-in is off since 2026-10-07.** The Clerk instance no longer serves `clerk.samourai.app`
-> (the TLS handshake fails), so a new sign-in cannot succeed. `theme/custom.css` hides every
-> sign-in button (`[data-attr="login"]`, set by upstream `LoginButton.tsx`; no upstream setting
-> does it), and `scripts/check-upstream-contract.sh` fails if that rule or that attribute goes
-> away. **This hides a button; it is not an access control.** `/api/v1.0/authenticate/` and
-> `/api/v1.0/callback/` stay live: a typed URL, or the `/sdk/` pages (which load no theme),
-> still start a sign-in towards the dead Clerk host.
+> **Sign-in is off since 2026-10-07.** `clerk.samourai.app` no longer resolves: its DNS records
+> were deleted, so a new sign-in cannot succeed. Sign-in is closed in three places:
+>
+> - **The gateway** (`deploy/nginx/default.conf.template`, block "sign-in closed at the
+>   gateway") answers `/api/v1.0/authenticate/` and `/api/v1.0/callback/`, with and without the
+>   trailing slash, with `410 Gone` once deployed. This is what closes the typed URL and the
+>   `/sdk/` pages (which load no theme). Logout stays open. `preflight.sh public` asserts the 410.
+> - **The backend** trusts no identity provider: the six `OIDC_OP_*` endpoint and
+>   `OIDC_RP_CLIENT_*` lines in `env.d/common` are present and **empty** (§4). Empty, not
+>   removed: unset falls back to None and every request carrying a session cookie fails.
+>   `preflight.sh config` asserts it.
+> - **The theme** hides every sign-in button (`[data-attr="login"]`, set by upstream
+>   `LoginButton.tsx`; no upstream setting does it), and `scripts/check-upstream-contract.sh`
+>   fails if that rule or that attribute goes away. **This hides a button; it is not an access
+>   control.**
+>
+> **Never re-create the old CNAME `clerk.samourai.app` → `frontend-api.clerk.services`** (nor
+> `accounts`, `clkmail`, `clk._domainkey`, `clk2._domainkey`). Whoever then controlled that name
+> could sign tokens for any user of a backend that still trusted it.
 >
 > - Guests can still join any public room, and start one from any URL (§0 access
 >   table).
@@ -266,15 +278,17 @@ DJANGO_EMAIL_FROM=visio@samourai.app
 DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
 DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
 
-# ── OIDC — Clerk ──
-OIDC_OP_JWKS_ENDPOINT=https://clerk.samourai.app/.well-known/jwks.json
-OIDC_OP_AUTHORIZATION_ENDPOINT=https://clerk.samourai.app/oauth/authorize
-OIDC_OP_TOKEN_ENDPOINT=https://clerk.samourai.app/oauth/token
-OIDC_OP_USER_ENDPOINT=https://clerk.samourai.app/oauth/userinfo
-# OIDC_OP_LOGOUT_ENDPOINT deliberately unset — Clerk advertises no logout endpoint
+# ── OIDC — sign-in closed (see the top of this runbook) ──
+# Present and EMPTY, never removed. These named Clerk at clerk.samourai.app.
+OIDC_OP_JWKS_ENDPOINT=
+OIDC_OP_AUTHORIZATION_ENDPOINT=
+OIDC_OP_TOKEN_ENDPOINT=
+OIDC_OP_USER_ENDPOINT=
+# OIDC_OP_LOGOUT_ENDPOINT deliberately unset — Clerk advertised no logout endpoint
 
-OIDC_RP_CLIENT_ID=<from Clerk>
-OIDC_RP_CLIENT_SECRET=<from Clerk>
+OIDC_RP_CLIENT_ID=
+OIDC_RP_CLIENT_SECRET=
+# (both empty while sign-in is closed)
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
@@ -722,6 +736,7 @@ under us.
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
 - [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis). While sign-in is off (top of this file), only the first half can be checked
 - [ ] **No sign-in button** while sign-in is off — `curl -sS https://visio.samourai.app/custom/style.css | grep -cE '^\[data-attr="login"\] \{$'` prints `1` (the deployed theme carries the rule), and a room slug opened in a private window shows a join screen with no "Se connecter" button
+- [ ] **Sign-in closed at the gateway** — `for p in authenticate/ authenticate callback/ callback; do curl -s -o /dev/null -w '%{http_code}\n' "https://visio.samourai.app/api/v1.0/$p"; done` prints `410` four times, and `preflight.sh config` reports the six OIDC settings present and empty
 - [ ] **Legal pages reachable** from the landing footer, and they name **Samouraï Coop** — not DINUM (§7bis)
 - [ ] **No third-party request** — open devtools → Network on the landing *and* inside a room, and confirm every request goes to `visio.samourai.app` or `livekit.samourai.app`. This is what the privacy policy asserts
 - [ ] **A guest never contacts Clerk** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit must produce no `clerk.samourai.app` request and leave no `silent-login-retry` key in `localStorage`
@@ -990,7 +1005,7 @@ No secret rotates cleanly by itself — each has a blast radius:
 | `DJANGO_SECRET_KEY` | invalidates every session — **mass logout, mid-call** |
 | `LIVEKIT_API_SECRET` | must change in **two** files (`env.d/common` *and* `livekit-server.yaml`) or every token fails signature validation and nobody can join |
 | `DB_PASSWORD` | change in PostgreSQL *and* `env.d/postgresql` |
-| `OIDC_RP_CLIENT_SECRET` | regenerate in Clerk; login is broken between regeneration and restart |
+| `OIDC_RP_CLIENT_SECRET` | empty while sign-in is closed; nothing to rotate |
 | Scaleway TEM API key | invitation emails fail silently until restart |
 | Object Storage **write** key (`RCLONE_CONFIG_VISIO_*`) | the nightly backup and `restore-drill.sh --remote` fail until `env.d/backup` carries the new key — `LAST_OK` goes stale, `preflight.sh stack` red within a day |
 | Object Storage **prune** key (`RCLONE_CONFIG_VISIOPRUNE_*`) | only `backup.sh prune` fails; the nightly's retention invariant turns red at 32 days if it is forgotten. Re-run §8ter step 3 after either rotation |

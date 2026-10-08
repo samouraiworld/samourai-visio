@@ -20,6 +20,7 @@ fail=0
 pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
 fyi()  { printf '        %s\n' "$1"; }
 bad()  { printf '  \033[31mFAIL\033[0m  %s\n' "$1"; fail=1; }
+note() { printf '  \033[33mNOTE\033[0m  %s\n' "$1"; }
 
 # ── Flood brake · the lobby's poll pace ──────────────────────────────────────
 # The lobby brake's rate is a full room polling at the pace useLobby.ts sets.
@@ -89,11 +90,14 @@ fi
 # Upstream defaults FRONTEND_IS_SILENT_LOGIN_ENABLED to true: every anonymous
 # visitor is then redirected to the identity provider with no click at all,
 # which the theme cannot hide. Both the host env template and the Greffon
-# compose must turn it off.
+# compose must turn it off. The last line setting it is the one that counts
+# (Docker keeps the last), so a later "true" is not hidden by an earlier
+# "false".
 silent_login_off() { # silent_login_off <env-or-compose file>...
   local f
   for f in "$@"; do
-    if grep -qE '^[[:space:]]*FRONTEND_IS_SILENT_LOGIN_ENABLED(=|:[[:space:]]*)"?[Ff]alse"?[[:space:]]*$' "$f"; then
+    if grep -E '^[[:space:]]*FRONTEND_IS_SILENT_LOGIN_ENABLED(=|:)' "$f" | tail -1 \
+       | grep -qE '^[[:space:]]*FRONTEND_IS_SILENT_LOGIN_ENABLED(=|:[[:space:]]*)"?[Ff]alse"?[[:space:]]*$'; then
       pass "$(basename "$f") turns silent login off"
     else
       bad "$(basename "$f") does not set FRONTEND_IS_SILENT_LOGIN_ENABLED to false — upstream defaults it to true, and every anonymous visitor is redirected to the identity provider"
@@ -103,6 +107,71 @@ silent_login_off() { # silent_login_off <env-or-compose file>...
 if [ "${1:-}" = "--silent-login-off" ]; then
   shift
   silent_login_off "${@:?usage: $0 --silent-login-off <file>...}"
+  exit "$fail"
+fi
+
+# ── Sign-in closed · no deployment names an identity provider ───────────────
+# The provider these six settings named no longer serves this host, and
+# whoever revived its name could sign tokens for any user. Each stays present
+# and EMPTY in both deployments: unset, the backend falls back to None and
+# every request with a session cookie fails (RS256 needs a JWKS endpoint).
+# The last line for each key is the one read, as Docker keeps the last.
+oidc_closed() { # oidc_closed <env-or-compose file>...
+  local f k last set missing
+  for f in "$@"; do
+    set="" missing=""
+    for k in OIDC_OP_JWKS_ENDPOINT OIDC_OP_AUTHORIZATION_ENDPOINT OIDC_OP_TOKEN_ENDPOINT \
+             OIDC_OP_USER_ENDPOINT OIDC_RP_CLIENT_ID OIDC_RP_CLIENT_SECRET; do
+      last="$(grep -E "^[[:space:]]*${k}(=|:)" "$f" | tail -1)"
+      if [ -z "$last" ]; then
+        missing="$missing $k"
+      elif ! printf '%s\n' "$last" | grep -qE "^[[:space:]]*${k}(=(\"\")?|:[[:space:]]*(\"\"|''))[[:space:]]*$"; then
+        set="$set $k"
+      fi
+    done
+    [ -n "$set" ] && bad "$(basename "$f") still sets$set — sign-in is closed, and the backend would trust tokens from the provider it names"
+    [ -n "$missing" ] && bad "$(basename "$f") no longer carries$missing — keep each one, empty: unset makes every signed-in request fail"
+    [ -z "$set$missing" ] && pass "$(basename "$f") names no identity provider (six OIDC settings present and empty)"
+  done
+}
+if [ "${1:-}" = "--oidc-closed" ]; then
+  shift
+  oidc_closed "${@:?usage: $0 --oidc-closed <file>...}"
+  exit "$fail"
+fi
+
+# ── Advisory · how many places in the SPA start a sign-in ──────────────────
+# LoginButton.tsx is the only file the sign-in assertion reads, but authUrl()
+# is called from more places than the button, and later releases add more
+# (upstream main has a fifth, in the SDK settings popup). A new call site is a
+# sign-in entry point the theme may not hide. The gateway's 410 still closes
+# it, so this never fails: it prints the count, and a NOTE when it moved.
+AUTHURL_SITES_PINNED=4   # src/frontend/src at v1.24.0
+authurl_sites() { # authurl_sites <upstream .tar.gz> <ref>
+  local n
+  n="$(python3 - "$1" <<'PYCOUNT'
+import re, sys, tarfile
+n = 0
+with tarfile.open(sys.argv[1], 'r:gz') as t:
+    for m in t:
+        if m.isfile() and '/src/frontend/src/' in m.name and m.name.endswith(('.ts', '.tsx')):
+            for line in t.extractfile(m).read().decode('utf-8', 'replace').splitlines():
+                if re.match(r'\s*(//|\*|/\*|\{/\*|export const authUrl)', line):
+                    continue
+                n += line.count('authUrl(')
+print(n)
+PYCOUNT
+)"
+  if [ -z "$n" ]; then
+    note "could not count the SPA's authUrl( call sites at $2 — advisory only"
+  elif [ "$n" -eq "$AUTHURL_SITES_PINNED" ]; then
+    pass "the SPA starts a sign-in from $n authUrl( call sites at $2, the same count as v1.24.0"
+  else
+    note "the SPA starts a sign-in from $n authUrl( call sites at $2, $AUTHURL_SITES_PINNED at v1.24.0 — find the new entry point; the gateway 410 closes it, the theme may not hide it"
+  fi
+}
+if [ "${1:-}" = "--authurl-sites" ]; then
+  authurl_sites "${2:?usage: $0 --authurl-sites <upstream .tar.gz> <ref>}" "${3:-local}"
   exit "$fail"
 fi
 
@@ -155,6 +224,13 @@ lobby_poll "$WORK/useLobby.ts"
 login_hidden "$WORK/LoginButton.tsx" "$(dirname "$0")/../theme/custom.css"
 silent_login_off "$(dirname "$0")/../deploy/env.d/common.example" \
                  "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
+oidc_closed "$(dirname "$0")/../deploy/env.d/common.example" \
+            "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
+if curl -sSfL -o "$WORK/upstream.tar.gz" "https://codeload.github.com/suitenumerique/meet/tar.gz/${REF}"; then
+  authurl_sites "$WORK/upstream.tar.gz" "$REF"
+else
+  note "could not fetch the upstream tree at ${REF} to count authUrl( call sites — advisory only"
+fi
 
 # ── BLOCKER-1 · the runtime-CSS variable is FRONTEND_CUSTOM_CSS_URL ──────────
 if grep -q 'environ_name="FRONTEND_CUSTOM_CSS_URL"' "$WORK/settings.py"; then

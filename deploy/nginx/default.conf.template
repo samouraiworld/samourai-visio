@@ -320,6 +320,29 @@ server {
     location /.well-known/ { return 404; }
     # SAMOURAI-END
 
+    # SAMOURAI-BEGIN sign-in closed at the gateway
+    # Sign-in is off on this instance: the identity provider it was configured
+    # for no longer serves this host, and the backend's OIDC settings are
+    # blanked. The theme hides the sign-in button, which is no access control:
+    # these two backend routes stay reachable by URL, and the /sdk/ pages start
+    # a sign-in with no button at all. So the gateway answers them itself.
+    #
+    # 410, not 404: the routes existed and are withdrawn on purpose. Exact `=`
+    # locations, with and without the trailing slash, take precedence over
+    # upstream's plain `location /api` prefix below; the query string plays no
+    # part in location matching, so `?silent=true` lands here too. Logout
+    # (/api/v1.0/logout/) stays open, so a session from before the closure can
+    # still end. No add_header here: these locations inherit the server-level
+    # security headers above. `preflight.sh public` asserts the 410 live.
+    #
+    # Reopening sign-in means a working identity provider first, then removing
+    # this block.
+    location = /api/v1.0/authenticate/ { return 410; }
+    location = /api/v1.0/authenticate  { return 410; }
+    location = /api/v1.0/callback/     { return 410; }
+    location = /api/v1.0/callback      { return 410; }
+    # SAMOURAI-END
+
     location / {
         try_files $uri @proxy_to_meet_frontend;
     }
