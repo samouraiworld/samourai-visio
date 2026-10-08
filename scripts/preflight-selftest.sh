@@ -185,7 +185,7 @@ mutate_rs 's|^OIDC_RP_SCOPES=|REALM_NAME=meet\nOIDC_RP_SCOPES=|' env.d/common \
 # Sign-in: each endpoint pinned to realm samourai-app, client visio, the
 # secret set exactly once, logout able to end the Keycloak session, and the
 # live discovery document agreeing with all of it.
-mutate_rs 's|^OIDC_OP_JWKS_ENDPOINT=.*|OIDC_OP_JWKS_ENDPOINT=https://auth.kodera.io/realms/kodera-dev/protocol/openid-connect/certs|' env.d/common \
+mutate_rs 's|^OIDC_OP_JWKS_ENDPOINT=.*|OIDC_OP_JWKS_ENDPOINT=https://auth.kodera.io/realms/other-realm/protocol/openid-connect/certs|' env.d/common \
   "OIDC settings not on realm samourai-app, client visio: OIDC_OP_JWKS_ENDPOINT" "the JWKS endpoint of another realm (it would trust that realm's tokens)"
 mutate_rs 's|^OIDC_OP_TOKEN_ENDPOINT=.*|OIDC_OP_TOKEN_ENDPOINT=https://auth.example.org/realms/samourai-app/protocol/openid-connect/token|' env.d/common \
   "OIDC settings not on realm samourai-app, client visio: OIDC_OP_TOKEN_ENDPOINT" "the token endpoint on another host"
@@ -201,9 +201,17 @@ mutate_rs 's|^OIDC_RP_SCOPES=|OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/oidc_clien
   "OIDC client secret set twice" "a secret file beside the plain secret (the file wins silently)"
 mutate_rs 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=|' env.d/common \
   "OIDC client secret missing" "no client secret at all"
+mutate_rs 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=""|' env.d/common \
+  "OIDC client secret missing" "a quoted empty secret (Compose passes an empty string)"
+mutate_rs 's|^OIDC_STORE_ID_TOKEN=true$|OIDC_STORE_ID_TOKEN=true\nOIDC_STORE_ID_TOKEN=false|' env.d/common \
+  "OIDC_STORE_ID_TOKEN is not true" "a later duplicate line turns the ID token off (Docker keeps the last)"
+mutate_rs 's|^OIDC_USE_PKCE=true$|OIDC_USE_PKCE=false|' env.d/common \
+  "PKCE is not on with S256" "PKCE turned off"
+mutate_rs 's|^OIDC_PKCE_CODE_CHALLENGE_METHOD=S256$|OIDC_PKCE_CODE_CHALLENGE_METHOD=plain|' env.d/common \
+  "PKCE is not on with S256" "PKCE method plain"
 mutate_rs 's|^OIDC_STORE_ID_TOKEN=true$|OIDC_STORE_ID_TOKEN=false|' env.d/common \
   "OIDC_STORE_ID_TOKEN is not true" "the ID token not kept (no id_token_hint, the Keycloak session survives logout)"
-mutate_rs 's|"issuer": "https://auth.kodera.io/realms/samourai-app"|"issuer": "https://auth.kodera.io/realms/kodera-dev"|' discovery.json \
+mutate_rs 's|"issuer": "https://auth.kodera.io/realms/samourai-app"|"issuer": "https://auth.kodera.io/realms/other-realm"|' discovery.json \
   "disagrees with the config: issuer is" "the discovery document names another issuer"
 mutate_rs 's|"token_endpoint": "https://auth.kodera.io/realms/samourai-app/|"token_endpoint": "https://auth.kodera.io/realms/samourai-app/x/|' discovery.json \
   "disagrees with the config: token_endpoint is" "the realm serves another token endpoint than the env"
@@ -213,6 +221,21 @@ mutate_rs 's|^{$|<html>|' discovery.json \
   "disagrees with the config: the discovery document is not JSON" "an HTML error page instead of the document"
 mutate_rs "1,\$d" discovery.json \
   "cannot read the realm's discovery document" "an empty or unreachable discovery document (fail closed, never SKIP)"
+# Not a mutation: the file variant with the plain key left empty ("") is a
+# correct configuration and must pass the secret check.
+cp "$WORK/env.d/common" "$WORK/env.d/common.orig"
+sed -i.bak -e 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=""|' \
+  -e 's|^OIDC_RP_SCOPES=|OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret\nOIDC_RP_SCOPES=|' "$WORK/env.d/common"
+# Captured first: under pipefail, grep -q closing the pipe early would fail it.
+out="$(bash scripts/preflight.sh config 2>/dev/null)"
+if printf '%s\n' "$out" | grep 'OK' | grep -qF 'OIDC client secret set once' &&
+   ! printf '%s\n' "$out" | grep 'FAIL' | grep -qF 'OIDC client secret'; then
+  ok "a secret file with the plain key empty passes the secret check"
+else
+  err "a secret file with the plain key empty is refused — a correct configuration fails"
+  printf '%s\n' "$out" | grep -F 'OIDC client secret'
+fi
+mv "$WORK/env.d/common.orig" "$WORK/env.d/common"; rm -f "$WORK/env.d/common.bak"
 mutate 's/^  tls_port: 0/  tls_port: 5349/' livekit-server.yaml "TURN without tls_port: 0"
 mutate 's/^  max_participants: 30/  max_participants: 0/' livekit-server.yaml "participant cap removed (0 = unlimited)"
 mutate 's/^  max_participants: 30/  max_participants:/' livekit-server.yaml "participant cap key present but empty"
@@ -476,7 +499,7 @@ class H(http.server.BaseHTTPRequestHandler):
             # The backend's sign-in redirect, as Django answers it.
             if m == "signin-closed":
                 return self.body(410, "text/html", b"<html>410 Gone</html>")
-            realm = "kodera-dev" if m == "signin-other-realm" else "samourai-app"
+            realm = "other-realm" if m == "signin-other-realm" else "samourai-app"
             q = {"response_type": "code", "scope": "openid email profile",
                  "client_id": "visio-test" if m == "signin-other-client" else "visio",
                  "redirect_uri": ("http://127.0.0.1/api/v1.0/callback/" if m == "signin-other-redirect"
@@ -566,7 +589,7 @@ else
   emutate securitytxt-expired 'security.txt expires'      "security.txt past its Expires date (must not be trusted)"
   emutate wellknown-spa       'well-known/ path answers'  "an unknown /.well-known/ path answered by the SPA shell"
   emutate signin-closed         'sign-in does not start at realm samourai-app as client visio: HTTP 410' "authenticate/ still closed at the gateway (the old 410 block left in)"
-  emutate signin-other-realm    'Location is https://auth.kodera.io/realms/kodera-dev/' "sign-in sent to another realm"
+  emutate signin-other-realm    'Location is https://auth.kodera.io/realms/other-realm/' "sign-in sent to another realm"
   emutate signin-other-client   "client_id is 'visio-test'" "sign-in as another client"
   emutate signin-other-redirect "redirect_uri is 'http://127.0.0.1/api/v1.0/callback/'" "a redirect URI Keycloak would refuse (wrong host header, plain http)"
   emutate signin-no-pkce        'no PKCE S256 challenge' "sign-in without PKCE"

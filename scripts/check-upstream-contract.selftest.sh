@@ -158,7 +158,7 @@ env_realm="$(grep -E '^OIDC_' deploy/env.d/common.example)"
 run_realm_case "the committed host template" \
   "$env_realm" 0 'pins sign-in to realm samourai-app, client visio'
 run_realm_case "MUTATION the JWKS endpoint of another realm (its tokens would be trusted)" \
-  "${env_realm//realms\/samourai-app\/protocol\/openid-connect\/certs/realms/kodera-dev/protocol/openid-connect/certs}" 1 'does not pin OIDC_OP_JWKS_ENDPOINT'
+  "${env_realm//realms\/samourai-app\/protocol\/openid-connect\/certs/realms/other-realm/protocol/openid-connect/certs}" 1 'does not pin OIDC_OP_JWKS_ENDPOINT'
 run_realm_case "MUTATION the token endpoint on another host" \
   "${env_realm//https:\/\/auth.kodera.io\/realms\/samourai-app\/protocol\/openid-connect\/token/https://auth.example.org/realms/samourai-app/protocol/openid-connect/token}" 1 'does not pin OIDC_OP_TOKEN_ENDPOINT'
 run_realm_case "MUTATION the logout endpoint removed (the Keycloak session would survive logout)" \

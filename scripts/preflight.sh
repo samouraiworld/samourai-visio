@@ -49,6 +49,8 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
+# envlast <file> <key>: the LAST occurrence, the one Docker keeps, unquoted.
+envlast() { grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | sed "s/^\"//; s/\"\$//; s/^'//; s/'\$//"; }
 
 # Read one `- KEY=value` entry from a named service's environment: block in a
 # compose file. Services sit at two-space indent, so any other two-space key
@@ -226,10 +228,11 @@ phase_config() {
 
   # The secret, exactly once. OIDC_RP_CLIENT_SECRET_FILE wins over the plain
   # value without a word, so both set means the one an operator just edited
-  # may be the one Django ignores.
+  # may be the one Django ignores. Values are read as Compose reads them: the
+  # last line, surrounding quotes stripped, so KEY="" counts as empty.
   local sec secf
-  sec="$(grep -E '^OIDC_RP_CLIENT_SECRET=' env.d/common 2>/dev/null | tail -1 | cut -d= -f2-)"
-  secf="$(grep -E '^OIDC_RP_CLIENT_SECRET_FILE=' env.d/common 2>/dev/null | tail -1 | cut -d= -f2-)"
+  sec="$(envlast env.d/common OIDC_RP_CLIENT_SECRET)"
+  secf="$(envlast env.d/common OIDC_RP_CLIENT_SECRET_FILE)"
   if [ -n "$sec" ] && [ -n "$secf" ]; then
     bad "OIDC client secret set twice: OIDC_RP_CLIENT_SECRET and OIDC_RP_CLIENT_SECRET_FILE" \
         "the file wins silently; keep one of the two"
@@ -244,11 +247,21 @@ phase_config() {
   # token to send as id_token_hint (django-lasuite oidc_login/views.py:89-107).
   # Without it, logout clears the Visio session only, and on a shared
   # computer the next "Se connecter" signs the previous person straight in.
-  if [ "$(envval env.d/common OIDC_STORE_ID_TOKEN)" = "true" ]; then
+  if [ "$(envlast env.d/common OIDC_STORE_ID_TOKEN)" = "true" ]; then
     ok "OIDC_STORE_ID_TOKEN=true: logout ends the Keycloak session too"
   else
     bad "OIDC_STORE_ID_TOKEN is not true: logout would leave the Keycloak session open" \
         "RP-initiated logout needs the ID token kept in the session"
+  fi
+
+  # PKCE, as client visio requires it. Without it, or with `plain`, Keycloak
+  # refuses every authorization request and nobody can sign in.
+  if [ "$(envlast env.d/common OIDC_USE_PKCE)" = "true" ] &&
+     [ "$(envlast env.d/common OIDC_PKCE_CODE_CHALLENGE_METHOD)" = "S256" ]; then
+    ok "PKCE on, method S256"
+  else
+    bad "PKCE is not on with S256: OIDC_USE_PKCE must be true and OIDC_PKCE_CODE_CHALLENGE_METHOD S256" \
+        "client visio requires S256; sign-in fails at Keycloak otherwise"
   fi
 
   # ── The realm still serves what the env names ────────────────────────────
