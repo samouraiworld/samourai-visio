@@ -179,6 +179,33 @@ phase_config() {
   if [ -z "$kc" ]; then ok "no Keycloak leftovers; OIDC_OP_LOGOUT_ENDPOINT correctly unset"
   else bad "upstream Keycloak config survived the copy" "$(echo "$kc" | cut -d: -f1,2 | tr '\n' ' ')"; fi
 
+  # ── Sign-in closed: the backend trusts no identity provider ──────────────
+  # The provider these six settings named no longer serves this host, and
+  # whoever revived its name could sign tokens for any user. Each stays
+  # PRESENT and EMPTY: unset falls back to None, and then every request with a
+  # session cookie fails with ImproperlyConfigured (RS256 needs a JWKS
+  # endpoint); an empty string passes that check and trusts nothing. The last
+  # occurrence is the one Docker keeps, so that is the one read.
+  local oidc_k oidc_v oidc_set="" oidc_missing=""
+  for oidc_k in OIDC_OP_JWKS_ENDPOINT OIDC_OP_AUTHORIZATION_ENDPOINT OIDC_OP_TOKEN_ENDPOINT \
+                OIDC_OP_USER_ENDPOINT OIDC_RP_CLIENT_ID OIDC_RP_CLIENT_SECRET; do
+    if ! grep -qE "^${oidc_k}=" env.d/common 2>/dev/null; then
+      oidc_missing="$oidc_missing $oidc_k"
+    else
+      oidc_v="$(grep -E "^${oidc_k}=" env.d/common | tail -1 | cut -d= -f2- | sed 's/^"//; s/"$//')"
+      [ -n "$oidc_v" ] && oidc_set="$oidc_set $oidc_k"
+    fi
+  done
+  if [ -n "$oidc_set" ]; then
+    bad "sign-in is not closed: env.d/common still sets$oidc_set" \
+        "empty each one (KEY= with nothing after it) and recreate the backend; it trusts tokens from whatever provider they name"
+  fi
+  if [ -n "$oidc_missing" ]; then
+    bad "OIDC settings missing from env.d/common:$oidc_missing" \
+        "keep each line, empty (KEY=): unset falls back to None and every signed-in request fails with ImproperlyConfigured"
+  fi
+  [ -z "$oidc_set$oidc_missing" ] && ok "sign-in closed: the six OIDC provider and client settings are present and empty"
+
   # ── The CSS variable that does not exist ─────────────────────────────────
   if grep -q '^FRONTEND_CUSTOM_CSS_URL=' env.d/common 2>/dev/null; then
     if grep -qE '^FRONTEND_CSS_URL=' env.d/common; then bad "FRONTEND_CSS_URL is set — it is not a Meet setting and is ignored silently"
@@ -819,10 +846,12 @@ phase_stack() {
   # Undefined variables render as the EMPTY STRING with a warning, not as a
   # literal ${VAR} — so grepping for '${' can never catch this. Assert the
   # values are non-empty and well-formed instead.
-  local envout; envout="$(dc exec -T backend printenv DJANGO_ALLOWED_HOSTS MEET_BASE_URL LIVEKIT_API_URL OIDC_OP_TOKEN_ENDPOINT 2>/dev/null)"
+  # OIDC_OP_TOKEN_ENDPOINT left this list when sign-in closed: it is empty
+  # by design now, and the config phase asserts that.
+  local envout; envout="$(dc exec -T backend printenv DJANGO_ALLOWED_HOSTS MEET_BASE_URL LIVEKIT_API_URL 2>/dev/null)"
   local n; n="$(echo "$envout" | grep -c .)"
-  if [ "$n" -ne 4 ]; then
-    bad "one or more critical env vars are EMPTY in the container" "expected 4 non-empty values, got $n — interpolation did not resolve"
+  if [ "$n" -ne 3 ]; then
+    bad "one or more critical env vars are EMPTY in the container" "expected 3 non-empty values, got $n — interpolation did not resolve"
   elif printf '%s' "$envout" | grep -qF "$(printf '$''{')"; then  # literal ${ — interpolation never ran
     bad "literal \${VAR} reached the container — interpolation did not run"
   elif echo "$envout" | grep -qE 'https?:///|//$'; then
@@ -1123,6 +1152,28 @@ edge_headers() {
     else
       bad "$self_path has unexpected frame ancestors: ${selfcsp:-none}" \
           "landing, API and near-match room paths must not be framed by Memba OS"
+    fi
+  done
+
+  # ── Sign-in closed at the gateway: each route answers 410 itself ────────
+  # The theme only hides the button. These are the backend routes a sign-in
+  # goes through, reachable by URL and from the /sdk/ pages with no button at
+  # all; the gateway template answers them 410 before the backend sees them.
+  # The 410 must also carry the server-level headers: a location that set an
+  # add_header of its own would silently drop them.
+  local sign_path signh signc
+  for sign_path in /api/v1.0/authenticate/ /api/v1.0/authenticate /api/v1.0/callback/ /api/v1.0/callback; do
+    signh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin$sign_path" 2>/dev/null | tr -d '\r')"
+    signc="$(printf '%s\n' "$signh" | grep -m1 '^HTTP/' | cut -d' ' -f2)"
+    if [ "$signc" != "410" ]; then
+      bad "sign-in route $sign_path answers HTTP ${signc:-nothing}, expected 410 — sign-in is open again at the gateway" \
+          "restore the 'sign-in closed at the gateway' block in the gateway template and recreate the frontend"
+    elif ! printf '%s\n' "$signh" | grep -qi '^strict-transport-security:' ||
+         ! printf '%s\n' "$signh" | grep -qi '^content-security-policy:'; then
+      bad "sign-in route $sign_path answers 410 without the server-level security headers" \
+          "that location must set no add_header of its own, so it inherits the server-level ones"
+    else
+      ok "sign-in route $sign_path answers 410, with the server-level headers"
     fi
   done
 
@@ -1475,23 +1526,10 @@ phase_public() {
     bad "ALLOW_UNREGISTERED_ROOMS is not working for anonymous visitors" "GET /api/v1.0/rooms/<never-created-slug> did not return a room+token"
   fi
 
-  # ── Clerk still matches what the config assumes ──────────────────────────
-  # The comparison needs the host's env.d/common, which rightly never leaves
-  # the host. Run off-host (no such file), this phase can still prove the
-  # discovery document is reachable — but a missing local file is not a
-  # mismatch, and reporting it as one cried wolf once (2026-07-25).
-  local disc; disc="$(curl -sS --max-time 15 https://clerk.samourai.app/.well-known/openid-configuration 2>/dev/null)"
-  local tok; tok="$(envval "$DIR/env.d/common" OIDC_OP_TOKEN_ENDPOINT)"
-  if [ -z "$disc" ]; then
-    bad "Clerk discovery document unreachable"
-  elif [ ! -f "$DIR/env.d/common" ]; then
-    skip "Clerk discovery reachable, but env.d/common is not readable here" \
-         "the endpoint comparison only runs on the host"
-  elif [ -n "$tok" ] && echo "$disc" | grep -qF "$tok"; then
-    ok "Clerk discovery still advertises the configured token endpoint"
-  else
-    bad "configured OIDC endpoint no longer matches Clerk discovery" "re-derive env.d/common from the live document"
-  fi
+  # (The comparison with Clerk's discovery document left with sign-in: the
+  # name no longer resolves, and the backend now trusts no provider. The
+  # config phase asserts the OIDC settings empty; the edge checks below
+  # assert the gateway's 410 on the sign-in routes.)
 
   # ── Response headers on /, /api and /.well-known/ ────────────────────────
   edge_headers "https://${MEET_HOST}"

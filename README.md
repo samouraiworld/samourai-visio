@@ -29,7 +29,7 @@ supply, then walks the runbook with a preflight gate at each stage.
 
 ## Quick orientation
 
-- **Auth**: Clerk, as OIDC provider — **off since 2026-10-07**: `clerk.samourai.app` no longer serves TLS. The theme hides the sign-in button once deployed; that is not an access control, and the sign-in endpoints stay live. See the top of [RUNBOOK.md](RUNBOOK.md)
+- **Auth**: Clerk, as OIDC provider — **off since 2026-10-07**: `clerk.samourai.app` no longer resolves. Sign-in is closed: the gateway answers the sign-in endpoints with `410 Gone`, and the backend trusts no identity provider. The theme also hides the sign-in button; that alone is not an access control. See the top of [RUNBOOK.md](RUNBOOK.md)
 - **Access**: `ALLOW_UNREGISTERED_ROOMS=True` — a room materialises from any URL, so **no account is needed to create one**. What an account buys is a *persistent, owned, administrable* room. See [RUNBOOK §4 trap 1](RUNBOOK.md)
 - **Branding**: `FRONTEND_CUSTOM_CSS_URL` injects CSS at runtime. No fork, survives upstream upgrades. Tokens are **Panda CSS** (`--colors-*`), not Cunningham
 - **Not in v1**: recording, transcription, telephony
@@ -50,7 +50,7 @@ scripts/check-hygiene.sh && scripts/check-upstream-contract.sh && scripts/check-
 
 Never commit real secrets. Only `*.example` files are tracked; `.gitignore` blocks the rest.
 
-Three secrets are generated at deploy time (`DB_PASSWORD`, `LIVEKIT_API_SECRET`, `DJANGO_SECRET_KEY`) and two come from the Clerk dashboard (`OIDC_RP_CLIENT_ID`, `OIDC_RP_CLIENT_SECRET`). The Clerk client secret is shown **once** and never again.
+Three secrets are generated at deploy time (`DB_PASSWORD`, `LIVEKIT_API_SECRET`, `DJANGO_SECRET_KEY`). The two OIDC client credentials (`OIDC_RP_CLIENT_ID`, `OIDC_RP_CLIENT_SECRET`) are empty while sign-in is closed.
 
 ## Credit
 
