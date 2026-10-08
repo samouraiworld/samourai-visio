@@ -18,7 +18,9 @@ def b64(s: str, mime: str) -> str:
 
 
 # ── Gateway nginx: single public origin -> frontend / backend / livekit ──────
-# No /identity (sign-in is closed), no /media (no recording in v1).
+# No /identity (sign-in is closed), no /media (no recording in v1). The
+# sign-in routes answer 410 here: with the OIDC settings empty, Django's
+# authenticate/ would redirect to itself until the browser gives up.
 # X-Forwarded-Proto is set to https authoritatively here — the gateway always
 # sits behind Greffon's TLS, so it never trusts a client-supplied value.
 GATEWAY = r"""
@@ -30,6 +32,10 @@ server {
     charset utf-8;
     client_max_body_size 100M;
 
+    location = /api/v1.0/authenticate/ { return 410; }
+    location = /api/v1.0/authenticate  { return 410; }
+    location = /api/v1.0/callback/     { return 410; }
+    location = /api/v1.0/callback      { return 410; }
     location /api/ {
         proxy_pass http://backend:8000;
         proxy_set_header Host $host;
@@ -95,7 +101,17 @@ logging:
   json: false
 """
 
-theme_css = (REPO / "theme/custom.css").read_text()
+# The hosted instance signs in through its identity provider; a Greffon
+# instance has none (one client per instance domain would be needed), so its
+# copy of the theme hides every sign-in button. LoginButton.tsx tags each one
+# data-attr="login". This hides a button only; the gateway's 410 closes the
+# routes.
+theme_css = (REPO / "theme/custom.css").read_text() + """
+/* Greffon package: sign-in is closed, so every sign-in button is hidden. */
+[data-attr="login"] {
+  display: none;
+}
+"""
 
 
 def secret(title, key, containers, minlen, alnum=False):

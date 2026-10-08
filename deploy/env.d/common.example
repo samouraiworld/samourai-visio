@@ -18,13 +18,15 @@
 # ────────────────────────────────────────────────────────────────────────────
 #
 # Differs from upstream in five deliberate places:
-#   1. OIDC points at no provider: sign-in is closed (Keycloak upstream)
+#   1. OIDC points at our realm `samourai-app` at auth.kodera.io, client
+#      `visio` (upstream points at its own Keycloak through KEYCLOAK_HOST)
 #   2. OIDC_RP_SCOPES adds `profile`   (default "openid email" -> names empty)
 #   3. OIDC_USERINFO_FULLNAME_FIELDS overridden (default contains `usual_name`,
-#      a ProConnect-only claim Clerk does not emit)
+#      a ProConnect-only claim Keycloak does not emit)
 #   4. ALLOW_UNREGISTERED_ROOMS=True   (upstream template ships False, which
 #      would require an account just to JOIN a call)
-#   5. OIDC_OP_LOGOUT_ENDPOINT omitted (Clerk advertises no logout endpoint)
+#   5. FRONTEND_IS_SILENT_LOGIN_ENABLED=false (a guest never contacts the
+#      identity provider; see Guest access below)
 
 # ── Django ──
 DJANGO_ALLOWED_HOSTS=${MEET_HOST}
@@ -78,62 +80,45 @@ DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
 # rather than a 404, so a naive curl check will not catch it.
 DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
 
-# ── OIDC — sign-in closed ──
-# Sign-in is off on this instance. These six lines named the old Clerk
-# provider at clerk.samourai.app, whose name no longer resolves; whoever
-# revived it could sign tokens for any user, so the backend trusts nothing.
-# Keep each line, EMPTY: unset, Django falls back to None and every request
-# carrying a session cookie fails with ImproperlyConfigured (RS256 needs a
-# JWKS endpoint); an empty string passes that check and trusts no provider.
-# The gateway answers authenticate/ and callback/ with 410 (gateway template).
-# `preflight.sh config` asserts all six present and empty.
+# ── OIDC — realm samourai-app at auth.kodera.io, client visio ──
+# Issuer https://auth.kodera.io/realms/samourai-app. Accounts are created at
+# first sign-in through GitHub or Google; no password is ever set.
+# Meet checks neither `iss` nor `aud` on the ID token: it trusts any token
+# signed by a key behind OIDC_OP_JWKS_ENDPOINT. These lines are therefore the
+# whole trust decision, and `preflight.sh config` pins each one to the realm
+# and compares them with the realm's live discovery document.
+# Never delete a line: unset, Django falls back to None and every request
+# carrying a session cookie fails with ImproperlyConfigured.
 # Never re-create the old CNAME clerk.samourai.app -> frontend-api.clerk.services.
-OIDC_OP_JWKS_ENDPOINT=
-OIDC_OP_AUTHORIZATION_ENDPOINT=
-OIDC_OP_TOKEN_ENDPOINT=
-OIDC_OP_USER_ENDPOINT=
-# OIDC_OP_LOGOUT_ENDPOINT intentionally unset — Clerk reported
-# backchannel_logout_supported:false and frontchannel_logout_supported:false.
-# Verified safe in source: django-lasuite oidc_login/views.py:89-92 returns the
-# plain redirect URL when this is falsy, and post() then calls auth.logout().
-# Effect: logout clears the Django session but NOT the Clerk SSO session, so
-# log-out-then-log-in silently re-authenticates.
-# Do NOT copy upstream's Keycloak value at env.d/production.dist/common:33.
+OIDC_OP_JWKS_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/certs
+OIDC_OP_AUTHORIZATION_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/auth
+OIDC_OP_TOKEN_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/token
+OIDC_OP_USER_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/userinfo
+# RP-initiated logout: "Se déconnecter" ends the Keycloak session as well,
+# so on a shared computer the next "Se connecter" asks again. It needs the
+# ID token in the session (OIDC_STORE_ID_TOKEN below) as id_token_hint;
+# django-lasuite oidc_login/views.py:89-107.
+OIDC_OP_LOGOUT_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/logout
 
-# Client credentials: empty while sign-in is closed (see above). A future
-# provider registers exactly https://visio.samourai.app/api/v1.0/callback/
-# (trailing slash included); `authenticate/` is a local entry point.
-OIDC_RP_CLIENT_ID=
-OIDC_RP_CLIENT_SECRET=
-# (both empty while sign-in is closed)
+# Confidential client `visio`: exact redirect URI
+# https://visio.samourai.app/api/v1.0/callback/ (trailing slash included),
+# post-logout URI https://visio.samourai.app/api/v1.0/logout-callback/.
+# The secret is on the client's Credentials tab in Keycloak; it lives there
+# and in this file only. Set it here OR through OIDC_RP_CLIENT_SECRET_FILE
+# (footer), never both: the file wins silently.
+OIDC_RP_CLIENT_ID=visio
+OIDC_RP_CLIENT_SECRET=<from Keycloak: client visio, Credentials tab>
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
 # Comma-separated, NOT JSON. See the header.
-#
-# Set to `preferred_username` by decision (2026-07-22): a public handle suits a
-# public video service better than a legal name, and it is one attribute rather
-# than two on a sign-up form shared with Memba and Zentai.
-#
-# !! REQUIRES A CLERK CHANGE THAT IS NOT YET APPLIED. !!
-# Audited 2026-07-22: `username` is DISABLED on clerk.samourai.app (as are
-# first_name and last_name). Until it is enabled in the Clerk dashboard,
-# userinfo carries no preferred_username and full_name stays NULL.
-# No worse than the previous value, which was equally empty — see the audit.
-#
-# Impact while unset is small: the join screen shows a required name field to
-# anyone not logged in, and also to logged-in users because
-# AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME defaults true
-# (Join.tsx:457-465). A null full_name means that field starts empty instead of
-# pre-filled; the browser remembers what the user types.
-#
-# Re-check with: scripts/audit-clerk-instance.sh
-# Rationale: first/last name are disabled on the Clerk instance; the username
-# handle is the only name claim that actually arrives.
-OIDC_USERINFO_FULLNAME_FIELDS=preferred_username
-OIDC_USERINFO_SHORTNAME_FIELD=preferred_username
-# Default is empty, which requires only `sub` — so a Clerk identity with no
-# email would create a silent null-email account rather than being rejected.
+# Keycloak emits given_name and family_name from the account's first and last
+# name, which GitHub and Google fill at first sign-in; the realm requires a
+# first name, so given_name is never empty.
+OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
+OIDC_USERINFO_SHORTNAME_FIELD=given_name
+# Default is empty, which requires only `sub` — so an identity with no email
+# would create a silent null-email account rather than being rejected.
 OIDC_USERINFO_ESSENTIAL_CLAIMS=email
 
 OIDC_USE_PKCE=true
@@ -143,25 +128,14 @@ OIDC_REDIRECT_REQUIRE_HTTPS=true
 # Host only — no scheme, no brackets. Django compares urlparse(url).netloc
 # against this set, so a scheme-bearing entry can never match anything.
 OIDC_REDIRECT_ALLOWED_HOSTS=visio.samourai.app
-# Nothing reads the stored ID token: there is no SessionRefresh middleware,
-# and the only reader returns before reaching it while logout is unset. With
-# the default (true) it is dead Clerk PII sitting in every Redis session.
-OIDC_STORE_ID_TOKEN=false
+# Kept in the Redis session for RP-initiated logout only (see above): without
+# it, logout ends the Visio session and leaves the Keycloak one open.
+OIDC_STORE_ID_TOKEN=true
 
 # NEVER set OIDC_FALLBACK_TO_EMAIL_FOR_IDENTIFICATION=true. `email_verified`
-# is checked nowhere in the chain, so with a shared Clerk org it creates an
-# account-takeover path via an unverified email matching an existing user.
-
-# ── OIDC fallbacks, in order, if login fails ──
-# 1. HTTP 400 "JWT Nonce verification failed" -> Clerk is not echoing `nonce`
-#    into the ID token. The check is fatal and outside the try/except, so this
-#    surfaces as a bare 400, not a graceful failure redirect.
-#OIDC_USE_NONCE=false
-# 2. Token endpoint rejects the credentials -> Clerk dropped client_secret_post.
-#OIDC_TOKEN_USE_BASIC_AUTH=true
-# 3. Last resort. PKCE + a confidential client is valid and Clerk advertises
-#    S256, so this should not be needed.
-#OIDC_USE_PKCE=false
+# is checked nowhere in the chain, so in a realm shared with other apps it
+# creates an account-takeover path via an unverified email matching an
+# existing user. Users are matched on `sub` alone.
 
 LOGIN_REDIRECT_URL=https://${MEET_HOST}
 LOGIN_REDIRECT_URL_FAILURE=https://${MEET_HOST}
@@ -200,13 +174,15 @@ ALLOW_UNREGISTERED_ROOMS=True
 # (is_administrable: false) and no attribution for moderation.
 #
 # DISABLED deliberately (decision 2026-07-24). Upstream defaults to true, which
-# sends EVERY anonymous visitor to Clerk with prompt=none before they click
-# anything — a round trip to a US processor on the guest path, on a service
-# whose stated position is no third parties. Verified live before the change:
-# an anonymous visit left `silent-login-retry` in localStorage, i.e. it fired.
+# sends EVERY anonymous visitor to the identity provider with prompt=none
+# before they click anything — a round trip on the guest path, on a service
+# whose stated position is that a guest leaves no trace. Verified live before
+# the change: an anonymous visit left `silent-login-retry` in localStorage,
+# i.e. it fired.
 #
-# With this false, a guest's browser never contacts Clerk at all, which is what
-# lets the privacy policy state it plainly (landing/confidentialite/).
+# With this false, a guest's browser never contacts auth.kodera.io at all,
+# which is what lets the privacy policy state it plainly
+# (landing/confidentialite/).
 #
 # Cost: a Samouraï user already signed in elsewhere must click "se connecter"
 # instead of being recognised silently. Accepted.
@@ -269,7 +245,7 @@ FRONTEND_EXTERNAL_HOME_URL="https://${MEET_HOST}/accueil/"
 # `docker compose config` output.
 #
 #   DJANGO_SECRET_KEY_FILE=/run/secrets/django_secret_key
-#   OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/clerk_client_secret
+#   OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret
 #   DJANGO_EMAIL_HOST_PASSWORD_FILE=/run/secrets/scaleway_tem_secret_key
 #
 # Write them with `printf '%s'` — exactly one trailing newline is stripped, so

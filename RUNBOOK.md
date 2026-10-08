@@ -1,37 +1,32 @@
 # Runbook — visio.samourai.app
 
-> La Suite Meet, self-hosted on Scaleway, authenticated against the existing **Clerk** org (`clerk.samourai.app`).
+> La Suite Meet, self-hosted on Scaleway, authenticated against the Keycloak realm
+> `samourai-app` at `auth.kodera.io` (client `visio`).
 > Written 2026-07-22. Execute top to bottom.
 
 > [!IMPORTANT]
-> **Sign-in is off since 2026-10-07.** `clerk.samourai.app` no longer resolves: its DNS records
-> were deleted, so a new sign-in cannot succeed. Sign-in is closed in three places:
+> **Sign-in moved from Clerk to Keycloak in October 2026.** The old provider,
+> `clerk.samourai.app`, was switched off on 2026-10-07; sign-in stayed closed at the gateway until
+> the move. Accounts start fresh: Meet matches users on `sub`, Keycloak's never equals
+> Clerk's, so a returning user gets a new account and rooms owned by an old one stay with it.
 >
-> - **The gateway** (`deploy/nginx/default.conf.template`, block "sign-in closed at the
->   gateway") answers `/api/v1.0/authenticate/` and `/api/v1.0/callback/`, with and without the
->   trailing slash, with `410 Gone` once deployed. This is what closes the typed URL and the
->   `/sdk/` pages (which load no theme). Logout stays open. `preflight.sh public` asserts the 410.
-> - **The backend** trusts no identity provider: the six `OIDC_OP_*` endpoint and
->   `OIDC_RP_CLIENT_*` lines in `env.d/common` are present and **empty** (§4). Empty, not
->   removed: unset falls back to None and every request carrying a session cookie fails.
->   `preflight.sh config` asserts it.
-> - **The theme** hides every sign-in button (`[data-attr="login"]`, set by upstream
->   `LoginButton.tsx`; no upstream setting does it), and `scripts/check-upstream-contract.sh`
->   fails if that rule or that attribute goes away. **This hides a button; it is not an access
->   control.**
+> - **Who signs in**: anyone with a GitHub or Google account. The realm creates the account at
+>   first sign-in; there is no password. The account is shared with the other Samouraï apps of
+>   the realm.
+> - **Trust**: Meet checks neither `iss` nor `aud` on the ID token; it trusts whatever the keys
+>   behind `OIDC_OP_JWKS_ENDPOINT` sign. `preflight.sh config` pins every endpoint to the realm
+>   and compares them with its live discovery document, and fails closed; `preflight.sh public`
+>   follows `authenticate/` to the realm.
+> - **Logout** is RP-initiated: it ends the Keycloak session as well, so on a shared computer
+>   the next "Se connecter" asks again.
+> - **Guests** need no account and never contact `auth.kodera.io` (silent login stays off).
 >
 > **Never re-create the old CNAME `clerk.samourai.app` → `frontend-api.clerk.services`** (nor
 > `accounts`, `clkmail`, `clk._domainkey`, `clk2._domainkey`). Whoever then controlled that name
 > could sign tokens for any user of a backend that still trusted it.
 >
-> - Guests can still join any public room, and start one from any URL (§0 access
->   table).
-> - A guest waiting at a room whose access is restricted can no longer be let in once its
->   owner's session has expired: nobody can sign in to admit them.
-> - Sessions opened before the outage stay valid until they expire (12 h); no new one can start.
->
-> Sections 1-3 below describe sign-in as it was set up. They are a record, not the current
-> state, and apply again only once a working identity provider is configured.
+> **Fastest kill switch**, without a deploy: disable client `visio` in the realm's admin
+> console. New sign-ins then fail at Keycloak; guests are unaffected.
 
 > [!WARNING]
 > **Verified against the local clone of `suitenumerique/meet`, which is from 2026-02-24 (5 months stale, shallow).**
@@ -50,7 +45,7 @@
 | Meet backend (Django) | API, rooms, auth |
 | Meet frontend | React app |
 | Reverse proxy | TLS termination (nginx-proxy + Let's Encrypt, or Caddy) |
-| **Clerk** (external) | OIDC identity provider — already running |
+| **Keycloak** (realm `samourai-app`, `auth.kodera.io`) | OIDC identity provider — run by the cooperative, not by this stack |
 
 **Not in v1:** recording, transcription, summarisation, telephony. Each needs MinIO, `livekit-egress`, and dedicated Celery workers.
 
@@ -62,7 +57,7 @@
 |---|---|---|
 | Anonymous visitor | **Join** any room by link | Nothing — they type a display name on the join screen |
 | Anonymous visitor | **Create** a room from any URL | Nothing (`ALLOW_UNREGISTERED_ROOMS=True`) |
-| Signed-in user | Own an **administrable, persistent** room | Clerk login — **off since 2026-10-07** (top of this file) |
+| Signed-in user | Own an **administrable, persistent** room | Sign-in through GitHub or Google, brokered by the realm (§1) |
 
 How the guest path works, end to end:
 
@@ -74,61 +69,65 @@ How the guest path works, end to end:
 
 Two settings interact with this and should be tested before launch:
 
-- **`FRONTEND_IS_SILENT_LOGIN_ENABLED`** (default `true`) redirects every anonymous visitor to Clerk with `prompt=none`, rate-limited via `localStorage`. Keeping it on means returning signed-in users are recognised without clicking "log in"; turning it off removes a redirect from every guest's first visit. The callback only handles `error=login_required` gracefully — test the anonymous path.
+- **`FRONTEND_IS_SILENT_LOGIN_ENABLED`** (default `true`) redirects every anonymous visitor to the identity provider with `prompt=none`, rate-limited via `localStorage`. **Off here**: a guest never contacts `auth.kodera.io`, which the privacy policy states. The cost is one click on "Se connecter" for a user already signed in elsewhere.
 - **`AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME`** (default `true`) shows the same name field to signed-in users, pre-filled from `full_name`.
 
-Session: Django cookie, 12 h.
+Sessions: Visio's Django cookie lasts 12 h. The realm's own session uses Keycloak's defaults (30 min idle, 10 h at most); it only matters at the next sign-in, since Visio does not refresh tokens.
 
 > [!IMPORTANT]
 > The production template ships `ALLOW_UNREGISTERED_ROOMS=False`. For a free public instance you **must** flip it to `True` (§4). This is the single most consequential line in the config.
 
 ---
 
-## 1. Clerk — create the OAuth application
+## 1. Identity provider — the Visio client in realm `samourai-app`
 
-*Record of the 2026-07-22 setup — sign-in is off since 2026-10-07, see the top of this file.*\
-Your instance was **already a working OIDC provider**. Verified live then:
-
-```
-https://clerk.samourai.app/.well-known/openid-configuration → HTTP 200
-```
+Sign-in goes to the Keycloak realm `samourai-app` at `auth.kodera.io`, which the cooperative
+runs for several of its apps; this stack runs no Keycloak of its own. Measured 2026-10-08:
 
 ```
-issuer                  https://clerk.samourai.app
-authorization_endpoint  https://clerk.samourai.app/oauth/authorize
-token_endpoint          https://clerk.samourai.app/oauth/token
-userinfo_endpoint       https://clerk.samourai.app/oauth/userinfo
-jwks_uri                https://clerk.samourai.app/.well-known/jwks.json
-scopes_supported        offline_access, user:org:read, email, profile,
-                        public_metadata, private_metadata, openid
-claims_supported        email, email_verified, given_name, family_name, name,
-                        sub, iat, preferred_username, picture, aud, iss, exp, org_id
-code_challenge_methods  S256                    ← PKCE available
-id_token_signing_alg    RS256                   ← matches OIDC_RP_SIGN_ALGO
-backchannel_logout      false
-frontchannel_logout     false                   ← no logout endpoint (see §4 note)
+https://auth.kodera.io/realms/samourai-app/.well-known/openid-configuration → HTTP 200
+
+issuer                  https://auth.kodera.io/realms/samourai-app
+authorization_endpoint  …/protocol/openid-connect/auth
+token_endpoint          …/protocol/openid-connect/token
+userinfo_endpoint       …/protocol/openid-connect/userinfo
+jwks_uri                …/protocol/openid-connect/certs
+end_session_endpoint    …/protocol/openid-connect/logout   ← RP-initiated logout
+code_challenge_methods  plain, S256                         ← PKCE S256
 ```
 
-**Steps** (Clerk Dashboard → *OAuth applications* → *Add OAuth application*):
+**The client.** The realm's administrator creates it; nothing in this repository can. Client
+`visio`:
 
-1. Name: `Visio Samouraï`
-2. Scopes: **`openid`, `email`, `profile`** — `profile` is required or user names arrive empty
+| Setting | Value |
+|---|---|
+| Client authentication | **On** (confidential), client secret |
+| Flows | Standard flow (authorization code) only: no implicit flow, no direct access grants, no service account |
+| PKCE | `S256`, required |
+| Valid redirect URIs | exactly `https://visio.samourai.app/api/v1.0/callback/` (trailing slash included, no wildcard) |
+| Valid post-logout redirect URIs | exactly `https://visio.samourai.app/api/v1.0/logout-callback/` |
+| Web origins | none |
+| Default client scopes | `basic`, `email`, `profile` (`basic` carries `sub`; Meet matches users on `sub` alone) |
+| Optional client scopes | none (no `offline_access`) |
+| ID token signature | `RS256` (`OIDC_RP_SIGN_ALGO`) |
 
-> [!WARNING]
-> **The `profile` scope is necessary but not sufficient, and on this instance it is currently not enough.**
-> Audited 2026-07-22: `first_name` and `last_name` are **disabled** on `clerk.samourai.app`, so the sign-up form collects no name, `userinfo` carries no `given_name`/`family_name`, and `full_name` is `NULL` for every user — regardless of scopes or env vars.
-> Re-check with `scripts/audit-clerk-instance.sh` (it prints the live sign-up mode, the enabled identifiers and the abuse controls).
-> Enabling those attributes changes the sign-up form for **Memba and Zentai** as well — this instance is shared.
-3. Redirect URI — exactly:
-   ```
-   https://visio.samourai.app/api/v1.0/callback/
-   ```
-   *(Meet mounts `lasuite.oidc_login.urls` under `api/{API_VERSION}/` in `core/urls.py:37-45`; `API_VERSION = "v1.0"`.)*
-4. Copy the **Client Secret immediately** — Clerk does not store it and will never show it again
-5. Copy the **Client ID** from the app settings page
+*(Meet mounts `lasuite.oidc_login.urls` under `api/{API_VERSION}/` in `core/urls.py:37-45`;
+`API_VERSION = "v1.0"`. The logout view sends `post_logout_redirect_uri` as the absolute URL of
+`logout-callback/`, django-lasuite `oidc_login/views.py:94-103`.)*
 
-> [!NOTE]
-> Because this reuses the shared org, **every existing Samouraï account (Memba, Zentai, …) can create rooms on day one**, and every new Visio signup becomes a Samouraï account everywhere. That's the intent — just be deliberate about it, and make sure your CGU covers it.
+**Users.** The realm brokers GitHub and Google; accounts are created at first sign-in, with no
+password. The realm requires a first name, so `given_name` is always there for
+`OIDC_USERINFO_FULLNAME_FIELDS` (§4). A Visio account is a Samouraï account on the realm's other
+apps too, and the reverse: be deliberate about it, and make sure the CGU covers it.
+
+**The secret.** On the client's *Credentials* tab. It has two copies only: the Keycloak database
+(and its backups) and `env.d/common` on the Visio host, mode 600. Read it once and write it
+straight into that file — never into a repository, a note, a chat or a message. To rotate it:
+*Regenerate* in Keycloak, edit `env.d/common`, recreate `backend`.
+
+**Testing against another realm.** Keycloak allows exact redirect URIs only, so a local Visio
+(`http://localhost:…/api/v1.0/callback/`) needs a temporary client of its own on a test realm,
+deleted afterwards. Never add a `localhost` URI to client `visio`.
 
 ---
 
@@ -149,7 +148,7 @@ LiveKit SFU is **CPU- and bandwidth-bound**, and load scales with *participant-m
 | `visio.samourai.app` | Meet frontend + backend |
 | `livekit.samourai.app` | LiveKit SFU |
 
-No `id.` record needed — Clerk replaces Keycloak.
+No `id.` record needed — sign-in goes to the realm at `auth.kodera.io`, which has its own DNS.
 
 ### Firewall
 
@@ -242,14 +241,14 @@ FRONTEND_INTERNAL_HOST=frontend
 LIVEKIT_INTERNAL_HOST=livekit
 # The proxy-tier network's subnet (§5). Compose refuses to run without it.
 PROXY_TIER_SUBNET=<proxy-tier-subnet>
-# KEYCLOAK_HOST / REALM_NAME are unused — Clerk replaces Keycloak
+# KEYCLOAK_HOST / REALM_NAME are unused — the realm is not run by this stack
 ```
 
 ### `env.d/postgresql`
 
 Set `DB_PASSWORD` to the generated value. Leave the rest.
 
-### `env.d/common` — the Clerk-specific version
+### `env.d/common` — the realm `samourai-app` version
 
 Replace the whole OIDC block from the Keycloak template with this:
 
@@ -278,25 +277,23 @@ DJANGO_EMAIL_FROM=visio@samourai.app
 DJANGO_EMAIL_BRAND_NAME="Samouraï Visio"
 DJANGO_EMAIL_LOGO_IMG="https://${MEET_HOST}/custom/logo.png"
 
-# ── OIDC — sign-in closed (see the top of this runbook) ──
-# Present and EMPTY, never removed. These named Clerk at clerk.samourai.app.
-OIDC_OP_JWKS_ENDPOINT=
-OIDC_OP_AUTHORIZATION_ENDPOINT=
-OIDC_OP_TOKEN_ENDPOINT=
-OIDC_OP_USER_ENDPOINT=
-# OIDC_OP_LOGOUT_ENDPOINT deliberately unset — Clerk advertised no logout endpoint
+# ── OIDC — realm samourai-app at auth.kodera.io, client visio (§1) ──
+# Never delete a line: unset falls back to None and every request with a
+# session cookie fails. preflight.sh config pins each value to the realm.
+OIDC_OP_JWKS_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/certs
+OIDC_OP_AUTHORIZATION_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/auth
+OIDC_OP_TOKEN_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/token
+OIDC_OP_USER_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/userinfo
+OIDC_OP_LOGOUT_ENDPOINT=https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/logout
 
-OIDC_RP_CLIENT_ID=
-OIDC_RP_CLIENT_SECRET=
-# (both empty while sign-in is closed)
+OIDC_RP_CLIENT_ID=visio
+OIDC_RP_CLIENT_SECRET=<from Keycloak: client visio, Credentials tab>
 OIDC_RP_SIGN_ALGO=RS256
 OIDC_RP_SCOPES="openid email profile"
 
 # Comma-separated. NOT JSON — see trap 2.
-# preferred_username, because this Clerk instance collects no first/last name
-# (see the Clerk audit). Requires `username` enabled in Clerk. See trap 3.
-OIDC_USERINFO_FULLNAME_FIELDS=preferred_username
-OIDC_USERINFO_SHORTNAME_FIELD=preferred_username
+OIDC_USERINFO_FULLNAME_FIELDS=given_name,family_name
+OIDC_USERINFO_SHORTNAME_FIELD=given_name
 OIDC_USERINFO_ESSENTIAL_CLAIMS=email
 
 OIDC_USE_PKCE=true
@@ -305,7 +302,8 @@ OIDC_CREATE_USER=true
 OIDC_REDIRECT_REQUIRE_HTTPS=true
 # Host only — no scheme, no brackets.
 OIDC_REDIRECT_ALLOWED_HOSTS=${MEET_HOST}
-OIDC_STORE_ID_TOKEN=false
+# Kept for RP-initiated logout (trap 5).
+OIDC_STORE_ID_TOKEN=true
 
 LOGIN_REDIRECT_URL=https://${MEET_HOST}
 LOGIN_REDIRECT_URL_FAILURE=https://${MEET_HOST}
@@ -334,14 +332,14 @@ What it actually does (`core/api/viewsets.py:257-277`): it fires **only** when `
 **2. List settings are comma-separated, not JSON.**
 `values.ListValue` parses with `value.strip().split(',')` (`django-configurations configurations/values.py:238`) and never reads JSON. `["given_name","family_name"]` becomes `['["given_name"', '"family_name"]']`, so `user_info.get(...)` returns `None` and **every display name is empty**. There is no error. Upstream's own template gets this wrong at `env.d/production.dist/common:44`. Affects `OIDC_USERINFO_FULLNAME_FIELDS`, `OIDC_REDIRECT_ALLOWED_HOSTS`, `OIDC_USERINFO_ESSENTIAL_CLAIMS`, `DJANGO_CSRF_TRUSTED_ORIGINS`.
 
-**3. `OIDC_USERINFO_FULLNAME_FIELDS` — override the default, and match it to what the instance actually collects.**
-Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Clerk never emits, so the default leaves every display name empty. We set **`preferred_username`** — because the Clerk instance has first/last name **disabled** (verified with `scripts/audit-clerk-instance.sh`, 2026-07-22), so a public username handle is the only name field that actually arrives. This **requires enabling `username` in the Clerk dashboard**. (A single token also can't be mis-split by trap 2.)
+**3. `OIDC_USERINFO_FULLNAME_FIELDS` — override the default, and match it to what the realm actually emits.**
+Meet defaults to `["given_name", "usual_name"]` (`settings.py:574`). `usual_name` is a **ProConnect-specific** claim Keycloak never emits, so the default leaves half of every display name empty. We set **`given_name,family_name`**: Keycloak emits both from the account's first and last name, which GitHub and Google fill at first sign-in, and the realm requires a first name. (Comma-separated: see trap 2.)
 
 **4. `OIDC_RP_SCOPES` — the default is too narrow.**
-Default is `"openid email"` (`settings.py:533`). Without `profile` you get no profile claims — including `preferred_username` — and names render empty regardless of trap 3. The scope is necessary but **not sufficient**: Clerk emits `preferred_username` only if the instance has **`username` enabled**, a setting shared with every other `*.samourai.app` product.
+Default is `"openid email"` (`settings.py:533`). Without `profile` you get no profile claims — no `given_name`, no `family_name` — and names render empty regardless of trap 3. The client must also carry `profile` among its default scopes (§1).
 
-**5. No logout endpoint.**
-Clerk reports `backchannel_logout_supported: false` and `frontchannel_logout_supported: false`. Leave `OIDC_OP_LOGOUT_ENDPOINT` unset. Consequence: signing out of Meet clears the local Django session but **not** the Clerk SSO session — clicking "log out" then "log in" silently re-authenticates. Acceptable for a shared-SSO product; surprising if you don't expect it. If you need true logout, redirect to Clerk's sign-out URL after `LOGOUT_REDIRECT_URL`.
+**5. Logout must end the Keycloak session too.**
+`lasuite`'s logout view sends the browser to `OIDC_OP_LOGOUT_ENDPOINT` with `id_token_hint` and `post_logout_redirect_uri` only when the endpoint is set **and** the ID token is in the session (`oidc_login/views.py:89-107`). So both `OIDC_OP_LOGOUT_ENDPOINT` and `OIDC_STORE_ID_TOKEN=true` are needed. With either missing, "Se déconnecter" clears the Django session only, the Keycloak session survives, and on a shared computer the next "Se connecter" signs the previous person straight in. `preflight.sh config` and `stack` fail on both. The ID token then sits in the Redis session (see `.gitignore`: Redis holds sessions).
 
 ### `livekit-server.yaml`
 
@@ -401,7 +399,7 @@ Two edits to the nginx-proxy example are mandatory:
       - TRUST_DOWNSTREAM_PROXY=false
 
       # FIRST RUN ONLY — prove issuance against staging before spending the
-      # Let's Encrypt budget. samourai.app is shared with clerk/memba/zentai,
+      # Let's Encrypt budget. samourai.app is shared with memba/zentai and others,
       # and the limits (5 failed validations/hostname/hour, 50 certs/domain/
       # week) are per registered domain.
       - ACME_CA_URI=https://acme-staging-v02.api.letsencrypt.org/directory
@@ -540,7 +538,7 @@ docker compose run --rm backend python manage.py migrate
 **No superuser is created, and `/admin` is deliberately unreachable from the
 internet** (the gateway 404s it — see §7bis). Django's admin has no MFA and no
 brute-force protection, it reaches every account and room, and a login there can
-grant `roomAdmin` on any room — a second, weaker credential path beside Clerk,
+grant `roomAdmin` on any room — a second, weaker credential path beside sign-in,
 which is what every real user authenticates against. Nothing in normal operation
 needs it.
 
@@ -720,12 +718,13 @@ under us.
       docker compose run --rm backend python manage.py shell -c \
         "from django.conf import settings; print(settings.OIDC_USERINFO_FULLNAME_FIELDS, settings.OIDC_REDIRECT_ALLOWED_HOSTS)"
       ```
-      Expected `['preferred_username'] ['visio.samourai.app']` — it must match whatever §4 sets `OIDC_USERINFO_FULLNAME_FIELDS` to (`preferred_username` by the 2026-07-22 decision, because first/last name are disabled on this Clerk instance). The outer brackets are normal Python list repr; a bracket or quote **inside an item** is trap 2.
+      Expected `['given_name', 'family_name'] ['visio.samourai.app']` — it must match whatever §4 sets `OIDC_USERINFO_FULLNAME_FIELDS` to. The outer brackets are normal Python list repr; a bracket or quote **inside an item** is trap 2.
 - [ ] `X-Forwarded-Proto` cannot be spoofed — `curl -H "X-Forwarded-Proto: https" http://visio.samourai.app/` must redirect to `https://`, not serve a 200 over plaintext
 - [ ] **Flood brake** — from a test client off the host, 200 requests at once on `/api/v1.0/rooms/<throwaway>/` answer about 100 × `429`, and a minute later a browser join from that same network works (§5)
 - [ ] **Real client address** — `docker compose logs frontend` shows visitors' public addresses, never an address inside `PROXY_TIER_SUBNET` (§5)
-- [ ] "Log in" → Clerk → back to Meet, **name and email correct** (validates traps 3 and 4). Test with a **freshly created** account: a pre-existing Clerk user may simply have no name stored
-- [ ] Anonymous first visit does not bounce — silent login (`prompt=none`) succeeds or fails gracefully
+- [ ] **Sign-in starts at the realm** — `curl -sI https://visio.samourai.app/api/v1.0/authenticate/` answers `302` to `https://auth.kodera.io/realms/samourai-app/protocol/openid-connect/auth?…` with `client_id=visio`, `redirect_uri=https%3A%2F%2Fvisio.samourai.app%2Fapi%2Fv1.0%2Fcallback%2F` and `code_challenge_method=S256`; `preflight.sh public` asserts the same
+- [ ] "Se connecter" → `auth.kodera.io` → **GitHub**, with an account that has never used the realm → back to Visio, **name and email correct** (validates traps 3 and 4). Then the same through **Google**
+- [ ] **Logout ends the Keycloak session** — "Se déconnecter", then "Se connecter": Keycloak asks for GitHub or Google again instead of signing you straight back in (trap 5)
 - [ ] Create a room as a logged-in user
 - [ ] Open the **created** room's link in a private window — joins with no account *(validates `access_level` + `RoomPermissions`, **not** the flag)*
 - [ ] Open a slug that was **never created** — e.g. `/zzz-test-unregistered-2026` — in a private window; a room materialises and joins *(**this alone** validates `ALLOW_UNREGISTERED_ROOMS` — trap 1)*
@@ -734,12 +733,11 @@ under us.
 - [ ] Call from a restrictive network (mobile data / corporate VPN). **Records what works; not a pass/fail gate.** With TURN on UDP/443 this covers firewalls that permit QUIC; a TCP-443-only firewall with TLS inspection will still fail, and that needs a second IP or SNI multiplexing
 - [ ] Invitation email arrives via Scaleway TEM, **and its logo renders**
 - [ ] Custom CSS **applied**, not merely served — `/custom/style.css` must return `200 text/css`; the SPA fallback returns `200 text/html` for a missing file, never 404
-- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis). While sign-in is off (top of this file), only the first half can be checked
-- [ ] **No sign-in button** while sign-in is off — `curl -sS https://visio.samourai.app/custom/style.css | grep -cE '^\[data-attr="login"\] \{$'` prints `1` (the deployed theme carries the rule), and a room slug opened in a private window shows a join screen with no "Se connecter" button
-- [ ] **Sign-in closed at the gateway** — `for p in authenticate/ authenticate callback/ callback; do curl -s -o /dev/null -w '%{http_code}\n' "https://visio.samourai.app/api/v1.0/$p"; done` prints `410` four times, and `preflight.sh config` reports the six OIDC settings present and empty
+- [ ] **Landing page** — open `https://visio.samourai.app/` in a private window: you land on the Samouraï page, not Meet's home. Then sign in and open `/` again: you get **Meet's** home. Both halves matter (§7bis)
+- [ ] **The sign-in button is back** — `curl -sS https://visio.samourai.app/custom/style.css | grep -c 'data-attr="login"'` prints `0`, and a room slug opened in a private window shows "Se connecter"
 - [ ] **Legal pages reachable** from the landing footer, and they name **Samouraï Coop** — not DINUM (§7bis)
 - [ ] **No third-party request** — open devtools → Network on the landing *and* inside a room, and confirm every request goes to `visio.samourai.app` or `livekit.samourai.app`. This is what the privacy policy asserts
-- [ ] **A guest never contacts Clerk** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit must produce no `clerk.samourai.app` request and leave no `silent-login-retry` key in `localStorage`
+- [ ] **A guest never contacts the identity provider** — with `FRONTEND_IS_SILENT_LOGIN_ENABLED=false`, an anonymous first visit, and a guest joining a room, must produce no `auth.kodera.io` request and leave no `silent-login-retry` key in `localStorage`
 - [ ] **"Démarrer une réunion" works** — the button lands you in a joinable room. This also re-exercises `ALLOW_UNREGISTERED_ROOMS`
 - [ ] **Backend default locale is `fr-fr`** — `/api/v1.0/config/` reports it. This needs the container **recreated** (`up -d`), not merely restarted.
       ⚠️ It does **not** set the interface language: the SPA resolves that client-side via i18next browser detection (`localStorage`, then `navigator`; `fallbackLng: 'fr'`), and `LANGUAGE_CODE` appears in none of its JS chunks. Invitation e-mails follow the **sender's** `Accept-Language`. Check the UI language in a browser set to French — there is no server-side switch for it
@@ -1008,7 +1006,7 @@ No secret rotates cleanly by itself — each has a blast radius:
 | `DJANGO_SECRET_KEY` | invalidates every session — **mass logout, mid-call** |
 | `LIVEKIT_API_SECRET` | must change in **two** files (`env.d/common` *and* `livekit-server.yaml`) or every token fails signature validation and nobody can join |
 | `DB_PASSWORD` | change in PostgreSQL *and* `env.d/postgresql` |
-| `OIDC_RP_CLIENT_SECRET` | empty while sign-in is closed; nothing to rotate |
+| `OIDC_RP_CLIENT_SECRET` | *Regenerate* on client `visio` in Keycloak, write it into `env.d/common`, recreate `backend`: sign-in fails between the two steps, open sessions survive |
 | Scaleway TEM API key | invitation emails fail silently until restart |
 | Object Storage **write** key (`RCLONE_CONFIG_VISIO_*`) | the nightly backup and `restore-drill.sh --remote` fail until `env.d/backup` carries the new key — `LAST_OK` goes stale, `preflight.sh stack` red within a day |
 | Object Storage **prune** key (`RCLONE_CONFIG_VISIOPRUNE_*`) | only `backup.sh prune` fails; the nightly's retention invariant turns red at 32 days if it is forgotten. Re-run §8ter step 3 after either rotation |
