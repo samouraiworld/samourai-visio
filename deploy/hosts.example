@@ -1,6 +1,7 @@
 # Copy to `deploy/.env` (compose reads this for ${VAR} interpolation).
 #
-# Clerk replaces Keycloak, so KEYCLOAK_HOST and REALM_NAME from the upstream
+# Sign-in goes to an existing Keycloak realm (env.d/common, OIDC_*), not to a
+# Keycloak this stack runs, so KEYCLOAK_HOST and REALM_NAME from the upstream
 # template are unused and omitted.
 
 MEET_HOST=visio.samourai.app

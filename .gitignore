@@ -26,7 +26,7 @@ deploy/livekit-server.yaml
 deploy/default.conf.template
 
 # ── Runtime data ────────────────────────────────────────────────────────────
-# The PostgreSQL cluster (all user PII) and the Redis AOF (which holds Clerk
+# The PostgreSQL cluster (all user PII) and the Redis AOF (which holds OIDC
 # ID tokens in serialised sessions). Created by `docker compose up`.
 data/
 deploy/data/

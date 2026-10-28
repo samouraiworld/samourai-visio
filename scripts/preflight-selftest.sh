@@ -84,6 +84,22 @@ printf '17 3 * * * user VISIO_DIR=/home/user/visio /home/user/repo/scripts/backu
   > "$WORK/etc/cron.d/visio-backup"
 export VISIO_ETC="$WORK/etc"
 
+# The realm's discovery document, as auth.kodera.io serves it (the fields the
+# config phase reads), so the comparison runs without the network.
+I="https://auth.kodera.io/realms/samourai-app"
+cat > "$WORK/discovery.json" <<JSON
+{
+  "issuer": "$I",
+  "authorization_endpoint": "$I/protocol/openid-connect/auth",
+  "token_endpoint": "$I/protocol/openid-connect/token",
+  "userinfo_endpoint": "$I/protocol/openid-connect/userinfo",
+  "end_session_endpoint": "$I/protocol/openid-connect/logout",
+  "jwks_uri": "$I/protocol/openid-connect/certs",
+  "code_challenge_methods_supported": ["plain", "S256"]
+}
+JSON
+export VISIO_OIDC_DISCOVERY_URL="file://$WORK/discovery.json"
+
 fails() { bash scripts/preflight.sh config 2>/dev/null | grep -c 'FAIL'; }
 
 # clean <phase> <label> [VAR=value ...]: the phase prints no FAIL line AND
@@ -164,17 +180,62 @@ mutate 's/^LIVEKIT_API_SECRET=.*/LIVEKIT_API_SECRET=mismatch_0000000000000000000
 mutate 's/^FRONTEND_CUSTOM_CSS_URL=/FRONTEND_CSS_URL=/' env.d/common "wrong CSS variable name"
 mutate 's|^#DJANGO_SENTRY_DSN=.*|SENTRY_DSN=https://k@sentry.example/1|' env.d/common "Sentry DSN under the bare name that resolves to None"
 mutate 's/^DJANGO_SECRET_KEY=.*/DJANGO_SECRET_KEY=<openssl rand -base64 64>/' env.d/common "unfilled placeholder"
-mutate 's/^OIDC_OP_TOKEN_ENDPOINT=/OIDC_OP_LOGOUT_ENDPOINT=https:\/\/x\/logout\nOIDC_OP_TOKEN_ENDPOINT=/' env.d/common "Keycloak-style logout endpoint present"
-# Sign-in closed: each OIDC provider or client setting set again, one unset,
-# and a later duplicate line (Docker keeps the last) setting one again.
-mutate_rs 's|^OIDC_OP_JWKS_ENDPOINT=$|OIDC_OP_JWKS_ENDPOINT=https://clerk.samourai.app/.well-known/jwks.json|' env.d/common \
-  "sign-in is not closed: env.d/common still sets OIDC_OP_JWKS_ENDPOINT" "the old provider's JWKS endpoint set again"
-mutate_rs 's|^OIDC_RP_CLIENT_SECRET=$|OIDC_RP_CLIENT_SECRET=selftest_client_secret|' env.d/common \
-  "sign-in is not closed: env.d/common still sets OIDC_RP_CLIENT_SECRET" "a client secret set again"
-mutate_rs 's|^OIDC_STORE_ID_TOKEN=false$|OIDC_OP_USER_ENDPOINT=https://idp.example/userinfo|' env.d/common \
-  "sign-in is not closed: env.d/common still sets OIDC_OP_USER_ENDPOINT" "a later duplicate line sets the userinfo endpoint again"
-mutate_rs '/^OIDC_OP_TOKEN_ENDPOINT=$/d' env.d/common \
-  "OIDC settings missing from env.d/common: OIDC_OP_TOKEN_ENDPOINT" "the token endpoint unset, not empty (every signed-in request would fail)"
+mutate_rs 's|^OIDC_RP_SCOPES=|REALM_NAME=meet\nOIDC_RP_SCOPES=|' env.d/common \
+  "upstream Keycloak config survived the copy" "upstream's REALM_NAME copied over"
+# Sign-in: each endpoint pinned to realm samourai-app, client visio, the
+# secret set exactly once, logout able to end the Keycloak session, and the
+# live discovery document agreeing with all of it.
+mutate_rs 's|^OIDC_OP_JWKS_ENDPOINT=.*|OIDC_OP_JWKS_ENDPOINT=https://auth.kodera.io/realms/other-realm/protocol/openid-connect/certs|' env.d/common \
+  "OIDC settings not on realm samourai-app, client visio: OIDC_OP_JWKS_ENDPOINT" "the JWKS endpoint of another realm (it would trust that realm's tokens)"
+mutate_rs 's|^OIDC_OP_TOKEN_ENDPOINT=.*|OIDC_OP_TOKEN_ENDPOINT=https://auth.example.org/realms/samourai-app/protocol/openid-connect/token|' env.d/common \
+  "OIDC settings not on realm samourai-app, client visio: OIDC_OP_TOKEN_ENDPOINT" "the token endpoint on another host"
+mutate_rs 's|^OIDC_STORE_ID_TOKEN=true$|OIDC_STORE_ID_TOKEN=true\nOIDC_OP_USER_ENDPOINT=https://idp.example/userinfo|' env.d/common \
+  "OIDC settings not on realm samourai-app, client visio: OIDC_OP_USER_ENDPOINT" "a later duplicate line moves the userinfo endpoint (Docker keeps the last)"
+mutate_rs 's|^OIDC_RP_CLIENT_ID=visio$|OIDC_RP_CLIENT_ID=visio-test|' env.d/common \
+  "OIDC settings not on realm samourai-app, client visio: OIDC_RP_CLIENT_ID" "another client id"
+mutate_rs '/^OIDC_OP_TOKEN_ENDPOINT=/d' env.d/common \
+  "OIDC settings missing from env.d/common: OIDC_OP_TOKEN_ENDPOINT" "the token endpoint unset (every signed-in request would fail)"
+mutate_rs '/^OIDC_OP_LOGOUT_ENDPOINT=/d' env.d/common \
+  "OIDC settings missing from env.d/common: OIDC_OP_LOGOUT_ENDPOINT" "the logout endpoint unset (logout leaves the Keycloak session open)"
+mutate_rs 's|^OIDC_RP_SCOPES=|OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret\nOIDC_RP_SCOPES=|' env.d/common \
+  "OIDC client secret set twice" "a secret file beside the plain secret (the file wins silently)"
+mutate_rs 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=|' env.d/common \
+  "OIDC client secret missing" "no client secret at all"
+mutate_rs 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=""|' env.d/common \
+  "OIDC client secret missing" "a quoted empty secret (Compose passes an empty string)"
+mutate_rs 's|^OIDC_STORE_ID_TOKEN=true$|OIDC_STORE_ID_TOKEN=true\nOIDC_STORE_ID_TOKEN=false|' env.d/common \
+  "OIDC_STORE_ID_TOKEN is not true" "a later duplicate line turns the ID token off (Docker keeps the last)"
+mutate_rs 's|^OIDC_USE_PKCE=true$|OIDC_USE_PKCE=false|' env.d/common \
+  "PKCE is not on with S256" "PKCE turned off"
+mutate_rs 's|^OIDC_PKCE_CODE_CHALLENGE_METHOD=S256$|OIDC_PKCE_CODE_CHALLENGE_METHOD=plain|' env.d/common \
+  "PKCE is not on with S256" "PKCE method plain"
+mutate_rs 's|^OIDC_STORE_ID_TOKEN=true$|OIDC_STORE_ID_TOKEN=false|' env.d/common \
+  "OIDC_STORE_ID_TOKEN is not true" "the ID token not kept (no id_token_hint, the Keycloak session survives logout)"
+mutate_rs 's|"issuer": "https://auth.kodera.io/realms/samourai-app"|"issuer": "https://auth.kodera.io/realms/other-realm"|' discovery.json \
+  "disagrees with the config: issuer is" "the discovery document names another issuer"
+mutate_rs 's|"token_endpoint": "https://auth.kodera.io/realms/samourai-app/|"token_endpoint": "https://auth.kodera.io/realms/samourai-app/x/|' discovery.json \
+  "disagrees with the config: token_endpoint is" "the realm serves another token endpoint than the env"
+mutate_rs 's|\["plain", "S256"\]|["plain"]|' discovery.json \
+  "S256 is not among code_challenge_methods_supported" "the realm stops offering PKCE S256"
+mutate_rs 's|^{$|<html>|' discovery.json \
+  "disagrees with the config: the discovery document is not JSON" "an HTML error page instead of the document"
+mutate_rs "1,\$d" discovery.json \
+  "cannot read the realm's discovery document" "an empty or unreachable discovery document (fail closed, never SKIP)"
+# Not a mutation: the file variant with the plain key left empty ("") is a
+# correct configuration and must pass the secret check.
+cp "$WORK/env.d/common" "$WORK/env.d/common.orig"
+sed -i.bak -e 's|^OIDC_RP_CLIENT_SECRET=.*|OIDC_RP_CLIENT_SECRET=""|' \
+  -e 's|^OIDC_RP_SCOPES=|OIDC_RP_CLIENT_SECRET_FILE=/run/secrets/oidc_client_secret\nOIDC_RP_SCOPES=|' "$WORK/env.d/common"
+# Captured first: under pipefail, grep -q closing the pipe early would fail it.
+out="$(bash scripts/preflight.sh config 2>/dev/null)"
+if printf '%s\n' "$out" | grep 'OK' | grep -qF 'OIDC client secret set once' &&
+   ! printf '%s\n' "$out" | grep 'FAIL' | grep -qF 'OIDC client secret'; then
+  ok "a secret file with the plain key empty passes the secret check"
+else
+  err "a secret file with the plain key empty is refused — a correct configuration fails"
+  printf '%s\n' "$out" | grep -F 'OIDC client secret'
+fi
+mv "$WORK/env.d/common.orig" "$WORK/env.d/common"; rm -f "$WORK/env.d/common.bak"
 mutate 's/^  tls_port: 0/  tls_port: 5349/' livekit-server.yaml "TURN without tls_port: 0"
 mutate 's/^  max_participants: 30/  max_participants: 0/' livekit-server.yaml "participant cap removed (0 = unlimited)"
 mutate 's/^  max_participants: 30/  max_participants:/' livekit-server.yaml "participant cap key present but empty"
@@ -387,10 +448,10 @@ if [ "$n" -eq 0 ]; then ok "0 failures after all reverts"; else err "fixture not
 # Good mode answers exactly what the gateway template is written to answer:
 # a 302 on / with the four headers, /api with each header once, security.txt
 # as text/plain with a future Expires, a 404 for any other well-known path,
-# and a 410 with the server-level headers on each sign-in route.
+# and authenticate/ redirecting to realm samourai-app as client visio.
 echo "edge: header checks against a local stub"
 cat > "$WORK/stub.py" <<'PYSTUB'
-import datetime, http.server, sys
+import datetime, http.server, sys, urllib.parse
 MODE_FILE = sys.argv[1]
 
 
@@ -434,25 +495,25 @@ class H(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         m = self.mode()
-        signin = {"/api/v1.0/authenticate/": "authenticate-open",
-                  "/api/v1.0/authenticate": "authenticate-bare-open",
-                  "/api/v1.0/callback/": "callback-open",
-                  "/api/v1.0/callback": "callback-bare-open"}
-        if self.path in signin:
-            if m == signin[self.path]:
-                # Reopened: the backend's sign-in redirect, as it would answer.
-                self.send_response(302)
-                self.send_header("Location", "https://idp.example/authorize")
-                self.sec()
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            if m == "signin-410-bare":
-                self.send_response(410)
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
-            return self.body(410, "text/html", b"<html>410 Gone</html>")
+        if self.path == "/api/v1.0/authenticate/":
+            # The backend's sign-in redirect, as Django answers it.
+            if m == "signin-closed":
+                return self.body(410, "text/html", b"<html>410 Gone</html>")
+            realm = "other-realm" if m == "signin-other-realm" else "samourai-app"
+            q = {"response_type": "code", "scope": "openid email profile",
+                 "client_id": "visio-test" if m == "signin-other-client" else "visio",
+                 "redirect_uri": ("http://127.0.0.1/api/v1.0/callback/" if m == "signin-other-redirect"
+                                  else "https://visio.samourai.app/api/v1.0/callback/"),
+                 "state": "s", "nonce": "n"}
+            if m != "signin-no-pkce":
+                q.update(code_challenge="c" * 43, code_challenge_method="S256")
+            self.send_response(302)
+            self.send_header("Location", f"https://auth.kodera.io/realms/{realm}/protocol/openid-connect/auth?"
+                             + urllib.parse.urlencode(q))
+            self.sec()
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
         if self.path == "/":
             self.send_response(302)
             self.send_header("Location", "/accueil/")
@@ -499,11 +560,20 @@ else
   fi
   # emutate <mode> <fail-text-regex> <label>: the FAIL text is asserted, as
   # in mutate_re, so an unrelated red cannot vouch for a check that never fired.
+  # The exit status is asserted too: CI and an operator read only that.
   emutate() {
+    local out code
     cases=$((cases+1))
     printf '%s\n' "$1" > "$WORK/stub.mode"
-    local hit; hit="$(bash scripts/preflight.sh edge 2>/dev/null | grep 'FAIL' | grep -c "$2")"
-    if [ "$hit" -ge 1 ]; then ok "detected: $3"; else err "NOT detected: $3"; fi
+    out="$(bash scripts/preflight.sh edge 2>/dev/null)"
+    code=$?
+    if [ "$code" -eq 0 ]; then
+      err "NOT detected: $3 — preflight exited 0"
+    elif ! printf '%s\n' "$out" | grep 'FAIL' | grep -q -- "$2"; then
+      err "NOT detected: $3 — exited $code, but no FAIL line matches: $2"
+    else
+      ok "detected: $3"
+    fi
     : > "$WORK/stub.mode"
   }
   emutate root-no-hsts        'the / redirect ships'      "HSTS missing from the / redirect (the if-block scope bug, as served)"
@@ -518,11 +588,11 @@ else
   emutate securitytxt-missing 'security.txt answers'      "security.txt absent (404)"
   emutate securitytxt-expired 'security.txt expires'      "security.txt past its Expires date (must not be trusted)"
   emutate wellknown-spa       'well-known/ path answers'  "an unknown /.well-known/ path answered by the SPA shell"
-  emutate authenticate-open      'sign-in route /api/v1.0/authenticate/ answers HTTP' "authenticate/ reopened at the gateway"
-  emutate authenticate-bare-open 'sign-in route /api/v1.0/authenticate answers HTTP'  "authenticate (no slash) reopened at the gateway"
-  emutate callback-open          'sign-in route /api/v1.0/callback/ answers HTTP'     "callback/ reopened at the gateway"
-  emutate callback-bare-open     'sign-in route /api/v1.0/callback answers HTTP'      "callback (no slash) reopened at the gateway"
-  emutate signin-410-bare        'answers 410 without the server-level security headers' "the 410 ships without HSTS and CSP (an add_header in its location)"
+  emutate signin-closed         'sign-in does not start at realm samourai-app as client visio: HTTP 410' "authenticate/ still closed at the gateway (the old 410 block left in)"
+  emutate signin-other-realm    'Location is https://auth.kodera.io/realms/other-realm/' "sign-in sent to another realm"
+  emutate signin-other-client   "client_id is 'visio-test'" "sign-in as another client"
+  emutate signin-other-redirect "redirect_uri is 'http://127.0.0.1/api/v1.0/callback/'" "a redirect URI Keycloak would refuse (wrong host header, plain http)"
+  emutate signin-no-pkce        'no PKCE S256 challenge' "sign-in without PKCE"
   n="$(efails)"
   if [ "$n" -eq 0 ]; then ok "stub back in good mode: 0 failures"; else err "stub not clean after the last mutation ($n)"; fi
 fi

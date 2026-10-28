@@ -36,7 +36,7 @@
      (deploy/host/visio-retention.conf, RUNBOOK §8bis) and asserted by
      preflight.sh — config for the files, stack for the oldest live entry.
    * Account deletion is on request, deliberately: a Samouraï account is
-     shared across apps (Clerk), so an idle-on-Visio timer would delete
+     shared across apps (one Keycloak realm), so an idle-on-Visio timer would delete
      accounts still active on Memba or Zentai.
    * The 30-day backup retention is BACKUP_KEEP_REMOTE_DAYS in env.d/backup
      (scripts/backup.sh prunes the bucket with --min-age). Changing one
@@ -60,7 +60,7 @@
   <div class="wrap">
     <p class="eyebrow">Données personnelles</p>
     <h1>Politique de confidentialité</h1>
-    <p class="updated">Dernière mise à jour : 24 juillet 2026</p>
+    <p class="updated">Dernière mise à jour : 8 octobre 2026</p>
 
     <div class="note">
       <p><b>En résumé.</b> Vos appels ne sont jamais enregistrés ni transcrits. Le
@@ -102,7 +102,7 @@
     <div class="tw">
     <table>
       <tr><th>Donnée</th><th>Pourquoi</th><th>Base légale</th></tr>
-      <tr><td><b>Adresse e-mail</b> et <b>nom d'utilisateur</b></td>
+      <tr><td><b>Adresse e-mail</b>, <b>prénom</b> et <b>nom</b></td>
           <td>Créer et administrer votre compte, vous permettre de posséder des salons
               permanents.</td>
           <td>Exécution du service</td></tr>
@@ -118,6 +118,10 @@
     </div>
     <p>Un compte Samouraï est commun à tous les services Samouraï. Le créer sur Visio
     le rend utilisable sur les autres applications de la coopérative.</p>
+    <p>Le compte est créé à votre première connexion, avec GitHub ou Google&nbsp;: nous
+    ne vous demandons aucun mot de passe. L'authentification passe par notre propre
+    serveur d'identité (Keycloak, logiciel libre), hébergé chez Scaleway en France.
+    Vous déconnecter de Visio ferme aussi votre session sur ce serveur.</p>
 
     <h2>Avec qui ces données sont partagées</h2>
     <p>Nous ne vendons, ne louons et n'échangeons aucune donnée. Nos seuls
@@ -127,19 +131,21 @@
       <tr><th>Prestataire</th><th>Rôle</th><th>Localisation</th></tr>
       <tr><td><b>Scaleway SAS</b></td><td>Hébergement des serveurs et de la base de données</td><td>France (Paris)</td></tr>
       <tr><td><b>Scaleway Transactional Email</b></td><td>Acheminement des e-mails d'invitation</td><td>France</td></tr>
-      <tr><td><b>Clerk</b></td><td>Authentification des comptes Samouraï</td><td>États-Unis</td></tr>
     </table>
     </div>
+    <p>Les comptes Samouraï sont gérés sur notre propre serveur d'identité, hébergé
+    par Scaleway en France&nbsp;: aucun prestataire d'authentification tiers.</p>
     <div class="note">
-      <p><b>Le point que nous ne cachons pas.</b> Notre prestataire d'authentification,
-      Clerk, est une société américaine&nbsp;: les données de compte (adresse e-mail,
-      nom d'utilisateur) y sont traitées, ce qui implique un transfert hors Union
-      européenne, encadré par les clauses contractuelles types de la Commission
-      européenne. C'est le seul maillon non européen de notre infrastructure, il est
-      contraire à ce que nous visons, et nous étudions son remplacement par une
-      solution européenne auto-hébergée.</p>
-      <p>Ce transfert ne concerne <b>que les titulaires d'un compte</b>. Si vous
-      rejoignez une réunion sans compte, votre navigateur ne contacte jamais Clerk.</p>
+      <p><b>Le point que nous ne cachons pas.</b> Pour vous connecter, vous choisissez
+      GitHub (GitHub, Inc.) ou Google (Google LLC), deux sociétés américaines. Le
+      service choisi vous authentifie selon ses propres conditions, apprend que vous
+      vous connectez à un service Samouraï, et nous transmet votre adresse e-mail,
+      votre prénom et votre nom. Il agit alors pour son propre compte, pas comme
+      notre sous-traitant&nbsp;; son traitement, qui peut avoir lieu hors de l'Union
+      européenne, relève de sa propre politique de confidentialité.</p>
+      <p>Cela ne concerne <b>que les personnes qui se connectent</b>. Si vous
+      rejoignez une réunion sans compte, votre navigateur ne contacte ni notre serveur
+      d'identité, ni GitHub, ni Google.</p>
     </div>
 
     <h2>Combien de temps</h2>

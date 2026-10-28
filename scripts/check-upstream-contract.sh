@@ -46,46 +46,6 @@ if [ "${1:-}" = "--lobby-poll" ]; then
   exit "$fail"
 fi
 
-# ── Sign-in hidden · the theme's selector and the upstream attribute ────────
-# Sign-in is off on this instance and no upstream setting hides the button,
-# so theme/custom.css does, by the data-attr="login" that LoginButton.tsx puts
-# on every sign-in button. Two facts, one per file: upstream still sets the
-# attribute on a JSX element (not in a comment), and the theme's last word on
-# a bare [data-attr="login"] rule — comments stripped, later rules winning —
-# is display: none. Bare, not a[...]: the button may stop being a link.
-# Either missing brings the button back, and it leads to an identity provider
-# that no longer serves this host. This hides a button; it closes nothing.
-login_hidden() { # login_hidden <LoginButton.tsx> <custom.css>
-  local ok=1
-  if ! grep -vE '^[[:space:]]*(//|\*|/\*|\{/\*)' "$1" \
-       | grep -qE '<[A-Za-z][A-Za-z.]*[[:space:]][^>]*data-attr="login"'; then
-    bad 'LoginButton.tsx no longer tags its button data-attr="login" — theme/custom.css cannot hide sign-in; re-derive the selector'
-    ok=0
-  fi
-  if ! python3 - "$2" <<'PY'
-import re, sys
-css = re.sub(r'/\*.*?\*/', '', open(sys.argv[1], encoding='utf-8').read(), flags=re.S)
-last = None
-for selectors, body in re.findall(r'([^{}]+)\{([^{}]*)\}', css):
-    if '[data-attr="login"]' in (s.strip() for s in selectors.split(',')):
-        for value in re.findall(r'(?:^|;)\s*display\s*:\s*([^;]+)', body):
-            last = value.strip()
-sys.exit(0 if last is not None and re.fullmatch(r'none(\s*!important)?', last) else 1)
-PY
-  then
-    bad 'theme/custom.css no longer hides [data-attr="login"] — the sign-in button is back, and sign-in is off on this instance'
-    ok=0
-  fi
-  [ "$ok" = 1 ] && pass 'sign-in buttons still carry data-attr="login" and theme/custom.css hides them'
-}
-# `--login-hidden <LoginButton.tsx> <custom.css>` runs that one assertion on
-# local files and exits, for the self-test.
-if [ "${1:-}" = "--login-hidden" ]; then
-  login_hidden "${2:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}" \
-               "${3:?usage: $0 --login-hidden <LoginButton.tsx> <custom.css>}"
-  exit "$fail"
-fi
-
 # ── Silent login off · in every deployment this repository ships ───────────
 # Upstream defaults FRONTEND_IS_SILENT_LOGIN_ENABLED to true: every anonymous
 # visitor is then redirected to the identity provider with no click at all,
@@ -110,12 +70,12 @@ if [ "${1:-}" = "--silent-login-off" ]; then
   exit "$fail"
 fi
 
-# ── Sign-in closed · no deployment names an identity provider ───────────────
-# The provider these six settings named no longer serves this host, and
-# whoever revived its name could sign tokens for any user. Each stays present
-# and EMPTY in both deployments: unset, the backend falls back to None and
-# every request with a session cookie fails (RS256 needs a JWKS endpoint).
-# The last line for each key is the one read, as Docker keeps the last.
+# ── Sign-in closed · the Greffon package names no identity provider ─────────
+# A Greffon instance runs on a domain no identity provider has registered, so
+# its package keeps sign-in closed: the six settings stay present and EMPTY.
+# Unset, the backend falls back to None and every request with a session
+# cookie fails (RS256 needs a JWKS endpoint). The last line for each key is
+# the one read, as Docker keeps the last.
 oidc_closed() { # oidc_closed <env-or-compose file>...
   local f k last set missing
   for f in "$@"; do
@@ -140,12 +100,50 @@ if [ "${1:-}" = "--oidc-closed" ]; then
   exit "$fail"
 fi
 
+# ── Sign-in · the host template names realm samourai-app, client visio ──────
+# Meet checks neither `iss` nor `aud` on an ID token: it trusts whatever the
+# JWKS endpoint's keys sign. So each endpoint in the template must be the
+# realm's own, exactly, and the logout pair must be on (without the ID token
+# kept, logout leaves the Keycloak session open). The secret must stay a
+# <placeholder>: this file is public. preflight.sh compares the host's copy
+# with the realm's live discovery document.
+OIDC_REALM_ISSUER="https://auth.kodera.io/realms/samourai-app"
+oidc_realm() { # oidc_realm <env file>
+  local f="$1" k want last wrong="" missing="" leak=0
+  for k in OIDC_OP_JWKS_ENDPOINT:certs OIDC_OP_AUTHORIZATION_ENDPOINT:auth OIDC_OP_TOKEN_ENDPOINT:token \
+           OIDC_OP_USER_ENDPOINT:userinfo OIDC_OP_LOGOUT_ENDPOINT:logout OIDC_RP_CLIENT_ID: OIDC_STORE_ID_TOKEN:; do
+    case "${k%%:*}" in
+      OIDC_RP_CLIENT_ID)   want="visio" ;;
+      OIDC_STORE_ID_TOKEN) want="true" ;;
+      *)                   want="$OIDC_REALM_ISSUER/protocol/openid-connect/${k#*:}" ;;
+    esac
+    k="${k%%:*}"
+    last="$(grep -E "^${k}=" "$f" | tail -1)"
+    if [ -z "$last" ]; then missing="$missing $k"
+    elif [ "${last#*=}" != "$want" ]; then wrong="$wrong $k"; fi
+  done
+  last="$(grep -E '^OIDC_RP_CLIENT_SECRET=' "$f" | tail -1)"
+  if [ -z "$last" ]; then missing="$missing OIDC_RP_CLIENT_SECRET"
+  elif ! printf '%s\n' "$last" | grep -qE '^OIDC_RP_CLIENT_SECRET=<[^>]+>$'; then
+    bad "$(basename "$f") carries a value for OIDC_RP_CLIENT_SECRET — this file is public; keep a <placeholder>"
+    leak=1
+  fi
+  [ -n "$missing" ] && bad "$(basename "$f") no longer carries$missing — unset makes sign-in or every signed-in request fail"
+  [ -n "$wrong" ] && bad "$(basename "$f") does not pin$wrong to realm samourai-app, client visio, logout on — the backend trusts whatever the JWKS endpoint's keys sign"
+  [ -z "$missing$wrong" ] && [ "$leak" = 0 ] \
+    && pass "$(basename "$f") pins sign-in to realm samourai-app, client visio, logout on, secret a placeholder"
+}
+if [ "${1:-}" = "--oidc-realm" ]; then
+  oidc_realm "${2:?usage: $0 --oidc-realm <env file>}"
+  exit "$fail"
+fi
+
 # ── Advisory · how many places in the SPA start a sign-in ──────────────────
-# LoginButton.tsx is the only file the sign-in assertion reads, but authUrl()
-# is called from more places than the button, and later releases add more
-# (upstream main has a fifth, in the SDK settings popup). A new call site is a
-# sign-in entry point the theme may not hide. The gateway's 410 still closes
-# it, so this never fails: it prints the count, and a NOTE when it moved.
+# authUrl() is called from more places than the sign-in button, and later
+# releases add more (upstream main has a fifth, in the SDK settings popup). A
+# new call site is a sign-in entry point the RUNBOOK smoke test does not walk
+# yet, and one the Greffon package, sign-in closed, must still fail cleanly
+# on. This never fails: it prints the count, and a NOTE when it moved.
 AUTHURL_SITES_PINNED=4   # src/frontend/src at v1.24.0
 authurl_sites() { # authurl_sites <upstream .tar.gz> <ref>
   local n
@@ -167,7 +165,7 @@ PYCOUNT
   elif [ "$n" -eq "$AUTHURL_SITES_PINNED" ]; then
     pass "the SPA starts a sign-in from $n authUrl( call sites at $2, the same count as v1.24.0"
   else
-    note "the SPA starts a sign-in from $n authUrl( call sites at $2, $AUTHURL_SITES_PINNED at v1.24.0 — find the new entry point; the gateway 410 closes it, the theme may not hide it"
+    note "the SPA starts a sign-in from $n authUrl( call sites at $2, $AUTHURL_SITES_PINNED at v1.24.0 — find the new entry point and add it to the RUNBOOK smoke test"
   fi
 }
 if [ "${1:-}" = "--authurl-sites" ]; then
@@ -192,7 +190,6 @@ fetch src/backend/core/api/viewsets.py     viewsets.py    || exit 1
 fetch docker/files/production/default.conf.template gateway.conf || exit 1
 fetch src/frontend/src/features/rooms/api/fetchRoom.ts fetchRoom.ts || exit 1
 fetch src/frontend/src/features/rooms/hooks/useLobby.ts useLobby.ts || exit 1
-fetch src/frontend/src/components/LoginButton.tsx LoginButton.tsx || exit 1
 
 # ── Flood brake · what its maps and its numbers were derived from ───────────
 # deploy/nginx/default.conf.template counts two URL shapes under /api/v1.0/,
@@ -221,11 +218,10 @@ else
   bad "the SPA's room URL changed shape — the room brake may now count each join twice, or not at all"
 fi
 lobby_poll "$WORK/useLobby.ts"
-login_hidden "$WORK/LoginButton.tsx" "$(dirname "$0")/../theme/custom.css"
 silent_login_off "$(dirname "$0")/../deploy/env.d/common.example" \
                  "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
-oidc_closed "$(dirname "$0")/../deploy/env.d/common.example" \
-            "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
+oidc_realm "$(dirname "$0")/../deploy/env.d/common.example"
+oidc_closed "$(dirname "$0")/../deploy/greffon/visio/1.0/docker-compose.yml"
 if curl -sSfL -o "$WORK/upstream.tar.gz" "https://codeload.github.com/suitenumerique/meet/tar.gz/${REF}"; then
   authurl_sites "$WORK/upstream.tar.gz" "$REF"
 else

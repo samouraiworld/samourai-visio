@@ -18,10 +18,11 @@ each stage is actually correct — not just "up".
 - **Via Greffon** ([deploy/greffon/](deploy/greffon/README.md)). Package the stack as a
   [Greffon](https://greffon.io) catalog app: Greffon provides the reverse proxy,
   TLS, and secret generation, and Visio joins its catalogue. A draft entry
-  exists; it is **gated on Greffon supporting a stable custom domain** (Clerk's
-  redirect URI is fixed), so until that's confirmed the manual path is the one
-  that works. The two are not exclusive — you can launch manually now and move
-  to Greffon later without redoing Clerk or DNS.
+  exists, with sign-in closed; sign-in there is **gated on Greffon supporting a
+  stable custom domain** (a Keycloak client allows exact redirect URIs only), so
+  until that's confirmed the manual path is the one that works. The two are not
+  exclusive — you can launch manually now and move to Greffon later without
+  redoing DNS.
 
 The rest of this document is the manual path.
 
@@ -33,10 +34,10 @@ Nothing past step 2 works without these. Get them first.
 
 | # | Need | Notes |
 |---|---|---|
-| 0.1 | **Clerk: shared org or dedicated instance?** | **Decide first — it sets the OIDC endpoints and can't be changed after step 3 without invalidating accounts.** Default so far: the shared `clerk.samourai.app` org. |
+| 0.1 | **Identity provider** | Decided: Keycloak realm `samourai-app` at `auth.kodera.io`. It sets the OIDC endpoints; changing it later orphans every account (users are matched on `sub`). |
 | 0.2 | **Server IP + SSH access** | The host to deploy on. |
-| 0.3 | **Clerk OAuth app** → `OIDC_RP_CLIENT_ID` + secret | Register redirect URI **exactly** `https://visio.samourai.app/api/v1.0/callback/`. Scopes `openid email profile`. Secret is shown once. |
-| 0.4 | **Clerk: enable `username`** | Without it, every display name is empty — the instance has first/last name disabled, so `preferred_username` is the only name claim that arrives (re-check with `scripts/audit-clerk-instance.sh`). Owner action in the Clerk dashboard. |
+| 0.3 | **Keycloak client `visio`** + its secret | Created in the realm by its administrator: confidential, PKCE S256, redirect URI **exactly** `https://visio.samourai.app/api/v1.0/callback/`, post-logout URI exactly `https://visio.samourai.app/api/v1.0/logout-callback/`, default scopes `basic email profile`. The secret is on the client's Credentials tab; it goes straight into `env.d/common` on the host, nowhere else. See [RUNBOOK §1](RUNBOOK.md). |
+| 0.4 | **GitHub and Google sign-in** | Brokered by the realm, already configured there: nothing to do for Visio. Display names come from `given_name` and `family_name`, which the realm requires. |
 | 0.5 | **Scaleway TEM** — a verified sending domain + an API key | Invitation emails, via Scaleway Transactional Email (French/EU). Verify the domain in TEM (SPF + DKIM + DMARC on the shared apex — coordinate it); username is the Project ID, password the API secret key. |
 | 0.6 | **Brand assets** | `logo.png` for emails; favicons. The CSS theme is already in the repo (`theme/custom.css`). |
 

@@ -21,8 +21,11 @@
 #
 # Run from the deploy directory on the host (the one holding compose.yaml),
 # or set VISIO_DIR. VISIO_ETC overrides /etc for the host-file checks, and
-# VISIO_PUBLIC_ORIGIN overrides https://<MEET_HOST> for `edge` — the
-# self-test uses both to point checks at a fixture. Never prints a secret.
+# VISIO_PUBLIC_ORIGIN overrides https://<MEET_HOST> for `edge`, and
+# VISIO_OIDC_DISCOVERY_URL overrides where `config` reads the realm's discovery
+# document (any curl URL, file:// included) — the self-test uses these to
+# point checks at a fixture. The expected issuer itself is not overridable.
+# Never prints a secret.
 
 set -uo pipefail
 
@@ -31,6 +34,11 @@ DIR="${VISIO_DIR:-$PWD}"
 ETC="${VISIO_ETC:-/etc}"
 MEET_HOST_DEFAULT="visio.samourai.app"
 LIVEKIT_HOST_DEFAULT="livekit.samourai.app"
+# The one identity provider this instance trusts. Meet checks neither `iss`
+# nor `aud` on an ID token: any token signed by a key behind
+# OIDC_OP_JWKS_ENDPOINT is accepted, so this pin is enforced here instead.
+OIDC_ISSUER="https://auth.kodera.io/realms/samourai-app"
+OIDC_CLIENT_ID="visio"
 
 pass=0; failed=0; skipped=0
 
@@ -41,6 +49,8 @@ head_() { printf '\n\033[1m%s\033[0m\n' "$1"; }
 
 # Read a value from an env file without sourcing it (never executes content).
 envval() { grep -m1 "^$2=" "$1" 2>/dev/null | cut -d= -f2- | sed 's/^"//; s/"$//'; }
+# envlast <file> <key>: the LAST occurrence, the one Docker keeps, unquoted.
+envlast() { grep "^$2=" "$1" 2>/dev/null | tail -1 | cut -d= -f2- | sed "s/^\"//; s/\"\$//; s/^'//; s/'\$//"; }
 
 # Read one `- KEY=value` entry from a named service's environment: block in a
 # compose file. Services sit at two-space indent, so any other two-space key
@@ -141,7 +151,7 @@ phase_config() {
   else bad "missing config files" "$missing"; return; fi
 
   # ── Unfilled placeholders ────────────────────────────────────────────────
-  # Catches <from Clerk dashboard>, <resend api key>, <openssl rand ...>.
+  # Catches <from Keycloak: ...>, <resend api key>, <openssl rand ...>.
   # grep -n on multiple files prefixes each hit with "file:line:", so the
   # comment filter must skip past that prefix before looking for '#' — a bare
   # '^\s*#' never matches once the filename prefix is there, and every
@@ -174,37 +184,127 @@ phase_config() {
   elif [ "$a" = "$b" ]; then ok "LiveKit secret matches across livekit-server.yaml and env.d/common"
   else bad "LiveKit secret MISMATCH — the stack will look healthy and nobody will be able to join"; fi
 
-  # ── Keycloak leftovers ───────────────────────────────────────────────────
-  local kc; kc="$(grep -nE '^(OIDC_OP_LOGOUT_ENDPOINT|KEYCLOAK_HOST|REALM_NAME)=' env.d/common .env 2>/dev/null || true)"
-  if [ -z "$kc" ]; then ok "no Keycloak leftovers; OIDC_OP_LOGOUT_ENDPOINT correctly unset"
+  # ── Upstream's Keycloak leftovers ────────────────────────────────────────
+  # Upstream's template names its own realm through KEYCLOAK_HOST and
+  # REALM_NAME. Neither is a Meet setting: copied over, they are ignored
+  # silently and suggest a configuration that does not exist.
+  local kc; kc="$(grep -nE '^(KEYCLOAK_HOST|REALM_NAME)=' env.d/common .env 2>/dev/null || true)"
+  if [ -z "$kc" ]; then ok "no upstream Keycloak leftovers (KEYCLOAK_HOST, REALM_NAME)"
   else bad "upstream Keycloak config survived the copy" "$(echo "$kc" | cut -d: -f1,2 | tr '\n' ' ')"; fi
 
-  # ── Sign-in closed: the backend trusts no identity provider ──────────────
-  # The provider these six settings named no longer serves this host, and
-  # whoever revived its name could sign tokens for any user. Each stays
-  # PRESENT and EMPTY: unset falls back to None, and then every request with a
-  # session cookie fails with ImproperlyConfigured (RS256 needs a JWKS
-  # endpoint); an empty string passes that check and trusts nothing. The last
-  # occurrence is the one Docker keeps, so that is the one read.
-  local oidc_k oidc_v oidc_set="" oidc_missing=""
+  # ── Sign-in: realm samourai-app, client visio, nothing else ──────────────
+  # Meet checks neither `iss` nor `aud` on the ID token, so the endpoints are
+  # the whole trust decision: each must be the pinned realm's own. Every line
+  # stays present: unset falls back to None, and then every request with a
+  # session cookie fails with ImproperlyConfigured. The last occurrence is the
+  # one Docker keeps, so that is the one read.
+  local oidc_k oidc_v oidc_missing="" oidc_wrong="" oidc_path
   for oidc_k in OIDC_OP_JWKS_ENDPOINT OIDC_OP_AUTHORIZATION_ENDPOINT OIDC_OP_TOKEN_ENDPOINT \
-                OIDC_OP_USER_ENDPOINT OIDC_RP_CLIENT_ID OIDC_RP_CLIENT_SECRET; do
+                OIDC_OP_USER_ENDPOINT OIDC_OP_LOGOUT_ENDPOINT OIDC_RP_CLIENT_ID; do
+    case "$oidc_k" in
+      OIDC_OP_JWKS_ENDPOINT)          oidc_path="$OIDC_ISSUER/protocol/openid-connect/certs" ;;
+      OIDC_OP_AUTHORIZATION_ENDPOINT) oidc_path="$OIDC_ISSUER/protocol/openid-connect/auth" ;;
+      OIDC_OP_TOKEN_ENDPOINT)         oidc_path="$OIDC_ISSUER/protocol/openid-connect/token" ;;
+      OIDC_OP_USER_ENDPOINT)          oidc_path="$OIDC_ISSUER/protocol/openid-connect/userinfo" ;;
+      OIDC_OP_LOGOUT_ENDPOINT)        oidc_path="$OIDC_ISSUER/protocol/openid-connect/logout" ;;
+      OIDC_RP_CLIENT_ID)              oidc_path="$OIDC_CLIENT_ID" ;;
+    esac
     if ! grep -qE "^${oidc_k}=" env.d/common 2>/dev/null; then
       oidc_missing="$oidc_missing $oidc_k"
     else
       oidc_v="$(grep -E "^${oidc_k}=" env.d/common | tail -1 | cut -d= -f2- | sed 's/^"//; s/"$//')"
-      [ -n "$oidc_v" ] && oidc_set="$oidc_set $oidc_k"
+      [ "$oidc_v" = "$oidc_path" ] || oidc_wrong="$oidc_wrong $oidc_k"
     fi
   done
-  if [ -n "$oidc_set" ]; then
-    bad "sign-in is not closed: env.d/common still sets$oidc_set" \
-        "empty each one (KEY= with nothing after it) and recreate the backend; it trusts tokens from whatever provider they name"
-  fi
   if [ -n "$oidc_missing" ]; then
     bad "OIDC settings missing from env.d/common:$oidc_missing" \
-        "keep each line, empty (KEY=): unset falls back to None and every signed-in request fails with ImproperlyConfigured"
+        "unset falls back to None: sign-in breaks, and every signed-in request fails with ImproperlyConfigured"
   fi
-  [ -z "$oidc_set$oidc_missing" ] && ok "sign-in closed: the six OIDC provider and client settings are present and empty"
+  if [ -n "$oidc_wrong" ]; then
+    bad "OIDC settings not on realm samourai-app, client visio:$oidc_wrong" \
+        "expected $OIDC_ISSUER/protocol/openid-connect/{certs,auth,token,userinfo,logout} and client id $OIDC_CLIENT_ID; Meet trusts any token the JWKS endpoint's keys sign"
+  fi
+  [ -z "$oidc_missing$oidc_wrong" ] && ok "sign-in endpoints and client id are realm samourai-app's, client visio"
+
+  # The secret, exactly once. OIDC_RP_CLIENT_SECRET_FILE wins over the plain
+  # value without a word, so both set means the one an operator just edited
+  # may be the one Django ignores. Values are read as Compose reads them: the
+  # last line, surrounding quotes stripped, so KEY="" counts as empty.
+  local sec secf
+  sec="$(envlast env.d/common OIDC_RP_CLIENT_SECRET)"
+  secf="$(envlast env.d/common OIDC_RP_CLIENT_SECRET_FILE)"
+  if [ -n "$sec" ] && [ -n "$secf" ]; then
+    bad "OIDC client secret set twice: OIDC_RP_CLIENT_SECRET and OIDC_RP_CLIENT_SECRET_FILE" \
+        "the file wins silently; keep one of the two"
+  elif [ -z "$sec$secf" ]; then
+    bad "OIDC client secret missing: neither OIDC_RP_CLIENT_SECRET nor OIDC_RP_CLIENT_SECRET_FILE is set" \
+        "the token exchange fails and nobody can sign in; the secret is on client visio's Credentials tab"
+  else
+    ok "OIDC client secret set once"
+  fi
+
+  # Logout ends the Keycloak session only when Django still holds the ID
+  # token to send as id_token_hint (django-lasuite oidc_login/views.py:89-107).
+  # Without it, logout clears the Visio session only, and on a shared
+  # computer the next "Se connecter" signs the previous person straight in.
+  if [ "$(envlast env.d/common OIDC_STORE_ID_TOKEN)" = "true" ]; then
+    ok "OIDC_STORE_ID_TOKEN=true: logout ends the Keycloak session too"
+  else
+    bad "OIDC_STORE_ID_TOKEN is not true: logout would leave the Keycloak session open" \
+        "RP-initiated logout needs the ID token kept in the session"
+  fi
+
+  # PKCE, as client visio requires it. Without it, or with `plain`, Keycloak
+  # refuses every authorization request and nobody can sign in.
+  if [ "$(envlast env.d/common OIDC_USE_PKCE)" = "true" ] &&
+     [ "$(envlast env.d/common OIDC_PKCE_CODE_CHALLENGE_METHOD)" = "S256" ]; then
+    ok "PKCE on, method S256"
+  else
+    bad "PKCE is not on with S256: OIDC_USE_PKCE must be true and OIDC_PKCE_CODE_CHALLENGE_METHOD S256" \
+        "client visio requires S256; sign-in fails at Keycloak otherwise"
+  fi
+
+  # ── The realm still serves what the env names ────────────────────────────
+  # Fail closed: a document that cannot be read or parsed is a FAIL, never a
+  # SKIP. Its issuer must be the pinned one, and each endpoint must equal the
+  # env's — a realm renamed or moved, or an env edited by hand, shows here
+  # before a user meets it. python3 is required; without it nothing is proven.
+  local disc_url="${VISIO_OIDC_DISCOVERY_URL:-$OIDC_ISSUER/.well-known/openid-configuration}"
+  local disc; disc="$(curl -sSf --max-time 15 "$disc_url" 2>/dev/null)"
+  local dverdict
+  if [ -z "$disc" ]; then
+    bad "cannot read the realm's discovery document" "$disc_url — sign-in cannot be verified"
+  else
+    dverdict="$(python3 - "$disc" "$OIDC_ISSUER" \
+      "$(grep -E '^OIDC_OP_JWKS_ENDPOINT=' env.d/common | tail -1 | cut -d= -f2-)" \
+      "$(grep -E '^OIDC_OP_AUTHORIZATION_ENDPOINT=' env.d/common | tail -1 | cut -d= -f2-)" \
+      "$(grep -E '^OIDC_OP_TOKEN_ENDPOINT=' env.d/common | tail -1 | cut -d= -f2-)" \
+      "$(grep -E '^OIDC_OP_USER_ENDPOINT=' env.d/common | tail -1 | cut -d= -f2-)" \
+      "$(grep -E '^OIDC_OP_LOGOUT_ENDPOINT=' env.d/common | tail -1 | cut -d= -f2-)" <<'PY' 2>/dev/null || echo "python3 could not compare the discovery document"
+import json, sys
+try:
+    d = json.loads(sys.argv[1])
+except ValueError:
+    print("the discovery document is not JSON")
+    sys.exit()
+bad = []
+if d.get("issuer") != sys.argv[2]:
+    bad.append(f"issuer is {d.get('issuer')!r}, expected {sys.argv[2]!r}")
+pairs = (("jwks_uri", "OIDC_OP_JWKS_ENDPOINT", 3), ("authorization_endpoint", "OIDC_OP_AUTHORIZATION_ENDPOINT", 4),
+         ("token_endpoint", "OIDC_OP_TOKEN_ENDPOINT", 5), ("userinfo_endpoint", "OIDC_OP_USER_ENDPOINT", 6),
+         ("end_session_endpoint", "OIDC_OP_LOGOUT_ENDPOINT", 7))
+for field, key, i in pairs:
+    if d.get(field) != sys.argv[i].strip('"'):
+        bad.append(f"{field} is {d.get(field)!r}, {key} is {sys.argv[i]!r}")
+if "S256" not in d.get("code_challenge_methods_supported", []):
+    bad.append("S256 is not among code_challenge_methods_supported")
+print("; ".join(bad))
+PY
+)"
+    if [ -z "$dverdict" ]; then ok "the realm's discovery document names the pinned issuer and the env's five endpoints"
+    else bad "the realm's discovery document disagrees with the config: $dverdict" \
+             "re-read $disc_url; never point the env elsewhere to make this pass"; fi
+  fi
 
   # ── The CSS variable that does not exist ─────────────────────────────────
   if grep -q '^FRONTEND_CUSTOM_CSS_URL=' env.d/common 2>/dev/null; then
@@ -846,12 +946,10 @@ phase_stack() {
   # Undefined variables render as the EMPTY STRING with a warning, not as a
   # literal ${VAR} — so grepping for '${' can never catch this. Assert the
   # values are non-empty and well-formed instead.
-  # OIDC_OP_TOKEN_ENDPOINT left this list when sign-in closed: it is empty
-  # by design now, and the config phase asserts that.
-  local envout; envout="$(dc exec -T backend printenv DJANGO_ALLOWED_HOSTS MEET_BASE_URL LIVEKIT_API_URL 2>/dev/null)"
+  local envout; envout="$(dc exec -T backend printenv DJANGO_ALLOWED_HOSTS MEET_BASE_URL LIVEKIT_API_URL OIDC_OP_TOKEN_ENDPOINT 2>/dev/null)"
   local n; n="$(echo "$envout" | grep -c .)"
-  if [ "$n" -ne 3 ]; then
-    bad "one or more critical env vars are EMPTY in the container" "expected 3 non-empty values, got $n — interpolation did not resolve"
+  if [ "$n" -ne 4 ]; then
+    bad "one or more critical env vars are EMPTY in the container" "expected 4 non-empty values, got $n — interpolation did not resolve"
   elif printf '%s' "$envout" | grep -qF "$(printf '$''{')"; then  # literal ${ — interpolation never ran
     bad "literal \${VAR} reached the container — interpolation did not run"
   elif echo "$envout" | grep -qE 'https?:///|//$'; then
@@ -876,6 +974,7 @@ print(json.dumps({
  'ssl_redirect': s.SECURE_SSL_REDIRECT,
  'unregistered': s.ALLOW_UNREGISTERED_ROOMS,
  'logout': bool(s.OIDC_OP_LOGOUT_ENDPOINT),
+ 'store_id_token': bool(s.OIDC_STORE_ID_TOKEN),
 }))" 2>/dev/null | tr -d '\r' | grep '^{')"
 
   if [ -z "$s" ]; then
@@ -897,8 +996,8 @@ if d["proxy"] != ["HTTP_X_FORWARDED_PROTO", "https"]:
     bad.append(f"SECURE_PROXY_SSL_HEADER={d['proxy']!r} is not the expected pair")
 if not d["unregistered"]:
     bad.append("ALLOW_UNREGISTERED_ROOMS is False — guests cannot create ad-hoc rooms")
-if d["logout"]:
-    bad.append("OIDC_OP_LOGOUT_ENDPOINT is set — Clerk advertises none; logout will break")
+if not d["logout"] or not d["store_id_token"]:
+    bad.append("RP-initiated logout is off (OIDC_OP_LOGOUT_ENDPOINT empty or OIDC_STORE_ID_TOKEN false) — logout leaves the Keycloak session open")
 print("; ".join(bad))
 PY
 )"
@@ -1100,7 +1199,7 @@ PY
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
-# The response-header surface of one origin — no DNS, TLS or Clerk. `public`
+# The response-header surface of one origin — no DNS or TLS. `public`
 # runs it against https://<MEET_HOST>; the `edge` phase runs it alone, where
 # VISIO_PUBLIC_ORIGIN can point it at a stub. That is how
 # preflight-selftest.sh proves each of these checks can fail: the live host
@@ -1155,27 +1254,46 @@ edge_headers() {
     fi
   done
 
-  # ── Sign-in closed at the gateway: each route answers 410 itself ────────
-  # The theme only hides the button. These are the backend routes a sign-in
-  # goes through, reachable by URL and from the /sdk/ pages with no button at
-  # all; the gateway template answers them 410 before the backend sees them.
-  # The 410 must also carry the server-level headers: a location that set an
-  # add_header of its own would silently drop them.
-  local sign_path signh signc
-  for sign_path in /api/v1.0/authenticate/ /api/v1.0/authenticate /api/v1.0/callback/ /api/v1.0/callback; do
-    signh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin$sign_path" 2>/dev/null | tr -d '\r')"
-    signc="$(printf '%s\n' "$signh" | grep -m1 '^HTTP/' | cut -d' ' -f2)"
-    if [ "$signc" != "410" ]; then
-      bad "sign-in route $sign_path answers HTTP ${signc:-nothing}, expected 410 — sign-in is open again at the gateway" \
-          "restore the 'sign-in closed at the gateway' block in the gateway template and recreate the frontend"
-    elif ! printf '%s\n' "$signh" | grep -qi '^strict-transport-security:' ||
-         ! printf '%s\n' "$signh" | grep -qi '^content-security-policy:'; then
-      bad "sign-in route $sign_path answers 410 without the server-level security headers" \
-          "that location must set no add_header of its own, so it inherits the server-level ones"
-    else
-      ok "sign-in route $sign_path answers 410, with the server-level headers"
-    fi
-  done
+  # ── Sign-in starts at realm samourai-app, as client visio ────────────────
+  # authenticate/ is where "Se connecter" goes: Django answers a 302 to the
+  # realm's authorization endpoint. Its Location is the end-to-end proof that
+  # the gateway passes the route, the backend loaded the settings, and the
+  # request names the right client, the exact registered redirect URI and
+  # PKCE S256. Keycloak refuses any other redirect URI, so a drift here is a
+  # sign-in that fails for everyone.
+  local authh authc authloc authv
+  authh="$(curl -sS -D- -o /dev/null --max-time 15 "$origin/api/v1.0/authenticate/" 2>/dev/null | tr -d '\r')"
+  authc="$(printf '%s\n' "$authh" | grep -m1 '^HTTP/' | cut -d' ' -f2)"
+  authloc="$(printf '%s\n' "$authh" | grep -im1 '^location:' | sed 's/^[^:]*:[[:space:]]*//')"
+  if [ "$authc" != "302" ]; then
+    authv="HTTP ${authc:-nothing}, expected 302"
+  else
+    authv="$(python3 - "$authloc" "$OIDC_ISSUER/protocol/openid-connect/auth" "$OIDC_CLIENT_ID" \
+      "https://$MEET_HOST_DEFAULT/api/v1.0/callback/" <<'PY' 2>/dev/null || echo "python3 could not read the Location"
+import sys
+from urllib.parse import urlsplit, parse_qs
+loc, endpoint, client, redirect = sys.argv[1:5]
+u = urlsplit(loc)
+q = {k: v[0] for k, v in parse_qs(u.query).items()}
+bad = []
+if f"{u.scheme}://{u.netloc}{u.path}" != endpoint:
+    bad.append(f"Location is {u.scheme}://{u.netloc}{u.path}, expected {endpoint}")
+if q.get("client_id") != client:
+    bad.append(f"client_id is {q.get('client_id')!r}, expected {client!r}")
+if q.get("redirect_uri") != redirect:
+    bad.append(f"redirect_uri is {q.get('redirect_uri')!r}, expected {redirect!r}")
+if q.get("code_challenge_method") != "S256" or not q.get("code_challenge"):
+    bad.append("no PKCE S256 challenge")
+print("; ".join(bad))
+PY
+)"
+  fi
+  if [ -z "$authv" ]; then
+    ok "authenticate/ sends the browser to realm samourai-app as client visio, exact redirect URI, PKCE S256"
+  else
+    bad "sign-in does not start at realm samourai-app as client visio: $authv" \
+        "check the gateway template, OIDC_* in env.d/common and that the backend was recreated"
+  fi
 
   # ── /api: Django sets these two as well; each must arrive exactly once ───
   # Browsers take the LAST Referrer-Policy they see, so a second, looser
@@ -1405,19 +1523,19 @@ phase_public() {
     bad "single HSTS header but max-age=${hsmax:-unknown} is under 180 days"
   fi
 
-  # ── The claim that a guest never contacts Clerk ───────────────────────────
+  # ── The claim that a guest never contacts the identity provider ───────────
   # The privacy policy states plainly that a visitor without an account never
   # reaches our authentication provider. That is only true while silent login
   # is off: upstream defaults it ON, which sends every anonymous visitor to
-  # Clerk with prompt=none before they click anything. Nothing asserted it, so
+  # auth.kodera.io with prompt=none before they click anything. Nothing asserted it, so
   # an upstream default change or a hand-edit on the host would have quietly
   # falsified a published GDPR statement.
   local sl; sl="$(echo "$cfg" | sed -n 's/.*"is_silent_login_enabled"[[:space:]]*:[[:space:]]*\([a-z]*\).*/\1/p' | head -1)"
   case "$sl" in
-    false) ok "silent login is off — a guest's browser never contacts Clerk, as the privacy policy states" ;;
-    true)  bad "silent login is ENABLED — every anonymous visitor is sent to Clerk before clicking anything" \
+    false) ok "silent login is off — a guest's browser never contacts auth.kodera.io, as the privacy policy states" ;;
+    true)  bad "silent login is ENABLED — every anonymous visitor is sent to auth.kodera.io before clicking anything" \
                "the privacy policy states the opposite; set FRONTEND_IS_SILENT_LOGIN_ENABLED=false and recreate the backend" ;;
-    *)     skip "is_silent_login_enabled absent from /api/v1.0/config/" "cannot prove the guest path avoids Clerk" ;;
+    *)     skip "is_silent_login_enabled absent from /api/v1.0/config/" "cannot prove the guest path avoids auth.kodera.io" ;;
   esac
 
   # ── And the same claim, proven against what the SPA is actually served ────
@@ -1526,10 +1644,9 @@ phase_public() {
     bad "ALLOW_UNREGISTERED_ROOMS is not working for anonymous visitors" "GET /api/v1.0/rooms/<never-created-slug> did not return a room+token"
   fi
 
-  # (The comparison with Clerk's discovery document left with sign-in: the
-  # name no longer resolves, and the backend now trusts no provider. The
-  # config phase asserts the OIDC settings empty; the edge checks below
-  # assert the gateway's 410 on the sign-in routes.)
+  # (The realm's discovery document is compared with the env in the config
+  # phase, which has env.d/common; the edge checks below follow
+  # authenticate/ to the realm.)
 
   # ── Response headers on /, /api and /.well-known/ ────────────────────────
   edge_headers "https://${MEET_HOST}"
@@ -1537,7 +1654,7 @@ phase_public() {
   # ── Things this script structurally cannot prove ─────────────────────────
   skip "UDP reachability (7882, 443, relay range)" "'nc -zu' reports success against a DROPping firewall; and run from the host it tests loopback. Prove it with a real call and read LiveKit's selected ICE candidate pair."
   skip "Scaleway security group" "a second filter ufw cannot see. Check it in the console."
-  skip "silent login (prompt=none) for a first-time anonymous visitor" "needs a real browser with no session; the callback only handles error=login_required gracefully."
+  skip "a real sign-in through GitHub and Google, and logout ending the Keycloak session" "needs a browser and an account: RUNBOOK smoke test."
 }
 
 # ═══════════════════════════════════════════════════════════════════════════

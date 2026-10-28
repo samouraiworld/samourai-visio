@@ -57,7 +57,7 @@ check "no unfilled upstream placeholders in tracked config" \
       "${CFG[@]}" 2>/dev/null || true)"
 
 # ── Secrets ─────────────────────────────────────────────────────────────────
-# Real Clerk/Resend/LiveKit credentials, never the <angle-bracket> hints in
+# Real OIDC client/Resend/LiveKit credentials, never the <angle-bracket> hints in
 # the .example templates.
 check "no live-looking credentials in tracked files" \
   "$(grep -nE '(sk_live_|sk_test_|pk_live_|re_[A-Za-z0-9]{20,}|APIKey[A-Za-z0-9]{16,})' \
