@@ -15,6 +15,7 @@ and this project adheres to
 
 ### Changed
 
+- 📝(docs) describe this fork and route security reports to its maintainers
 - 🔒️(ci) check develop metadata and required policy clauses
 - 🔒️(ci) bound attribution checks and honor one-line commits
 - ⬆️(dev) pin LiveKit server to v1.13.6

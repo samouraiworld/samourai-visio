@@ -2,9 +2,9 @@
 
 Thank you for taking the time to contribute! Please follow these guidelines to ensure a smooth and productive workflow. 🚀🚀🚀
 
-To get started with the project, please refer to the [README.md](https://github.com/suitenumerique/meet/blob/main/README.md) for detailed instructions.
+To get started with this fork, read the top of [README.md](README.md). Changes that belong upstream should go to [La Suite Meet](https://github.com/suitenumerique/meet) and follow its [dev handbook](https://suitenumerique.gitbook.io/handbook).
 
-Please also check out our [dev handbook](https://suitenumerique.gitbook.io/handbook) to learn our best practices.
+Questions: support@samourai.coop. Security reports: [SECURITY.md](SECURITY.md), never a public issue.
 
 
 ## Creating an Issue
