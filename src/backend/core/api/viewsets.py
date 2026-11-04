@@ -75,11 +75,7 @@ from core.services.participants_management import (
     ParticipantsManagementException,
 )
 from core.services.room_creation import RoomCreation
-from core.services.room_management import (
-    RoomManagement,
-    RoomManagementException,
-    RoomNotFoundException,
-)
+from core.services.room_management import RoomManagement
 from core.services.room_roles import (
     RoomRoleError,
     RoomRoleService,
@@ -97,60 +93,6 @@ from .feature_flag import FeatureFlag
 # pylint: disable=too-many-ancestors
 
 logger = getLogger(__name__)
-
-
-class NestedGenericViewSet(viewsets.GenericViewSet):
-    """
-    A generic Viewset aims to be used in a nested route context.
-    e.g: `/api/v1.0/resource_1/<resource_1_pk>/resource_2/<resource_2_pk>/`
-
-    It allows to define all url kwargs and lookup fields to perform the lookup.
-    """
-
-    lookup_fields: list[str] = ["pk"]
-    lookup_url_kwargs: list[str] = []
-
-    def __getattribute__(self, file):
-        """
-        This method is overridden to allow to get the last lookup field or lookup url kwarg
-        when accessing the `lookup_field` or `lookup_url_kwarg` attribute. This is useful
-        to keep compatibility with all methods used by the parent class `GenericViewSet`.
-        """
-        if file in ["lookup_field", "lookup_url_kwarg"]:
-            return getattr(self, file + "s", [None])[-1]
-
-        return super().__getattribute__(file)
-
-    def get_queryset(self):
-        """
-        Get the list of files for this view.
-
-        `lookup_fields` attribute is enumerated here to perform the nested lookup.
-        """
-        queryset = super().get_queryset()
-
-        # The last lookup field is removed to perform the nested lookup as it corresponds
-        # to the object pk, it is used within get_object method.
-        lookup_url_kwargs = (
-            self.lookup_url_kwargs[:-1]
-            if self.lookup_url_kwargs
-            else self.lookup_fields[:-1]
-        )
-
-        filter_kwargs = {}
-        for index, lookup_url_kwarg in enumerate(lookup_url_kwargs):
-            if lookup_url_kwarg not in self.kwargs:
-                raise KeyError(
-                    f"Expected view {self.__class__.__name__} to be called with a URL "
-                    f'keyword argument named "{lookup_url_kwarg}". Fix your URL conf, or '
-                    "set the `.lookup_fields` attribute on the view correctly."
-                )
-
-            filter_kwargs.update(
-                {self.lookup_fields[index]: self.kwargs[lookup_url_kwarg]}
-            )
-
-        return queryset.filter(**filter_kwargs)
 
 
 class SerializerPerActionMixin:
@@ -263,6 +205,9 @@ class RoomViewSet(
             if not settings.ALLOW_UNREGISTERED_ROOMS:
                 raise
             slug = slugify(self.kwargs["pk"])
+            if slug.startswith(models.BreakoutRoom.LIVEKIT_ROOM_PREFIX):
+                # A breakout room's pass comes only from its assignment-checked join.
+                raise
             username = request.query_params.get("username", None)
             data = {
                 "id": None,
@@ -280,7 +225,9 @@ class RoomViewSet(
         else:
             data = self.get_serializer(instance).data
 
-        return drf_response.Response(data)
+        response = drf_response.Response(data)
+        LobbyService.prepare_response(response, request)
+        return response
 
     def list(self, request, *args, **kwargs):
         """Limit listed rooms to the ones related to the authenticated user."""
@@ -356,26 +303,7 @@ class RoomViewSet(
         ):
             return
 
-        metadata = {
-            "configuration": room.configuration,
-            "access_level": room.access_level,
-        }
-
-        try:
-            RoomManagement().update_metadata(
-                room_name=str(room.id),
-                metadata=metadata,
-            )
-        except RoomNotFoundException:
-            logger.info(
-                "LiveKit room %s does not exist yet, skipping metadata sync",
-                room.id,
-            )
-        except RoomManagementException:
-            logger.warning(
-                "Failed to sync metadata to LiveKit for room %s",
-                room.id,
-            )
+        RoomManagement.sync_room_metadata(room)
 
     @decorators.action(
         detail=True,
@@ -513,7 +441,7 @@ class RoomViewSet(
             **serializer.validated_data,
         )
         response = drf_response.Response({**participant.to_dict(), "livekit": livekit})
-        lobby_service.prepare_response(response, participant.id)
+        lobby_service.prepare_response(response, request)
 
         return response
 
@@ -931,6 +859,15 @@ class RoomViewSet(
     def rename(self, request, pk=None):  # pylint: disable=unused-argument
         """Rename the current participant in the room."""
         room = self.get_object()
+
+        if (
+            not settings.AUTHENTICATED_PARTICIPANTS_CAN_EDIT_DISPLAY_NAME
+            and request.user.is_authenticated
+        ):
+            return drf_response.Response(
+                {"error": "Authenticated participants cannot edit their display name"},
+                status=drf_status.HTTP_403_FORBIDDEN,
+            )
 
         serializer = serializers.RenameParticipantSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -3,7 +3,7 @@ import { keys } from './queryKeys'
 import { useQuery } from '@tanstack/react-query'
 import { RecordingMode } from '@/features/recording'
 import type { ApiAccessLevel } from '@/features/rooms/api/ApiRoom'
-import type { Track } from 'livekit-client'
+import type { Track, VideoCodec } from 'livekit-client'
 type Source = Track.Source
 
 export interface ApiConfig {
@@ -48,6 +48,9 @@ export interface ApiConfig {
   diagnostics: {
     connection_test_enabled?: boolean
   }
+  breakout_rooms?: {
+    is_enabled?: boolean
+  }
   telephony: {
     enabled: boolean
     international_phone_number?: string
@@ -62,6 +65,7 @@ export interface ApiConfig {
     force_wss_protocol: boolean
     enable_firefox_proxy_workaround: boolean
     default_sources: Source[]
+    default_video_codec: VideoCodec
   }
   transcription_destination?: string
   max_participants_for_sound: number

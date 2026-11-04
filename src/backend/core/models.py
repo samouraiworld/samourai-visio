@@ -27,6 +27,7 @@ from timezone_field import TimeZoneField
 
 from . import fields, utils
 from .recording.enums import FileExtension
+from .validators import sub_validator
 
 logger = getLogger(__name__)
 
@@ -57,6 +58,7 @@ class RecordingStatusChoices(models.TextChoices):
     STOPPED = "stopped", _("Stopped")
     SAVED = "saved", _("Saved")
     ABORTED = "aborted", _("Aborted")
+    FAILED = "failed", _("Failed")
     FAILED_TO_START = "failed_to_start", _("Failed to Start")
     FAILED_TO_STOP = "failed_to_stop", _("Failed to Stop")
     NOTIFICATION_SUCCEEDED = "notification_succeeded", _("Notification succeeded")
@@ -78,16 +80,12 @@ class RecordingStatusChoices(models.TextChoices):
             cls.STOPPED,
             cls.SAVED,
             cls.ABORTED,
+            cls.FAILED,
             cls.EXTERNAL_PROCESS_SUCCESSFUL,
             cls.EXTERNAL_PROCESS_FAILED,
             cls.FAILED_TO_START,
             cls.FAILED_TO_STOP,
         }
-
-    @classmethod
-    def is_unsuccessful(cls, status):
-        """Determine if the recording status represents an unsuccessful state."""
-        return status in {cls.ABORTED, cls.FAILED_TO_START, cls.FAILED_TO_STOP}
 
 
 class RecordingModeChoices(models.TextChoices):
@@ -145,19 +143,11 @@ class BaseModel(models.Model):
 class User(AbstractBaseUser, BaseModel, auth_models.PermissionsMixin):
     """User model to work with OIDC only authentication."""
 
-    sub_validator = validators.RegexValidator(
-        regex=r"^[\w.@+-]+\Z",
-        message=_(
-            "Enter a valid sub. This value may contain only letters, "
-            "numbers, and @/./+/-/_ characters."
-        ),
-    )
-
     sub = models.CharField(
         _("sub"),
         help_text=_(
             "Optional for pending users; required upon account activation. "
-            "255 characters or fewer. Letters, numbers, and @/./+/-/_ characters only."
+            "255 characters or fewer. Printable ASCII characters only."
         ),
         max_length=255,
         unique=True,
@@ -589,6 +579,7 @@ class Recording(BaseModel):
     4. NOTIFICATION_SUCCEEDED: External service has been notified of this recording
 
     Error States:
+    - FAILED: Egress failed mid-recording
     - FAILED_TO_START: Worker failed to initialize recording
     - FAILED_TO_STOP: Worker failed during stop operation
     - ABORTED: Recording was terminated before completion
@@ -1082,3 +1073,114 @@ class File(BaseModel):
 
         self.hard_deleted_at = timezone.now()
         self.save(update_fields=["hard_deleted_at"])
+
+
+class BreakoutSessionStatusChoices(models.TextChoices):
+    """Breakout session status choices."""
+
+    ACTIVE = "active", _("Active")
+    CLOSED = "closed", _("Closed")
+
+
+class BreakoutSession(BaseModel):
+    """One round of splitting a meeting into breakout rooms, from opening to closing."""
+
+    room = models.ForeignKey(
+        Room,
+        on_delete=models.CASCADE,
+        related_name="breakout_sessions",
+        verbose_name=_("Room"),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=BreakoutSessionStatusChoices.choices,
+        default=BreakoutSessionStatusChoices.ACTIVE,
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("Created by"),
+    )
+    closed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Closed at"))
+
+    class Meta:
+        db_table = "meet_breakout_session"
+        ordering = ("-created_at",)
+        verbose_name = _("Breakout session")
+        verbose_name_plural = _("Breakout sessions")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["room"],
+                condition=models.Q(status=BreakoutSessionStatusChoices.ACTIVE),
+                name="unique_active_breakout_session_per_room",
+            )
+        ]
+
+    def __str__(self):
+        return f"Breakout session {self.id!s} ({self.status})"
+
+
+class BreakoutRoom(BaseModel):
+    """A breakout room: a display name and the media server room behind it."""
+
+    LIVEKIT_ROOM_PREFIX = "breakout_"
+
+    session = models.ForeignKey(
+        BreakoutSession,
+        on_delete=models.CASCADE,
+        related_name="rooms",
+        verbose_name=_("Breakout session"),
+    )
+    name = models.CharField(max_length=200, verbose_name=_("Name"))
+    livekit_room_name = models.CharField(
+        max_length=100, unique=True, verbose_name=_("LiveKit room name")
+    )
+
+    class Meta:
+        db_table = "meet_breakout_room"
+        # Names end in the room's index, 0 to 9, so this is the host's order.
+        ordering = ("livekit_room_name",)
+        verbose_name = _("Breakout room")
+        verbose_name_plural = _("Breakout rooms")
+
+    def __str__(self):
+        return self.name
+
+
+class BreakoutAssignment(BaseModel):
+    """Which breakout room one participant of the meeting belongs in."""
+
+    session = models.ForeignKey(
+        BreakoutSession,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        verbose_name=_("Breakout session"),
+    )
+    breakout_room = models.ForeignKey(
+        BreakoutRoom,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        verbose_name=_("Breakout room"),
+    )
+    identity = models.CharField(max_length=255, verbose_name=_("Participant identity"))
+    name = models.CharField(
+        max_length=255, blank=True, verbose_name=_("Participant name")
+    )
+
+    class Meta:
+        db_table = "meet_breakout_assignment"
+        ordering = ("created_at",)
+        verbose_name = _("Breakout assignment")
+        verbose_name_plural = _("Breakout assignments")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["session", "identity"],
+                name="unique_breakout_assignment_per_identity",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.identity} in {self.breakout_room_id!s}"
