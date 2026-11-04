@@ -1,6 +1,6 @@
 # Contributing
 
-This repository holds **deployment configuration only** — no application code.
+This repository holds **deployment configuration and the public landing site** — no application code.
 The application is [La Suite Meet](https://github.com/suitenumerique/meet), run
 from unmodified upstream images. See [NOTICE.md](NOTICE.md).
 
@@ -35,7 +35,7 @@ job is advisory, and a failure there means the next version bump needs a fresh
 drift analysis, not that your PR is broken.
 
 ## Assistant attribution — hard rule
-- Never name an AI assistant, its vendor, or a model anywhere in this repository: not in a tracked file, a filename, a commit message, a PR title or body, a branch name, a tag, or a release note. No vendor-named instruction file — conventions live in `AGENTS.md` — no `Co-Authored-By:` trailer, no "generated with" footer or badge, no link to a vendor's site.
+- Never name an AI assistant, its vendor, or a model anywhere in this repository: not in a tracked file, a filename, a commit message, a PR title or body, a branch name, a tag, or a release note. No vendor-named instruction file — conventions live in this file — no `Co-Authored-By:` trailer, no "generated with" footer or badge, no link to a vendor's site.
 - **It covers binary and encoded content too.** Attribution has reached these repositories inside PNG text chunks and base64-encoded provenance manifests, where a recursive grep cannot see it: `grep -ri` skips binaries, and an encoded name is not text at all. A grep is not sufficient evidence.
 - **Verify before pushing:** `python3 .github/scripts/check-vendor-attribution.py .`. If this repository does not have the script yet, copy it and its self-test from `kodera-internal` — the rule applies here whether or not CI enforces it here.
 - Naming a *third-party* tool is fine: a competitor in a pricing benchmark, or an editor a template supports. What is forbidden is attribution of the assistant used to produce the work.
@@ -58,8 +58,8 @@ is how the four original hollow checks got written.
 
 - Never commit to the default branch. Branch as `feat/`, `fix/`, `chore/` or
   `docs/`, and open a PR.
-- The default branch requires all six CI checks and must be up to date before
-  merge. Force-push and deletion are blocked.
+- The default branch requires every CI check (nine today) and must be up to
+  date before merge. Force-push and deletion are blocked.
 - Other sessions may be working the same repo. `git fetch --prune` and check
   divergence before pushing or merging.
 

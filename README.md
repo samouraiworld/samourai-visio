@@ -22,6 +22,8 @@ docs/               See docs/README.md — assessments are kept internal
 deploy/             compose overrides + env templates (.example only — no secrets)
 scripts/            CI gates + preflight, runnable locally
 theme/custom.css    Runtime branding via FRONTEND_CUSTOM_CSS_URL
+landing/            Public landing page and legal pages (static HTML)
+LICENSE, NOTICE.md  This repository's MIT licence; upstream credit and licences
 ```
 
 **Deploying?** → [DEPLOY.md](DEPLOY.md). It front-loads the inputs the owner must
@@ -55,3 +57,7 @@ Three secrets are generated at deploy time (`DB_PASSWORD`, `LIVEKIT_API_SECRET`,
 ## Credit
 
 Powered by [La Suite Meet](https://github.com/suitenumerique/meet) — MIT, by DINUM. Keep the attribution visible in the deployed UI.
+
+## Licence, contributing, security
+
+This repository is MIT-licensed ([LICENSE](LICENSE)). Contributions: [CONTRIBUTING.md](CONTRIBUTING.md). Report a vulnerability privately to security@samourai.coop ([SECURITY.md](SECURITY.md)), never in a public issue.
