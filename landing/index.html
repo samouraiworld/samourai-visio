@@ -68,9 +68,7 @@
      shows a genuinely valid code. A demo that lies is worse than no demo.
   2. The "FR · EN" switch is gone: there is no English version of this page,
      and a dead switch is worse than none.
-  3. "Devenir membre" is an explicit disabled "Bientôt" rather than href="#":
-     the page is public and the checkout flow does not exist.
-  4. --ink-4 lightened (#5C5C62 -> #808086): the original measured 2.83:1 on
+  3. --ink-4 lightened (#5C5C62 -> #808086): the original measured 2.83:1 on
      the background, under the 4.5:1 AA floor, and it carries real text.
 
   Contrast recomputed with the same formula as scripts/check-contrast.py (the
@@ -80,8 +78,8 @@
     ink-2  #B7B7BC   9.21:1     ink-3    #8A8A8F  5.36:1
     green  #6FBF73   8.21:1     ink #1a0d0d on coral  6.41:1
   WARNING: --ink-4 (#808086, 4.69:1 on #141416) holds ONLY on that backdrop.
-  On .member-card, lightened by its gradients, it drops to 4.46:1 and to
-  3.90:1 on mobile. Do not use it on any surface other than --bg.
+  On a lighter or gradient surface it drops under 4.5:1. Do not use it on any
+  surface other than --bg.
   WARNING: coral CANNOT carry white text (2.97:1) — coral buttons use a dark
   ink. Same constraint as theme/custom.css.
 -->
@@ -275,28 +273,6 @@ section.block{padding-block:clamp(52px,8vw,104px);border-top:1px solid var(--bor
 .st.beta{color:var(--green);border-color:rgba(111,191,115,.34);background:rgba(111,191,115,.10)}
 /* R&D: the earliest stage — amber, 11.12:1 on the card. */
 .st.rnd{color:#FFC24B;border-color:rgba(255,165,2,.34);background:rgba(255,165,2,.10)}
-
-/* ── Membership band ── */
-.member{padding-block:clamp(40px,6vw,76px);border-top:1px solid var(--border)}
-.member-card{display:flex;align-items:center;justify-content:space-between;gap:32px;flex-wrap:wrap;
-  border:1px solid var(--coral-line);border-radius:18px;padding:clamp(24px,3.4vw,38px);
-  background:
-    radial-gradient(120% 150% at 100% 0,rgba(253,98,98,.12),transparent 55%),
-    radial-gradient(120% 150% at 0 100%,rgba(136,156,231,.11),transparent 55%),
-    var(--bg-card)}
-.member-txt h3{font-size:clamp(1.3rem,2.4vw,1.65rem);letter-spacing:-.025em;margin:10px 0 9px}
-.member-txt p{color:var(--ink-2);max-width:46ch;font-size:.97rem}
-.member-buy{display:flex;flex-direction:column;align-items:flex-start;gap:12px;flex:none}
-.price{font-family:var(--mono);color:var(--ink);display:flex;align-items:baseline;gap:5px}
-.price b{font-size:clamp(1.9rem,3.6vw,2.35rem);font-weight:700;letter-spacing:-.03em}
-.price span{color:var(--ink-3);font-size:.92rem}
-/* --ink-2, not --ink-4: this note does NOT render on --bg but on
-   .member-card, whose two radial gradients lighten the backdrop. Measured on
-   real pixels: ink-4 drops to 4.46:1 on desktop and 3.90:1 below 640px (the
-   card goes column and the note lands in the lavender wash) — under AA.
-   ink-3 is not sufficient there either (4.46:1). */
-.member-note{font-size:.75rem;color:var(--ink-2);font-family:var(--mono)}
-@media(max-width:640px){.member-card{flex-direction:column;align-items:flex-start}}
 
 /* ── Final CTA + footer ── */
 .final{text-align:center;padding-block:clamp(60px,9vw,120px);border-top:1px solid var(--border);
