@@ -4,9 +4,9 @@
 
 Security is very important to us.
 
-If you have any issue regarding security, please disclose the information responsibly by submitting [this form](https://vdp.numerique.gouv.fr/p/Send-a-report?lang=en) and not by creating an issue on the repository. You can also email us at visio@numerique.gouv.fr
+If you find a vulnerability in this fork, report it privately to **security@samourai.coop**, not in an issue or a pull request on this repository.
 
-We appreciate your effort to make Visio more secure.
+A vulnerability that reproduces on unmodified upstream La Suite Meet belongs to its maintainers: use [DINUM's disclosure form](https://vdp.numerique.gouv.fr/p/Send-a-report?lang=en). If you are unsure which side it is on, write to us and we forward it.
 
 ## Vulnerability disclosure policy
 

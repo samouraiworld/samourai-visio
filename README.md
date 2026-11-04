@@ -1,3 +1,16 @@
+# samourai-visio, application branch
+
+This `develop` branch holds the application source: [La Suite Meet](https://github.com/suitenumerique/meet) by DINUM, with this fork's changes listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). The deployment configuration and the public landing site are on `main`, which runs unmodified upstream images.
+
+- **Run it locally:** `make bootstrap`, then `make run`; `make help` lists every target. Details in [docs/developping_locally.md](docs/developping_locally.md).
+- **Sign-in:** OpenID Connect, as upstream. The local stack uses upstream's development Keycloak (realm `meet`, `docker/auth/realm.json`).
+- **Security reports:** privately to security@samourai.coop, see [SECURITY.md](SECURITY.md). **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md).
+- **Licence:** MIT, as upstream ([LICENSE.md](LICENSE.md)).
+
+The upstream README follows, unchanged.
+
+---
+
 <p align="center">
   <img alt="meet logo" src="./docs/assets/banner-meet-fr.png" maxWidth="100%">
 </p>
