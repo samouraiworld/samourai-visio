@@ -1,6 +1,6 @@
 # samourai-visio, application branch
 
-This `develop` branch holds the application source: [La Suite Meet](https://github.com/suitenumerique/meet) by DINUM, with this fork's changes listed under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md). The deployment configuration and the public landing site are on `main`, which runs unmodified upstream images.
+This `develop` branch holds the application source: [La Suite Meet](https://github.com/suitenumerique/meet) by DINUM. `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) holds both this fork's changes and the upstream changes merged since 1.30.0. The deployment configuration and the public landing site are on `main`, which runs unmodified upstream images.
 
 - **Run it locally:** `make bootstrap`, then `make run`; `make help` lists every target. Details in [docs/developping_locally.md](docs/developping_locally.md).
 - **Sign-in:** OpenID Connect, as upstream. The local stack uses upstream's development Keycloak (realm `meet`, `docker/auth/realm.json`).
